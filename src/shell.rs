@@ -2,7 +2,7 @@ use colored::Colorize;
 use log::debug;
 use reedline::{
     default_emacs_keybindings, DefaultPrompt, DefaultPromptSegment, Emacs,
-    DescriptionPosition, FileBackedHistory, KeyCode, KeyModifiers, ListMenu, MenuBuilder,
+    FileBackedHistory, KeyCode, KeyModifiers, ListMenu, MenuBuilder,
     Reedline, ReedlineEvent, ReedlineMenu,
 };
 use std::collections::HashMap;
@@ -132,8 +132,6 @@ impl Shell {
                 .with_selected_match_text_style(
                     Style::new().fg(Color::Black).on(Color::Fixed(39)).bold()
                 )
-                // render description after the completion value
-                .with_description_position(DescriptionPosition::After)
                 .with_page_size(12),
         );
 
@@ -298,24 +296,137 @@ impl Shell {
         Ok(shell)
     }
 
-    /// Load configuration
-    fn load_config(&mut self) -> Result<()> {
-        use crate::config::ConfigManager;
+    pub fn parse_config_file(&mut self, path: &Path) -> Result<()> {
+        let content = std::fs::read_to_string(path)?;
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        self.process_winshrc_content(&content, &home.display().to_string())?;
+        Ok(())
+    }
 
-        // Load shell config
-        if let Some(config_path) = ConfigManager::find_config_file() {
-            if config_path
-                .extension()
-                .map(|e| e == "toml")
-                .unwrap_or(false)
-            {
-                let mut config_manager = ConfigManager::new();
-                self.config = config_manager.load_config(&config_path)?;
-            } else {
-                self.parse_config_file(&config_path)?;
+    /// Process .winshrc content recursively (handles source, export, alias, setopt, etc.)
+    fn process_winshrc_content(&mut self, content: &str, home_str: &str) -> Result<()> {
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+
+            // Expand variables in the line
+            let expanded = self.expand_config_line(trimmed, home_str);
+
+            // Handle source command
+            if let Some(path) = expanded.strip_prefix("source ") {
+                let path = path.trim().trim_matches('"').trim_matches('\'');
+                let source_path = if path.starts_with("$HOME") || path.starts_with('~') {
+                    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+                    let home_display = home.display().to_string();
+                    let rel = path.replacen("$HOME", &home_display, 1).replacen('~', &home_display, 1);
+                    PathBuf::from(rel.replace('/', "\\"))
+                } else {
+                    PathBuf::from(path)
+                };
+                if source_path.exists() {
+                    log::debug!("Sourcing: {}", source_path.display());
+                    if let Ok(source_content) = std::fs::read_to_string(&source_path) {
+                        self.process_winshrc_content(&source_content, home_str)?;
+                    } else {
+                        eprintln!("{} {}", "Warning:".yellow(), format!("Could not read: {}", source_path.display()));
+                    }
+                }
+                continue;
+            }
+
+            // Handle export
+            if let Some(rest) = expanded.strip_prefix("export ") {
+                if let Some((name, value)) = rest.split_once('=') {
+                    let name = name.trim();
+                    let value = value.trim().trim_matches('"').trim_matches('\'');
+                    if name == "PATH" {
+                        std::env::set_var("PATH", value);
+                    }
+                    self.env_vars.insert(name.to_string(), env_value(value));
+                }
+                continue;
+            }
+
+            // Handle alias
+            if let Some(rest) = expanded.strip_prefix("alias ") {
+                if let Some((name, value)) = rest.split_once('=') {
+                    let value = value.trim().trim_matches('\'').trim_matches('"');
+                    self.aliases.insert(name.trim().to_string(), value.to_string());
+                }
+                continue;
+            }
+
+            // Handle setopt
+            if let Some(opt) = expanded.strip_prefix("setopt ") {
+                // Most setopt options are already handled in ShellOptions default
+                // Skip for now - they control shell behavior at a low level
+                log::debug!("setopt: {}", opt.trim());
+                continue;
+            }
+
+            // Handle simple KEY=value assignments
+            if let Some((name, value)) = expanded.split_once('=') {
+                let name = name.trim();
+                let value = value.trim().trim_matches('"').trim_matches('\'');
+                if name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                    // Handle special config keys
+                    match name {
+                        "WINUXSH_THEME" => { /* theme handled by config */ }
+                        "PROMPT" | "PS1" => {
+                            // Store prompt format
+                            self.env_vars.insert(name.to_string(), env_value(value));
+                        }
+                        _ => {
+                            self.env_vars.insert(name.to_string(), env_value(value));
+                        }
+                    }
+                }
             }
         }
+        Ok(())
+    }
 
+    /// Expand variables in a config line ($HOME, ${VAR}, $VAR)
+    fn expand_config_line(&self, line: &str, home_str: &str) -> String {
+        let mut result = line.to_string();
+        // Expand $HOME first
+        result = result.replace("$HOME", home_str);
+        // Expand ${VAR} forms
+        for (name, value) in &self.env_vars {
+            if let Some(s) = value.as_string() {
+                result = result.replace(&format!("${{{}}}", name), &s);
+            }
+        }
+        // Expand $VAR forms
+        for (name, value) in &self.env_vars {
+            if let Some(s) = value.as_string() {
+                result = result.replace(&format!("${}", name), &s);
+            }
+        }
+        result
+    }
+
+    /// Load configuration
+    fn load_config(&mut self) -> Result<()> {
+        // Try .winshrc first (legacy format), then .winshrc.toml
+        let winshrc = dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".winshrc");
+        if winshrc.exists() {
+            log::info!("Loading config: {}", winshrc.display());
+            self.parse_config_file(&winshrc)?;
+            log::info!("Config loaded successfully");
+        } else {
+            // Fallback to TOML
+            if let Some(config_path) = crate::config::ConfigManager::find_config_file() {
+                if config_path.extension().map(|e| e == "toml").unwrap_or(false) {
+                    let mut config_manager = crate::config::ConfigManager::new();
+                    self.config = config_manager.load_config(&config_path)?;
+                } else {
+                    self.parse_config_file(&config_path)?;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -366,26 +477,6 @@ impl Shell {
     }
 
     /// Parse configuration file
-    pub fn parse_config_file(&mut self, path: &Path) -> Result<()> {
-        let file = std::fs::File::open(path)?;
-        let reader = std::io::BufReader::new(file);
-
-        for line in reader.lines() {
-            let line = line?;
-            let line = line.trim();
-
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-
-            // Execute config commands
-            // TODO: Implement proper command execution
-            let _ = line;
-        }
-
-        Ok(())
-    }
-
     /// Update completion state
     pub fn update_completion_state(&self) {
         if let Ok(mut state) = self.completion_state.lock() {
@@ -1370,16 +1461,17 @@ impl Shell {
     }
 
     fn execute_substitution_command(&mut self, command: &str) -> String {
-        let tokens = match Tokenizer::tokenize(command) {
+        let tokens = match Lexer::tokenize(command) {
             Ok(tokens) => tokens,
             Err(_) => return String::new(),
         };
 
-        let parsed = match Parser::parse(&tokens) {
-            Ok(parsed) => parsed,
+        let stmts = match Parser::parse(tokens) {
+            Ok(stmts) => stmts,
             Err(_) => return String::new(),
         };
 
+        let parsed = convert_to_parsed_command(&stmts);
         let (stdout_path, stderr_path) = self.create_substitution_capture_paths();
         let redirected = self.redirect_parsed_for_capture(&parsed, &stdout_path, &stderr_path);
         let _ = self.execute_parsed(&redirected);
@@ -2335,6 +2427,10 @@ fn expand_word(word: &Word, env_vars: &HashMap<String, String>) -> String {
         }
     }
     result
+}
+
+fn env_value(v: &str) -> ArrayValue {
+    ArrayValue::String(v.to_string())
 }
 
 /// Find winuxcmd.exe in system PATH
