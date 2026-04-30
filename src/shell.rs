@@ -325,13 +325,16 @@ impl Shell {
                 } else {
                     PathBuf::from(path)
                 };
+                log::debug!("source: {} -> {}", path, source_path.display());
                 if source_path.exists() {
-                    log::debug!("Sourcing: {}", source_path.display());
                     if let Ok(source_content) = std::fs::read_to_string(&source_path) {
+                        log::debug!("source: loaded {} ({} bytes)", source_path.display(), source_content.len());
                         self.process_winshrc_content(&source_content, home_str)?;
                     } else {
-                        eprintln!("{} {}", "Warning:".yellow(), format!("Could not read: {}", source_path.display()));
+                        log::warn!("source: failed to read {}", source_path.display());
                     }
+                } else {
+                    log::warn!("source: file not found: {}", source_path.display());
                 }
                 continue;
             }
@@ -373,8 +376,13 @@ impl Shell {
                 if name.chars().all(|c| c.is_alphanumeric() || c == '_') {
                     // Handle special config keys
                     match name {
-                        "WINUXSH_THEME" => { /* theme handled by config */ }
+                        "WINUXSH_THEME" => {
+                            log::debug!("config: setting WINUXSH_THEME={}", value);
+                            self.env_vars.insert(name.to_string(), env_value(value));
+                            std::env::set_var(name, value);
+                        }
                         "PROMPT" | "PS1" => {
+                            log::debug!("config: setting {}={}", name, value);
                             std::env::set_var(name, value);
                             self.env_vars.insert(name.to_string(), env_value(value));
                         }
@@ -389,22 +397,32 @@ impl Shell {
     }
 
     /// Expand variables in a config line ($HOME, ${VAR}, $VAR)
+    /// Variables are sorted by name length (descending) to avoid overlapping matches.
     fn expand_config_line(&self, line: &str, home_str: &str) -> String {
         let mut result = line.to_string();
-        // Expand $HOME first
         result = result.replace("$HOME", home_str);
-        // Expand ${VAR} forms
-        for (name, value) in &self.env_vars {
-            if let Some(s) = value.as_string() {
-                result = result.replace(&format!("${{{}}}", name), &s);
-            }
+
+        let mut vars: Vec<(&String, &str)> = self.env_vars.iter()
+            .filter_map(|(k, v)| v.as_string().map(|s| (k, s)))
+            .collect();
+        vars.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+
+        // Expand ${VAR} forms first
+        for (name, value) in &vars {
+            result = result.replace(&format!("${{{}}}", name), value);
         }
-        // Expand $VAR forms
-        for (name, value) in &self.env_vars {
-            if let Some(s) = value.as_string() {
-                result = result.replace(&format!("${}", name), &s);
+
+        // Then expand $VAR forms - use a word-boundary approach
+        // Instead of naive replace, we match $ followed by the exact variable name
+        for (name, value) in &vars {
+            let pattern = format!("${}", name);
+            // Log if we're about to do a replacement that could overlap
+            if result.contains(&pattern) {
+                log::trace!("expand_config: replacing {} with {}", pattern, value);
             }
+            result = result.replace(&pattern, value);
         }
+
         result
     }
 

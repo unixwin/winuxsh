@@ -256,16 +256,7 @@ impl Shell {
     }
 }
 
-/// Initialize WinuxCmd daemon
+/// Initialize WinuxCmd daemon (FFI disabled, always succeeds)
 fn initialize_winuxcmd() -> anyhow::Result<()> {
-    // Initialize WinuxCmd FFI (direct DLL execution, no daemon needed)
-    WinuxCmdFFI::init().map_err(|e| anyhow::anyhow!("{}", e))?;
-
-    if WinuxCmdFFI::is_initialized() {
-        return Ok(());
-    }
-
-    Err(anyhow::anyhow!(
-        "Failed to initialize WinuxCmd FFI. Please ensure winuxcore.dll is available."
-    ))
+    Ok(())
 }
