@@ -6,7 +6,6 @@ use reedline::{
     Reedline, ReedlineEvent, ReedlineMenu,
 };
 use std::collections::HashMap;
-use std::env;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
@@ -884,7 +883,8 @@ impl Shell {
                 // For builtin commands in pipelines, just continue - they will fail to find the executable
             }
 
-            // Find command path for external commands
+            // Find command path for external commands using the same resolver
+            // as non-pipeline execution to keep behavior consistent.
             let cmd_path = match self.find_command_in_path(cmd_name) {
                 Some(path) => path,
                 None => {
@@ -999,39 +999,16 @@ impl Shell {
 
     /// Find command in PATH (helper method for pipeline)
     fn find_command_in_path(&self, cmd: &str) -> Option<PathBuf> {
-        if cmd.contains('\\') || cmd.contains('/') {
-            // Full path provided
-            let path = PathBuf::from(cmd);
-            if path.exists() {
-                return Some(path);
-            }
-            return None;
+        let env_vars: Vec<(String, ArrayValue)> = self
+            .env_vars
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let executor = Executor::new(&env_vars, &self.current_dir);
+        match executor.find_command_in_path(cmd) {
+            Ok(path) => path,
+            Err(_) => None,
         }
-
-        // Search in PATH
-        if let Ok(path_env) = std::env::var("PATH") {
-            for path in env::split_paths(&path_env) {
-                let exe_path = path.join(&format!("{}.exe", cmd));
-                if exe_path.exists() {
-                    return Some(exe_path);
-                }
-                let bat_path = path.join(&format!("{}.bat", cmd));
-                if bat_path.exists() {
-                    return Some(bat_path);
-                }
-                let cmd_path = path.join(&format!("{}.cmd", cmd));
-                if cmd_path.exists() {
-                    return Some(cmd_path);
-                }
-                // Also check for files without extension on Unix-like systems
-                let direct_path = path.join(cmd);
-                if direct_path.exists() {
-                    return Some(direct_path);
-                }
-            }
-        }
-
-        None
     }
 
     /// Expand wildcards in arguments
