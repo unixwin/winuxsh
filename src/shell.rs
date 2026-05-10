@@ -393,14 +393,15 @@ impl Shell {
 
     /// Get environment variable
     pub fn get_env_var(&self, key: &str, default: &str) -> String {
+        if let Some(value) = self.env_vars.get(key) {
+            return value.as_string().unwrap_or(default).to_string();
+        }
+
         self.env_vars
             .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case(key))
-            .map(|(_, v)| v.clone())
-            .unwrap_or_else(|| ArrayValue::String(default.to_string()))
-            .as_string()
-            .unwrap_or(default)
-            .to_string()
+            .and_then(|(_, v)| v.as_string().map(|s| s.to_string()))
+            .unwrap_or_else(|| default.to_string())
     }
 
     /// Get the prompt string
@@ -827,8 +828,43 @@ impl Shell {
             return self.execute_single_command(&cmds[0]);
         }
 
+        // Fast path: support selected builtins as the first stage in a pipeline.
+        // Example: env | grep PATH
+        if let Some(input) = self.try_builtin_pipeline_input(&cmds[0]) {
+            return self.execute_real_pipeline_with_input(&cmds[1..], input.into_bytes());
+        }
+
         // Use real pipeline implementation with Windows pipes
         self.execute_real_pipeline(cmds)
+    }
+
+    fn try_builtin_pipeline_input(&self, first: &CommandInfo) -> Option<String> {
+        if first.args.is_empty() {
+            return None;
+        }
+        let cmd = first.args[0].as_str();
+        match cmd {
+            "env" => {
+                let mut output = String::new();
+                for (key, value) in &self.env_vars {
+                    match value {
+                        ArrayValue::String(v) => {
+                            output.push_str(&format!("{}={}\n", key, v));
+                        }
+                        ArrayValue::Array(arr) => {
+                            output.push_str(&format!("{}=({})\n", key, arr.join(" ")));
+                        }
+                    }
+                }
+                Some(output)
+            }
+            "echo" => {
+                let text = first.args[1..].join(" ");
+                Some(format!("{text}\n"))
+            }
+            "pwd" => Some(format!("{}\n", self.current_dir.display())),
+            _ => None,
+        }
     }
 
     /// Execute a real pipeline with Windows pipes
@@ -867,15 +903,14 @@ impl Shell {
             let cmd_name = &cmd.args[0];
             let cmd_args = &cmd.args[1..];
 
-            // Check if this is a builtin command - handle specially
-            let is_builtin = if let Some(router) = &self.command_router {
-                match router.route_command(cmd_name) {
-                    crate::command_router::RouteDecision::Builtin => true,
-                    _ => false,
-                }
+            let route_decision = if let Some(router) = &self.command_router {
+                router.route_command(cmd_name)
             } else {
-                false
+                crate::command_router::RouteDecision::ExternalCommand
             };
+
+            // Check if this is a builtin command - handle specially
+            let is_builtin = matches!(route_decision, crate::command_router::RouteDecision::Builtin);
 
             // For now, allow builtin commands to pass through (they will fail, but won't block other commands)
             // TODO: Implement proper builtin command pipeline support
@@ -883,23 +918,49 @@ impl Shell {
                 // For builtin commands in pipelines, just continue - they will fail to find the executable
             }
 
-            // Find command path for external commands using the same resolver
-            // as non-pipeline execution to keep behavior consistent.
-            let cmd_path = match self.find_command_in_path(cmd_name) {
-                Some(path) => path,
-                None => {
-                    return Err(crate::error::ShellError::CommandNotFound(format!(
-                        "Command '{}' not found",
-                        cmd_name
-                    )));
+            // Resolve executable and argv for this pipeline stage.
+            let (program, stage_args): (String, Vec<String>) = match route_decision {
+                crate::command_router::RouteDecision::WinuxCmdDLL(_) => {
+                    let winuxcmd_bin = self
+                        .find_command_in_path("winuxcmd")
+                        .or_else(|| self.find_winuxcmd_binary_path())
+                        .ok_or_else(|| crate::error::ShellError::CommandNotFound(
+                            "winuxcmd executable not found for pipeline stage".to_string(),
+                        ))?;
+                    let mut args = Vec::with_capacity(cmd_args.len() + 1);
+                    args.push(cmd_name.to_string());
+                    args.extend(cmd_args.iter().cloned());
+                    (winuxcmd_bin.to_string_lossy().to_string(), args)
+                }
+                _ => {
+                    if let Some(cmd_path) = self.find_command_in_path(cmd_name) {
+                        (
+                            cmd_path.to_string_lossy().to_string(),
+                            cmd_args.to_vec(),
+                        )
+                    } else if self.is_winuxcmd_classified(cmd_name) {
+                        let winuxcmd_bin = self
+                            .find_command_in_path("winuxcmd")
+                            .or_else(|| self.find_winuxcmd_binary_path())
+                            .ok_or_else(|| crate::error::ShellError::CommandNotFound(
+                                format!("Command '{}' not found", cmd_name),
+                            ))?;
+                        let mut args = Vec::with_capacity(cmd_args.len() + 1);
+                        args.push(cmd_name.to_string());
+                        args.extend(cmd_args.iter().cloned());
+                        (winuxcmd_bin.to_string_lossy().to_string(), args)
+                    } else {
+                        return Err(crate::error::ShellError::CommandNotFound(format!(
+                            "Command '{}' not found",
+                            cmd_name
+                        )));
+                    }
                 }
             };
 
-            let program = cmd_path.to_string_lossy().to_string();
-
             // Create process
             let mut process = Command::new(&program);
-            process.args(cmd_args);
+            process.args(&stage_args);
             process.envs(env_vars.iter().cloned());
             process.current_dir(&self.current_dir);
 
@@ -995,6 +1056,178 @@ impl Shell {
 
         self.last_exit_code = last_exit_code;
         Ok(())
+    }
+
+    fn execute_real_pipeline_with_input(&mut self, cmds: &[CommandInfo], input: Vec<u8>) -> Result<()> {
+        use std::io::Write;
+        use std::process::{Child, Command, Stdio};
+
+        if cmds.is_empty() {
+            self.last_exit_code = 0;
+            return Ok(());
+        }
+
+        let env_vars: Vec<(String, String)> = self
+            .env_vars
+            .iter()
+            .filter_map(|(k, v)| {
+                if let ArrayValue::String(ref s) = v {
+                    Some((k.clone(), s.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut children: Vec<Child> = Vec::new();
+        let mut prev_stdout: Option<std::process::ChildStdout> = None;
+
+        for (i, cmd) in cmds.iter().enumerate() {
+            let is_last = i == cmds.len() - 1;
+            if cmd.args.is_empty() {
+                return Err(crate::error::ShellError::Parse("Empty command in pipeline".to_string()));
+            }
+
+            let cmd_name = &cmd.args[0];
+            let cmd_args = &cmd.args[1..];
+            let route_decision = if let Some(router) = &self.command_router {
+                router.route_command(cmd_name)
+            } else {
+                crate::command_router::RouteDecision::ExternalCommand
+            };
+
+            let (program, stage_args): (String, Vec<String>) = match route_decision {
+                crate::command_router::RouteDecision::WinuxCmdDLL(_) => {
+                    let winuxcmd_bin = self
+                        .find_command_in_path("winuxcmd")
+                        .or_else(|| self.find_winuxcmd_binary_path())
+                        .ok_or_else(|| crate::error::ShellError::CommandNotFound(
+                            "winuxcmd executable not found for pipeline stage".to_string(),
+                        ))?;
+                    let mut args = Vec::with_capacity(cmd_args.len() + 1);
+                    args.push(cmd_name.to_string());
+                    args.extend(cmd_args.iter().cloned());
+                    (winuxcmd_bin.to_string_lossy().to_string(), args)
+                }
+                _ => {
+                    if let Some(cmd_path) = self.find_command_in_path(cmd_name) {
+                        (
+                            cmd_path.to_string_lossy().to_string(),
+                            cmd_args.to_vec(),
+                        )
+                    } else if self.is_winuxcmd_classified(cmd_name) {
+                        let winuxcmd_bin = self
+                            .find_command_in_path("winuxcmd")
+                            .or_else(|| self.find_winuxcmd_binary_path())
+                            .ok_or_else(|| crate::error::ShellError::CommandNotFound(
+                                format!("Command '{}' not found", cmd_name),
+                            ))?;
+                        let mut args = Vec::with_capacity(cmd_args.len() + 1);
+                        args.push(cmd_name.to_string());
+                        args.extend(cmd_args.iter().cloned());
+                        (winuxcmd_bin.to_string_lossy().to_string(), args)
+                    } else {
+                        return Err(crate::error::ShellError::CommandNotFound(format!(
+                            "Command '{}' not found",
+                            cmd_name
+                        )));
+                    }
+                }
+            };
+
+            let mut process = Command::new(&program);
+            process.args(&stage_args);
+            process.envs(env_vars.iter().cloned());
+            process.current_dir(&self.current_dir);
+
+            if i == 0 {
+                process.stdin(Stdio::piped());
+            } else if let Some(stdout) = prev_stdout.take() {
+                process.stdin(Stdio::from(stdout));
+            } else {
+                process.stdin(Stdio::inherit());
+            }
+
+            if is_last {
+                process.stdout(Stdio::inherit());
+            } else {
+                process.stdout(Stdio::piped());
+            }
+            process.stderr(Stdio::inherit());
+
+            #[cfg(windows)]
+            {
+                const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+                process.creation_flags(CREATE_NEW_PROCESS_GROUP);
+            }
+
+            let mut child = process.spawn().map_err(|e| {
+                crate::error::ShellError::CommandNotFound(format!(
+                    "Failed to execute '{}': {}",
+                    cmd_name, e
+                ))
+            })?;
+
+            if i == 0 {
+                if let Some(mut stdin) = child.stdin.take() {
+                    let _ = stdin.write_all(&input);
+                }
+            }
+
+            if !is_last {
+                prev_stdout = child.stdout.take();
+            }
+            children.push(child);
+        }
+
+        let mut last_exit_code = 0;
+        for mut child in children {
+            let status = child.wait().map_err(|e| {
+                crate::error::ShellError::CommandNotFound(format!(
+                    "Failed to wait for process: {}",
+                    e
+                ))
+            })?;
+            last_exit_code = status.code().unwrap_or(1);
+        }
+        self.last_exit_code = last_exit_code;
+        Ok(())
+    }
+
+    fn find_winuxcmd_binary_path(&self) -> Option<PathBuf> {
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(exe_dir) = exe_path.parent() {
+                let candidate = exe_dir.join("winuxcmd").join("winuxcmd.exe");
+                if candidate.exists() {
+                    return Some(candidate);
+                }
+                // Typical dev layout: target/debug/winuxsh.exe -> ../../utils/winuxcmd/winuxcmd.exe
+                if let Some(target_dir) = exe_dir.parent() {
+                    if let Some(repo_root) = target_dir.parent() {
+                        let candidate2 =
+                            repo_root.join("utils").join("winuxcmd").join("winuxcmd.exe");
+                        if candidate2.exists() {
+                            return Some(candidate2);
+                        }
+                    }
+                }
+            }
+        }
+
+        let repo_candidate = self.current_dir.join("utils").join("winuxcmd").join("winuxcmd.exe");
+        if repo_candidate.exists() {
+            return Some(repo_candidate);
+        }
+
+        None
+    }
+
+    fn is_winuxcmd_classified(&self, cmd_name: &str) -> bool {
+        if let Some(router) = &self.command_router {
+            router.classification().is_winuxcmd_command(cmd_name)
+        } else {
+            false
+        }
     }
 
     /// Find command in PATH (helper method for pipeline)
@@ -1869,6 +2102,12 @@ impl Shell {
     fn resolve_script_var(&self, name: &str, state: &ScriptState) -> String {
         if let Some(value) = state.locals.get(name) {
             return value.clone();
+        }
+
+        if let Some(value) = self.env_vars.get(name) {
+            if let Some(s) = value.as_string() {
+                return s.to_string();
+            }
         }
 
         if let Some((_, value)) = self
