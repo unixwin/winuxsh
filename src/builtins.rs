@@ -69,8 +69,9 @@ impl Shell {
                     let arg = &args[1];
                     if arg.contains('=') {
                         if let Some((key, value)) = arg.split_once('=') {
+                            let normalized = Self::strip_assignment_quotes(value);
                             self.env_vars
-                                .insert(key.to_string(), ArrayValue::String(value.to_string()));
+                                .insert(key.to_string(), ArrayValue::String(normalized));
                         }
                     }
                 }
@@ -81,9 +82,10 @@ impl Shell {
                     let arg = &args[1];
                     if arg.contains('=') {
                         if let Some((key, value)) = arg.split_once('=') {
+                            let normalized = Self::strip_assignment_quotes(value);
                             self.env_vars
-                                .insert(key.to_string(), ArrayValue::String(value.to_string()));
-                            std::env::set_var(key, value);
+                                .insert(key.to_string(), ArrayValue::String(normalized.clone()));
+                            std::env::set_var(key, normalized);
                         }
                     }
                 }
@@ -91,10 +93,40 @@ impl Shell {
             }
             "unset" => {
                 if args.len() > 1 {
-                    self.env_vars.remove(&args[1]);
-                    std::env::remove_var(&args[1]);
+                    if args[1] == "-f" {
+                        // Function unsetting is handled by script runtime.
+                    } else {
+                        self.env_vars.remove(&args[1]);
+                        std::env::remove_var(&args[1]);
+                    }
                 }
                 Some(Ok(()))
+            }
+            "hash" => {
+                // POSIX shell compatibility: `hash -r` can be treated as no-op.
+                Some(Ok(()))
+            }
+            "[" | "test" => {
+                let is_bracket = args[0] == "[";
+                let slice_end = if is_bracket && args.last().map(|s| s.as_str()) == Some("]") {
+                    args.len() - 1
+                } else {
+                    args.len()
+                };
+                let test_args = if is_bracket {
+                    &args[1..slice_end]
+                } else {
+                    &args[1..]
+                };
+
+                let ok = Self::eval_test_expr(test_args);
+                if ok {
+                    Some(Ok(()))
+                } else {
+                    Some(Err(ShellError::InvalidCommand(
+                        "test expression evaluated to false".to_string(),
+                    )))
+                }
             }
             "env" => {
                 for (key, value) in &self.env_vars {
@@ -136,10 +168,36 @@ impl Shell {
                 Some(Ok(()))
             }
             "source" | "." => {
-                if args.len() > 1 {
-                    if let Err(e) = self.parse_config_file(Path::new(&args[1])) {
-                        return Some(Err(e));
+                if args.len() < 2 {
+                    return Some(Err(ShellError::InvalidCommand(
+                        "source: filename argument required".to_string(),
+                    )));
+                }
+
+                let script_arg = &args[1];
+                let script_path = if script_arg == "~" {
+                    dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
+                } else {
+                    let raw = PathBuf::from(script_arg);
+                    if raw.is_absolute() {
+                        raw
+                    } else {
+                        self.current_dir.join(raw)
                     }
+                };
+
+                let script_args: Vec<String> = if args.len() > 2 {
+                    args[2..].to_vec()
+                } else {
+                    Vec::new()
+                };
+
+                if let Err(e) = self.run_script_file(&script_path, &script_args) {
+                    return Some(Err(ShellError::InvalidCommand(format!(
+                        "source: failed to execute '{}': {}",
+                        script_path.display(),
+                        e
+                    ))));
                 }
                 Some(Ok(()))
             }
@@ -189,6 +247,44 @@ impl Shell {
             }
             _ => None,
         }
+    }
+
+    fn eval_test_expr(args: &[String]) -> bool {
+        if args.is_empty() {
+            return false;
+        }
+
+        if args.len() == 2 && args[0] == "-n" {
+            return !args[1].is_empty();
+        }
+        if args.len() == 2 && args[0] == "-z" {
+            return args[1].is_empty();
+        }
+        if args.len() == 3 && args[1] == "=" {
+            return args[0] == args[2];
+        }
+        if args.len() == 3 && args[1] == "!=" {
+            return args[0] != args[2];
+        }
+
+        // Fallback: non-empty single argument is true.
+        if args.len() == 1 {
+            return !args[0].is_empty();
+        }
+
+        false
+    }
+
+    fn strip_assignment_quotes(value: &str) -> String {
+        if value.len() >= 2 {
+            let bytes = value.as_bytes();
+            if (bytes[0] == b'\'' && bytes[value.len() - 1] == b'\'')
+                || (bytes[0] == b'"' && bytes[value.len() - 1] == b'"')
+            {
+                return value[1..value.len() - 1].to_string();
+            }
+        }
+        value.to_string()
     }
 
     /// Handle array commands
@@ -400,8 +496,8 @@ impl Shell {
         println!("  export VAR=VALUE - Set environment variable");
         println!("  unset VAR      - Remove environment variable");
         println!("  env            - Display all environment variables");
-        println!("  source [file]  - Load configuration file");
-        println!("  . [file]       - Load configuration file (alias)");
+        println!("  source [file] [args...] - Execute script in current shell");
+        println!("  . [file] [args...]      - Alias for source");
         println!("  exit           - Exit shell");
         println!("  quit           - Exit shell");
         println!("  clear          - Clear screen");

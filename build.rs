@@ -9,7 +9,8 @@ fn main() {
     {
         // Check for development mode warnings
         // Note: DLL name changed from winuxcmd.dll to winuxcore.dll
-        let dll_path = std::path::Path::new("utils/winuxcmd/winuxcore.dll");
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
+        let dll_path = std::path::Path::new(&manifest_dir).join("utils/winuxcmd/winuxcore.dll");
         if !dll_path.exists() {
             println!(
                 "cargo:warning=winuxcore.dll not found at {} for development",

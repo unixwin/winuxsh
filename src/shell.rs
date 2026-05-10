@@ -6,7 +6,6 @@ use reedline::{
     Reedline, ReedlineEvent, ReedlineMenu,
 };
 use std::collections::HashMap;
-use std::env;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
@@ -54,6 +53,7 @@ enum ScriptFlow {
 struct ScriptState {
     positional: Vec<String>,
     locals: HashMap<String, String>,
+    functions: HashMap<String, Vec<String>>,
 }
 
 impl ScriptState {
@@ -61,6 +61,7 @@ impl ScriptState {
         Self {
             positional: args.to_vec(),
             locals: HashMap::new(),
+            functions: HashMap::new(),
         }
     }
 
@@ -764,31 +765,37 @@ impl Shell {
             .chain(expanded_args)
             .collect();
 
+        // Always prefer builtin handling first.
+        // This avoids router/classification drift causing builtins (e.g. source)
+        // to be misrouted as external commands.
+        if self.try_builtin_with_redirection(&clean_command, &all_args, &cmd_clone)? {
+            self.last_exit_code = 0;
+            return Ok(());
+        }
+
+        if let Some(result) = self.handle_builtin(&all_args) {
+            match result {
+                Ok(()) => {
+                    self.last_exit_code = 0;
+                    return Ok(());
+                }
+                Err(e) => {
+                    self.last_exit_code = 1;
+                    if clean_command != "[" && clean_command != "test" {
+                        eprintln!("{} {}", "Error:".red(), e);
+                    }
+                    return Ok(());
+                }
+            }
+        }
+
         // Route command using command_router if available
         if let Some(router) = &self.command_router {
             let route_decision = router.route_command(&clean_command);
 
             match route_decision {
                 crate::command_router::RouteDecision::Builtin => {
-                    // Execute builtin command
-                    if self.try_builtin_with_redirection(&clean_command, &all_args, &cmd_clone)? {
-                        self.last_exit_code = 0;
-                        return Ok(());
-                    }
-
-                    if let Some(result) = self.handle_builtin(&all_args) {
-                        match result {
-                            Ok(()) => {
-                                self.last_exit_code = 0;
-                                return Ok(());
-                            }
-                            Err(e) => {
-                                self.last_exit_code = 1;
-                                eprintln!("{} {}", "Error:".red(), e);
-                                return Ok(());
-                            }
-                        }
-                    }
+                    // Builtins are already handled above; keep this as a no-op.
                 }
                 crate::command_router::RouteDecision::WinuxCmdDLL(category) => {
                     // Execute via WinuxCmd DLL
@@ -802,26 +809,6 @@ impl Shell {
                     self.last_exit_code = 127;
                     eprintln!("{} {}", "Error:".red(), format!("Command '{}' not found", clean_command));
                     return Ok(());
-                }
-            }
-        } else {
-            // No router available, use old logic
-            if self.try_builtin_with_redirection(&clean_command, &all_args, &cmd_clone)? {
-                self.last_exit_code = 0;
-                return Ok(());
-            }
-
-            if let Some(result) = self.handle_builtin(&all_args) {
-                match result {
-                    Ok(()) => {
-                        self.last_exit_code = 0;
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        self.last_exit_code = 1;
-                        eprintln!("{} {}", "Error:".red(), e);
-                        return Ok(());
-                    }
                 }
             }
         }
@@ -1114,7 +1101,8 @@ impl Shell {
                 // For builtin commands in pipelines, just continue - they will fail to find the executable
             }
 
-            // Find command path for external commands
+            // Find command path for external commands using the same resolver
+            // as non-pipeline execution to keep behavior consistent.
             let cmd_path = match self.find_command_in_path(cmd_name) {
                 Some(path) => path,
                 None => {
@@ -1229,39 +1217,16 @@ impl Shell {
 
     /// Find command in PATH (helper method for pipeline)
     fn find_command_in_path(&self, cmd: &str) -> Option<PathBuf> {
-        if cmd.contains('\\') || cmd.contains('/') {
-            // Full path provided
-            let path = PathBuf::from(cmd);
-            if path.exists() {
-                return Some(path);
-            }
-            return None;
+        let env_vars: Vec<(String, ArrayValue)> = self
+            .env_vars
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let executor = Executor::new(&env_vars, &self.current_dir);
+        match executor.find_command_in_path(cmd) {
+            Ok(path) => path,
+            Err(_) => None,
         }
-
-        // Search in PATH
-        if let Ok(path_env) = std::env::var("PATH") {
-            for path in env::split_paths(&path_env) {
-                let exe_path = path.join(&format!("{}.exe", cmd));
-                if exe_path.exists() {
-                    return Some(exe_path);
-                }
-                let bat_path = path.join(&format!("{}.bat", cmd));
-                if bat_path.exists() {
-                    return Some(bat_path);
-                }
-                let cmd_path = path.join(&format!("{}.cmd", cmd));
-                if cmd_path.exists() {
-                    return Some(cmd_path);
-                }
-                // Also check for files without extension on Unix-like systems
-                let direct_path = path.join(cmd);
-                if direct_path.exists() {
-                    return Some(direct_path);
-                }
-            }
-        }
-
-        None
     }
 
     /// Expand wildcards in arguments
@@ -1571,8 +1536,18 @@ impl Shell {
                 continue;
             }
 
+            if line.starts_with("if ") {
+                i = self.execute_if_block(lines, i, end, state)?;
+                continue;
+            }
+
             if line.starts_with("case ") {
                 i = self.execute_case_block(lines, i, end, state)?;
+                continue;
+            }
+
+            if let Some(func_name) = Self::parse_function_header(&line) {
+                i = self.register_script_function(lines, i, end, func_name, state)?;
                 continue;
             }
 
@@ -1740,6 +1715,197 @@ impl Shell {
         Ok(esac + 1)
     }
 
+    fn execute_if_block(
+        &mut self,
+        lines: &[String],
+        start: usize,
+        end: usize,
+        state: &mut ScriptState,
+    ) -> Result<usize> {
+        let mut depth = 0usize;
+        let mut fi_index = None;
+        let mut i = start;
+        while i < end {
+            let line = Self::normalize_script_line(&lines[i]);
+            if line.starts_with("if ") {
+                depth += 1;
+            } else if line == "fi" {
+                depth -= 1;
+                if depth == 0 {
+                    fi_index = Some(i);
+                    break;
+                }
+            }
+            i += 1;
+        }
+
+        let fi = fi_index
+            .ok_or_else(|| ShellError::InvalidCommand("if block missing 'fi'".to_string()))?;
+
+        let mut branches: Vec<(String, usize, usize)> = Vec::new();
+        let mut else_block: Option<(usize, usize)> = None;
+        let mut cursor = start;
+        let mut nesting = 0usize;
+        while cursor <= fi {
+            let line = Self::normalize_script_line(&lines[cursor]);
+            if line.starts_with("if ") {
+                nesting += 1;
+                if nesting == 1 {
+                    let cond = Self::extract_if_condition(&line, "if")?;
+                    let (body_start, next) = self.find_then_body_start(lines, cursor, fi)?;
+                    let body_end =
+                        self.find_if_branch_end(lines, body_start, fi, &["elif", "else", "fi"])?;
+                    branches.push((cond, body_start, body_end));
+                    cursor = next.max(body_end);
+                    continue;
+                }
+            } else if line == "fi" {
+                nesting = nesting.saturating_sub(1);
+            } else if nesting == 1 && line.starts_with("elif ") {
+                let cond = Self::extract_if_condition(&line, "elif")?;
+                let (body_start, next) = self.find_then_body_start(lines, cursor, fi)?;
+                let body_end =
+                    self.find_if_branch_end(lines, body_start, fi, &["elif", "else", "fi"])?;
+                branches.push((cond, body_start, body_end));
+                cursor = next.max(body_end);
+                continue;
+            } else if nesting == 1 && line == "else" {
+                else_block = Some((cursor + 1, fi));
+                break;
+            }
+            cursor += 1;
+        }
+
+        let mut executed = false;
+        for (condition, body_start, body_end) in branches {
+            let expanded_condition = self.expand_script_vars(&condition, state);
+            self.execute_command(&expanded_condition)?;
+            if self.last_exit_code == 0 {
+                let _ = self.execute_script_lines(lines, body_start, body_end, state)?;
+                executed = true;
+                break;
+            }
+        }
+
+        if !executed {
+            if let Some((body_start, body_end)) = else_block {
+                let _ = self.execute_script_lines(lines, body_start, body_end, state)?;
+            }
+        }
+
+        Ok(fi + 1)
+    }
+
+    fn extract_if_condition(line: &str, keyword: &str) -> Result<String> {
+        let raw = line.trim_start_matches(keyword).trim();
+        let cond = raw
+            .trim_end_matches("; then")
+            .trim_end_matches(" then")
+            .trim_end_matches(';')
+            .trim();
+        if cond.is_empty() {
+            return Err(ShellError::InvalidCommand(format!(
+                "{} condition cannot be empty",
+                keyword
+            )));
+        }
+        Ok(cond.to_string())
+    }
+
+    fn find_then_body_start(&self, lines: &[String], start: usize, fi: usize) -> Result<(usize, usize)> {
+        let header = Self::normalize_script_line(&lines[start]);
+        if header.ends_with("; then") || header.ends_with(" then") {
+            return Ok((start + 1, start + 1));
+        }
+        let mut i = start + 1;
+        while i <= fi {
+            let line = Self::normalize_script_line(&lines[i]);
+            if line == "then" {
+                return Ok((i + 1, i + 1));
+            }
+            i += 1;
+        }
+        Err(ShellError::InvalidCommand(
+            "if syntax expects 'then'".to_string(),
+        ))
+    }
+
+    fn find_if_branch_end(
+        &self,
+        lines: &[String],
+        start: usize,
+        fi: usize,
+        branch_markers: &[&str],
+    ) -> Result<usize> {
+        let mut depth = 1usize;
+        let mut i = start;
+        while i <= fi {
+            let line = Self::normalize_script_line(&lines[i]);
+            if line.starts_with("if ") {
+                depth += 1;
+            } else if line == "fi" {
+                depth -= 1;
+                if depth == 0 {
+                    return Ok(i);
+                }
+            } else if depth == 1 && branch_markers.iter().any(|m| line == *m || line.starts_with(&format!("{m} "))) {
+                return Ok(i);
+            }
+            i += 1;
+        }
+        Err(ShellError::InvalidCommand(
+            "if branch termination not found".to_string(),
+        ))
+    }
+
+    fn parse_function_header(line: &str) -> Option<String> {
+        let trimmed = line.trim();
+        if !trimmed.ends_with('{') {
+            return None;
+        }
+        let header = trimmed.trim_end_matches('{').trim();
+        if let Some(name) = header.strip_suffix("()") {
+            let n = name.trim();
+            if !n.is_empty() {
+                return Some(n.to_string());
+            }
+        }
+        None
+    }
+
+    fn register_script_function(
+        &mut self,
+        lines: &[String],
+        start: usize,
+        end: usize,
+        func_name: String,
+        state: &mut ScriptState,
+    ) -> Result<usize> {
+        let mut depth = 1usize;
+        let mut cursor = start + 1;
+        let mut body: Vec<String> = Vec::new();
+        while cursor < end {
+            let line = Self::normalize_script_line(&lines[cursor]);
+            if line.ends_with('{') {
+                depth += 1;
+            } else if line == "}" {
+                depth -= 1;
+                if depth == 0 {
+                    state.functions.insert(func_name, body);
+                    return Ok(cursor + 1);
+                }
+            }
+            if depth > 0 {
+                body.push(line);
+            }
+            cursor += 1;
+        }
+
+        Err(ShellError::InvalidCommand(
+            "function block missing '}'".to_string(),
+        ))
+    }
+
     fn case_pattern_matches(&self, patterns: &str, value: &str) -> bool {
         for pattern in patterns.split('|') {
             let pat = Self::strip_quotes(pattern.trim());
@@ -1761,6 +1927,14 @@ impl Shell {
 
     fn execute_script_simple_line(&mut self, line: &str, state: &mut ScriptState) -> Result<()> {
         let trimmed = line.trim();
+        if trimmed.starts_with("unset -f ") {
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+            if parts.len() > 2 {
+                state.functions.remove(parts[2]);
+            }
+            return Ok(());
+        }
+
         if trimmed.starts_with("shift") {
             let parts: Vec<&str> = trimmed.split_whitespace().collect();
             let shift_n = if parts.len() > 1 {
@@ -1785,15 +1959,27 @@ impl Shell {
         let mut idx = 0usize;
         while idx < parts.len() && Self::is_assignment_token(parts[idx]) {
             if let Some((key, value)) = parts[idx].split_once('=') {
-                state.locals.insert(key.to_string(), value.to_string());
+                let mut normalized_value = Self::normalize_assignment_value(value);
+                if key.eq_ignore_ascii_case("PATH") {
+                    normalized_value = Self::normalize_path_list_for_windows(&normalized_value);
+                }
+
+                state
+                    .locals
+                    .insert(key.to_string(), normalized_value.to_string());
                 self.env_vars
-                    .insert(key.to_string(), ArrayValue::String(value.to_string()));
-                std::env::set_var(key, value);
+                    .insert(key.to_string(), ArrayValue::String(normalized_value.clone()));
+                std::env::set_var(key, &normalized_value);
             }
             idx += 1;
         }
 
         if idx >= parts.len() {
+            return Ok(());
+        }
+
+        if let Some(func_body) = state.functions.get(parts[idx]).cloned() {
+            let _ = self.execute_script_lines(&func_body, 0, func_body.len(), state)?;
             return Ok(());
         }
 
@@ -1844,7 +2030,16 @@ impl Shell {
                         }
                         name.push(c);
                     }
-                    out.push_str(&self.resolve_script_var(&name, state));
+                    if let Some((var_name, default_value)) = name.split_once(":-") {
+                        let value = self.resolve_script_var(var_name.trim(), state);
+                        if value.is_empty() {
+                            out.push_str(default_value);
+                        } else {
+                            out.push_str(&value);
+                        }
+                    } else {
+                        out.push_str(&self.resolve_script_var(&name, state));
+                    }
                 }
                 '#' => {
                     chars.next();
@@ -1909,8 +2104,49 @@ impl Shell {
     }
 
     fn normalize_script_line(line: &str) -> String {
-        line.trim_matches(|c: char| c == '\u{feff}' || c == '\u{fffe}' || c.is_whitespace())
-            .to_string()
+        let trimmed = line
+            .trim_matches(|c: char| c == '\u{feff}' || c == '\u{fffe}' || c.is_whitespace());
+        Self::strip_inline_comment(trimmed).trim().to_string()
+    }
+
+    fn strip_inline_comment(line: &str) -> String {
+        let mut out = String::new();
+        let mut in_single = false;
+        let mut in_double = false;
+        let mut escaped = false;
+
+        for ch in line.chars() {
+            if escaped {
+                out.push(ch);
+                escaped = false;
+                continue;
+            }
+
+            if ch == '\\' && !in_single {
+                out.push(ch);
+                escaped = true;
+                continue;
+            }
+
+            if ch == '\'' && !in_double {
+                in_single = !in_single;
+                out.push(ch);
+                continue;
+            }
+            if ch == '"' && !in_single {
+                in_double = !in_double;
+                out.push(ch);
+                continue;
+            }
+
+            if ch == '#' && !in_single && !in_double {
+                break;
+            }
+
+            out.push(ch);
+        }
+
+        out
     }
 
     fn strip_quotes(s: &str) -> String {
@@ -1923,6 +2159,71 @@ impl Shell {
             }
         }
         s.to_string()
+    }
+
+    fn normalize_assignment_value(raw: &str) -> String {
+        let mut out = String::new();
+        let mut in_single = false;
+        let mut in_double = false;
+
+        for ch in raw.chars() {
+            if ch == '\'' && !in_double {
+                in_single = !in_single;
+                continue;
+            }
+            if ch == '"' && !in_single {
+                in_double = !in_double;
+                continue;
+            }
+
+            out.push(ch);
+        }
+
+        out
+    }
+
+    fn normalize_path_list_for_windows(path_value: &str) -> String {
+        if cfg!(not(windows)) || path_value.is_empty() {
+            return path_value.to_string();
+        }
+
+        if path_value.contains(';') {
+            return path_value.to_string();
+        }
+
+        let chars: Vec<char> = path_value.chars().collect();
+        let mut parts: Vec<String> = Vec::new();
+        let mut current = String::new();
+
+        for i in 0..chars.len() {
+            let ch = chars[i];
+            if ch == ':' {
+                let prev = if i > 0 { Some(chars[i - 1]) } else { None };
+                let next = if i + 1 < chars.len() {
+                    Some(chars[i + 1])
+                } else {
+                    None
+                };
+                let is_drive_colon = prev.map(|c| c.is_ascii_alphabetic()).unwrap_or(false)
+                    && next.map(|c| c == '\\' || c == '/').unwrap_or(false);
+                if !is_drive_colon {
+                    if !current.is_empty() {
+                        parts.push(current.clone());
+                        current.clear();
+                    } else {
+                        parts.push(String::new());
+                    }
+                    continue;
+                }
+            }
+            current.push(ch);
+        }
+
+        if !current.is_empty() {
+            parts.push(current);
+        }
+
+        parts.join(";")
     }
 }
 
