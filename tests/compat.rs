@@ -25,7 +25,11 @@ fn winuxsh_binary() -> PathBuf {
         let mut fallback = repo_root();
         fallback.push("target");
         fallback.push("debug");
-        fallback.push(if cfg!(windows) { "winuxsh.exe" } else { "winuxsh" });
+        fallback.push(if cfg!(windows) {
+            "winuxsh.exe"
+        } else {
+            "winuxsh"
+        });
         if fallback.exists() {
             return fallback;
         }
@@ -67,7 +71,11 @@ fn run_case(name: &str) {
     // interactive use without relying on the line-by-line script-file reader
     // (which still has heredoc/continuation gaps tracked as T-4).
     let bin = winuxsh_binary();
-    assert!(bin.exists(), "winuxsh binary not found at {}", bin.display());
+    assert!(
+        bin.exists(),
+        "winuxsh binary not found at {}",
+        bin.display()
+    );
 
     let output = Command::new(&bin)
         .arg("-c")

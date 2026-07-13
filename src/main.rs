@@ -94,7 +94,10 @@ fn print_usage() {
 fn print_version() {
     println!("winuxsh 0.6.0");
     println!("  rubash:   {}", rubash_version());
-    println!("  winuxcmd: {}", winuxsh_runtime::winuxcmd::version().unwrap_or_else(|| "not found".to_string()));
+    println!(
+        "  winuxcmd: {}",
+        winuxsh_runtime::winuxcmd::version().unwrap_or_else(|| "not found".to_string())
+    );
 }
 
 fn rubash_version() -> &'static str {
