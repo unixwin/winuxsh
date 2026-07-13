@@ -12,7 +12,8 @@ repository = "https://github.com/unixwin/winuxsh"
 
 [dependencies]
 winuxsh-runtime = { path = "crates/winuxsh-runtime" }
-rubash = { git = "https://github.com/unixwin/rubash.git", branch = "master" }
+rubash = { git = "https://github.com/unixwin/rubash.git", rev = "f08d6d68e4901332c0003be5339f9f80f6251ae2" }
 anyhow = "1.0"
 env_logger = "0.11"
 log = "0.4"
+

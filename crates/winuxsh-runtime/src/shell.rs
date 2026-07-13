@@ -40,14 +40,7 @@ impl Shell {
         // 3. Build rubash Executor.
         let mut executor = Executor::new();
 
-                // 3b. Force uppercase PATH in rubash's internal env.
-        // On Windows, `std::env::vars()` stores PATH as "Path" (capital P),
-        // but rubash's find_user_command reads all-caps "PATH".  This
-        // workaround ensures the lookup succeeds regardless of OS casing.
-        if let Ok(p) = std::env::var("PATH") {
-            executor.set_env("PATH", &p);
-        }
-// 4. Wire aliases from config into rubash.
+        // 4. Wire aliases from config into rubash.
         for (name, value) in &config.aliases {
             executor.set_env(&format!("BASH_ALIASES[{}]", name), value);
         }
@@ -131,5 +124,6 @@ impl Shell {
         self.executor.last_exit_code()
     }
 }
+
 
 

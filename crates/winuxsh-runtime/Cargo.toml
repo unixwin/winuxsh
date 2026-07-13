@@ -7,7 +7,7 @@ license = "GPL-3.0-or-later"
 description = "Runtime crate for winuxsh: rubash-backed shell REPL on Windows"
 
 [dependencies]
-rubash = { git = "https://github.com/unixwin/rubash.git", branch = "master" }
+rubash = { git = "https://github.com/unixwin/rubash.git", rev = "f08d6d68e4901332c0003be5339f9f80f6251ae2" }
 reedline = "0.33"
 anyhow = "1.0"
 thiserror = "1.0"
@@ -24,3 +24,4 @@ glob = "0.3"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Console"] }
+
