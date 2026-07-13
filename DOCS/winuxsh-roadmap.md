@@ -25,17 +25,18 @@ status: active
 ## 短期 - v2.1
 
 ### CI 基础设施
-- [ ] .github/workflows/ci.yml - push/PR 自动 cargo build + cargo test
-- [ ] Windows 平台 (当前仅支持 Windows)
-- [ ] cargo fmt --check lint 步骤
+- [x] .github/workflows/ci.yml - push/PR 自动 cargo build + cargo test (PR #9 合入)
+- [x] Windows 平台 (当前仅支持 Windows)
+- [x] cargo fmt --check lint 步骤
 
 ### 兼容性测试套件
-- [ ] tests/compat/ 目录, .sh + .expected 配对
-- [ ] 覆盖: 变量展开、命令替换、管道、if/for/case/function、别名、重定向、heredoc
-- [ ] 通过 cargo test --ignored 运行 (标记为 compat 忽略测试)
+- [x] tests/compat/ 目录, .sh + .expected 配对
+- [x] 覆盖: 变量展开、命令替换、管道、if/for/case/function、别名、exit code、echo flags (heredoc 待 T-4)
+- [x] 通过 cargo test --test compat -- --ignored 运行 (10 个 fixture)
 
 ### master 合并
-- [ ] PR: rewrite/v2-rubash -> master (含完整架构变更描述)
+- [x] PR #9: rewrite/v2-rubash -> master, 已 squash 合并到 master (commit a50638f)
+        修复了 cargo fmt --check 与 Cargo.lock tracked 问题，CI 全绿
 
 ### 脚本执行改进
 - [ ] 从逐行 execute_line 切换到 execute_script_file 以支持 heredoc / 多行 continuation

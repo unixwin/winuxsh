@@ -123,6 +123,46 @@ impl Shell {
     pub fn last_exit_code(&self) -> i32 {
         self.executor.last_exit_code()
     }
+
+    /// Execute an entire script (multi-line) via rubash full AST execution.
+    ///
+    /// Unlike `execute_line` which tokenizes/parses/executes each line
+    /// independently, this method tokenizes the whole script at once.
+    /// This enables heredocs, line continuations (backslash-newline),
+    /// and multi-line compound commands (if/for/while across lines).
+    pub fn execute_script(&mut self, script: &str) -> anyhow::Result<i32> {
+        let script = script.trim();
+        if script.is_empty() {
+            return Ok(0);
+        }
+
+        let tokens = tokenize(script);
+        if tokens.is_empty() {
+            return Ok(0);
+        }
+
+        let ast = parse(&tokens);
+
+        match self.executor.execute_ast(&ast) {
+            Ok(()) => {}
+            Err(rubash::executor::ExecuteError::ExitCode(code)) => {
+                return Ok(code);
+            }
+            Err(rubash::executor::ExecuteError::Return(code)) => {
+                return Ok(code);
+            }
+            Err(rubash::executor::ExecuteError::CommandNotFound(cmd)) => {
+                eprintln!("winuxsh: {}: command not found", cmd);
+                return Ok(127);
+            }
+            Err(e) => {
+                eprintln!("winuxsh: {}", e);
+                return Ok(1);
+            }
+        }
+
+        Ok(self.executor.last_exit_code())
+    }
 }
 
 

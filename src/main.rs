@@ -49,7 +49,7 @@ fn run(args: &[String]) -> anyhow::Result<()> {
                 anyhow::bail!("-c requires an argument");
             }
             let mut shell = winuxsh_runtime::Shell::new()?;
-            let code = shell.execute_line(&args[2])?;
+            let code = shell.execute_script(&args[2])?;
             if code != 0 {
                 std::process::exit(code);
             }
@@ -63,13 +63,7 @@ fn run(args: &[String]) -> anyhow::Result<()> {
             }
             let mut shell = winuxsh_runtime::Shell::new()?;
             let content = std::fs::read_to_string(&script)?;
-            for line in content.lines() {
-                let line = line.trim();
-                if line.is_empty() || line.starts_with('#') {
-                    continue;
-                }
-                shell.execute_line(line)?;
-            }
+            shell.execute_script(&content)?;
             Ok(())
         }
     }

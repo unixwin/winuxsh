@@ -119,3 +119,8 @@ compat_test!(alias, "alias");
 compat_test!(exit_code, "exit_code");
 compat_test!(string_param, "string_param");
 compat_test!(echo_flags, "echo_flags");
+// Multi-line constructs require execute_script (whole-file tokenization).
+compat_test!(heredoc, "heredoc");
+compat_test!(continuation, "continuation");
+compat_test!(multiline_if, "multiline_if");
+compat_test!(multiline_for, "multiline_for");
