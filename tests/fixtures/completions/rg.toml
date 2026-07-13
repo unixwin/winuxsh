@@ -1,0 +1,20 @@
+command = "rg"
+description = "ripgrep: recursively search directories for a regex pattern"
+
+[[flags]]
+short = "-i"
+long = "--ignore-case"
+description = "Case insensitive search"
+
+[[flags]]
+long = "--regexp"
+short = "-e"
+description = "A pattern to search for"
+takes_value = true
+
+[[flags]]
+long = "--type"
+short = "-t"
+description = "Only search files matching the specified type"
+takes_value = true
+values = ["rust", "toml", "markdown"]

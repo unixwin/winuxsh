@@ -1,81 +1,18 @@
-[workspace]
-resolver = "2"
-members = [
-    "crates/winsh-ast",
-    "crates/winsh-core",
-    "crates/winsh-lexer",
-    "crates/winsh-parser",
-    ".",
-]
-
-[workspace.package]
-version = "0.6.0"
-edition = "2021"
-rust-version = "1.75"
-license = "MIT"
-description = "WinSH - A zsh-compatible shell for Windows"
-
-[workspace.dependencies]
-# Internal crates
-winsh-ast = { path = "crates/winsh-ast" }
-winsh-core = { path = "crates/winsh-core" }
-winsh-lexer = { path = "crates/winsh-lexer" }
-winsh-parser = { path = "crates/winsh-parser" }
-
-# External dependencies
-reedline = "0.33"
-shlex = "1.3"
-anyhow = "1.0"
-thiserror = "1.0"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-toml = "0.8"
-dirs = "5.0"
-colored = "2.1"
-log = "0.4"
-env_logger = "0.11"
-nu-ansi-term = "0.50"
-glob = "0.3"
-globset = "0.4"
-libloading = "0.8"
-windows-sys = { version = "0.59", features = [
-    "Win32_Foundation",
-    "Win32_System_Console",
-    "Win32_System_Threading",
-    "Win32_Security",
-    "Win32_System_Pipes",
-] }
-
-[dev-dependencies]
-tempfile = "3.0"
-
-[build-dependencies]
-cc = "1.0"
-
 [package]
 name = "winuxsh"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-description = "WinSH MVP6 - Array Support and Internationalization"
+version = "0.6.0"
+edition = "2021"
+rust-version = "1.70"
+license = "GPL-3.0-or-later"
+authors = ["unixwin team <arookieofc@gmail.com>"]
+description = "A bash-compatible shell for Windows, built on rubash + winuxcmd"
+readme = "README.md"
+homepage = "https://github.com/unixwin/winuxsh"
+repository = "https://github.com/unixwin/winuxsh"
 
 [dependencies]
-winsh-ast.workspace = true
-winsh-core.workspace = true
-winsh-lexer.workspace = true
-winsh-parser.workspace = true
-
-reedline.workspace = true
-shlex.workspace = true
-anyhow.workspace = true
-thiserror.workspace = true
-serde.workspace = true
-toml.workspace = true
-dirs.workspace = true
-colored.workspace = true
-log.workspace = true
-env_logger.workspace = true
-nu-ansi-term.workspace = true
-glob.workspace = true
-libloading.workspace = true
-windows-sys.workspace = true
+winuxsh-runtime = { path = "crates/winuxsh-runtime" }
+rubash = { git = "https://github.com/unixwin/rubash.git", branch = "master" }
+anyhow = "1.0"
+env_logger = "0.11"
+log = "0.4"

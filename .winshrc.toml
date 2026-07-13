@@ -1,24 +1,24 @@
-# WinSH Configuration File
+# Winuxsh Configuration File
 
-# WinuxCmd Configuration
-[winuxcmd]
-# Enable WinuxCmd DLL for Unix commands (default: true)
-# Set to false to force all commands to use PATH execution
-# Note: When enabled, some commands (grep, sed, etc.) are forced to use PATH for better Ctrl+C handling
-enable_dll = true
-
-# Aliases
 [aliases]
 ll = "ls -la"
 la = "ls -a"
 l = "ls -CF"
 
 [completions]
+# Directories containing <cmd>.toml or <cmd>.bash completion definitions
 completion_dirs = [
-    "D:/shellTools/fd-v10.4.2-x86_64-pc-windows-msvc/autocomplete",
-    "D:/shellTools/bat-v0.26.1-x86_64-pc-windows-msvc/autocomplete",
-    "D:/shellTools/btm/completion",
-    "D:/shellTools/ripgrep-15.1.0-x86_64-pc-windows-msvc/complete",
-    "D:/shellTools/yazi-x86_64-pc-windows-msvc/completions",
-    "D:/shellTools/Zoxide/completions",
+    "D:/shellTools/ripgrep/complete",
+    "D:/shellTools/fd/autocomplete",
+    "D:/shellTools/bat/autocomplete",
 ]
+
+[theme]
+current_theme = "default"
+
+[shell]
+prompt_format = "{user}@{host} {cwd} {symbol}"
+
+[winuxcmd]
+# Override path to winuxcmd.exe (auto-detected from PATH if not set)
+# path = "D:/tools/winuxcmd/winuxcmd.exe"
