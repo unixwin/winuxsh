@@ -82,7 +82,12 @@ Also support familiar zsh environment variables where practical:
 
 Implementation interface audit: `DOCS/zsh-compatibility-interface-audit.md`.
 
-Current implementation status: report-only scanner and `--zsh-compat-report` / `--zsh-compat-report-json` CLI are implemented on `codex/zsh-compat-scanner`; automatic startup import remains disabled.
+Current implementation status: scanner and `--zsh-compat-report` /
+`--zsh-compat-report-json` CLI are implemented on `codex/zsh-compat-scanner`.
+Opt-in startup import is available behind `[zsh].enabled = true` plus
+`[zsh].auto_apply = true` for known-safe env/PATH records and aliases only.
+Completion assets, theme hints, and editor hints remain report-only until their
+native translators are implemented.
 
 Build a scanner/parser for zsh profile files. It should read but not execute:
 
@@ -108,11 +113,19 @@ Output:
 - native config suggestions
 - imported aliases/completion dirs/theme settings where safe
 - a stable diagnostic format suitable for agents and CI snapshots
+- opt-in safe application path:
+  - env/PATH records apply before `rubash::Executor::new()`
+  - `winuxcmd` PATH injection still runs after zsh PATH import so coreutils win
+  - imported aliases apply after executor construction through rubash `alias`
+    builtin semantics
+  - native `.winshrc.toml` aliases apply last and override imported names
 
 Tests:
 
 - fixture `.zshrc` files for Oh My Zsh template, simple aliases, plugin arrays,
   fpath, zstyle, bindkey.
+- safe apply tests for PATH de-duplication, env whitelist filtering, and rubash
+  alias installation.
 
 ## Phase 2 - Oh My Zsh Layout Importer
 

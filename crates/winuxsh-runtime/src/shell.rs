@@ -13,6 +13,7 @@ use rubash::{executor::Executor, lexer::tokenize, parser::parse};
 use crate::completion::CompletionState;
 use crate::config::{load as load_config, EditorMode};
 use crate::prompt::WinuxshPrompt;
+use crate::zsh_compat::{apply_alias, apply_safe_aliases, apply_safe_env, scan, ZshImportOptions};
 
 use crate::winuxcmd;
 
@@ -33,33 +34,55 @@ impl Shell {
         // 1. Load config from ~/.winshrc.toml.
         let config = load_config();
 
-        // 2. WinuxCmd PATH injection (best-effort), honoring config override.
+        // 2. Apply opt-in, known-safe zsh profile env/PATH records before
+        // winuxcmd injection and before rubash snapshots the process env.
+        let zsh_report = if config.zsh.enabled && config.zsh.auto_apply {
+            let report = scan(&ZshImportOptions::from_config(&config.zsh));
+            let summary = apply_safe_env(&report);
+            log::debug!(
+                "zsh safe env import: env={} path_entries={}",
+                summary.env_applied,
+                summary.path_entries_applied
+            );
+            Some(report)
+        } else {
+            None
+        };
+
+        // 3. WinuxCmd PATH injection (best-effort), honoring config override.
         if let Err(e) = winuxcmd::ensure_on_path_with_override(config.winuxcmd_path.as_deref()) {
             log::warn!("winuxcmd not on PATH: {}", e);
         }
 
-        // 3. Build rubash Executor after PATH injection.
+        // 4. Build rubash Executor after PATH injection.
         let mut executor = Executor::new();
 
-        // 4. Wire aliases from config into rubash.
+        // 5. Apply imported aliases first, then native config aliases so
+        // ~/.winshrc.toml remains authoritative when names collide.
+        if let Some(report) = &zsh_report {
+            let summary = apply_safe_aliases(report, &mut executor);
+            log::debug!("zsh safe alias import: aliases={}", summary.aliases_applied);
+        }
         for (name, value) in &config.aliases {
-            executor.set_env(&format!("BASH_ALIASES[{}]", name), value);
+            if !apply_alias(&mut executor, name, value) {
+                log::warn!("Skipping invalid alias from config: {}", name);
+            }
         }
 
-        // 5. Prompt + theme.
+        // 6. Prompt + theme.
         let prompt = WinuxshPrompt::new(config.shell.prompt_format.clone(), &config.theme_name);
 
-        // 6. History file in home dir.
+        // 7. History file in home dir.
         let history_path = dirs::home_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
             .join(".winuxsh_history");
 
-        // 7. Completion state.
+        // 8. Completion state.
         let completion_state = Arc::new(Mutex::new(CompletionState::new(
             std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
         )));
 
-        // 8. Load completion dirs from config (inline, not in thread).
+        // 9. Load completion dirs from config (inline, not in thread).
         {
             let mut s = completion_state.lock().unwrap();
             s.load_completion_dirs(&config.completion_dirs);

@@ -5,6 +5,7 @@
 //! applied through explicit, safe winuxsh hooks.
 
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -122,6 +123,13 @@ impl ZshImportReport {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct SafeApplySummary {
+    pub env_applied: usize,
+    pub aliases_applied: usize,
+    pub path_entries_applied: usize,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ImportedAlias {
     pub name: String,
@@ -214,6 +222,85 @@ pub fn scan(options: &ZshImportOptions) -> ZshImportReport {
     }
 
     report
+}
+
+pub fn apply_safe_env(report: &ZshImportReport) -> SafeApplySummary {
+    let mut summary = SafeApplySummary::default();
+
+    if let Some(path) = safe_path_value(report) {
+        std::env::set_var("PATH", path);
+        summary.path_entries_applied = report.path_entries.len();
+        summary.env_applied += 1;
+    }
+
+    for env in &report.env {
+        if is_safe_env_key(&env.key) && env.key != "PATH" {
+            std::env::set_var(&env.key, &env.value);
+            summary.env_applied += 1;
+        }
+    }
+
+    summary
+}
+
+pub fn apply_safe_aliases(
+    report: &ZshImportReport,
+    executor: &mut rubash::executor::Executor,
+) -> SafeApplySummary {
+    let mut summary = SafeApplySummary::default();
+
+    for alias in &report.aliases {
+        if apply_alias(executor, &alias.name, &alias.value) {
+            summary.aliases_applied += 1;
+        }
+    }
+
+    summary
+}
+
+pub fn apply_alias(
+    executor: &mut rubash::executor::Executor,
+    name: &str,
+    value: &str,
+) -> bool {
+    if !is_identifierish(name) {
+        return false;
+    }
+
+    let source = format!("alias {}={}", name, shell_quote(value));
+    let tokens = rubash::lexer::tokenize(&source);
+    if tokens.is_empty() {
+        return false;
+    }
+    let ast = rubash::parser::parse(&tokens);
+    executor.execute_ast(&ast).is_ok() && executor.last_exit_code() == 0
+}
+
+pub fn safe_path_value(report: &ZshImportReport) -> Option<OsString> {
+    if report.path_entries.is_empty() {
+        return None;
+    }
+
+    let mut seen = HashSet::new();
+    let mut parts: Vec<PathBuf> = Vec::new();
+    for entry in &report.path_entries {
+        if entry.as_os_str().is_empty() {
+            continue;
+        }
+        let key = normalise_path_key(entry);
+        if seen.insert(key) {
+            parts.push(entry.clone());
+        }
+    }
+
+    for entry in current_path_entries() {
+        let key = normalise_path_key(&entry);
+        if seen.insert(key) {
+            parts.push(entry);
+        }
+    }
+
+    std::env::join_paths(parts).ok()
 }
 
 fn default_zdotdir() -> PathBuf {
@@ -888,8 +975,57 @@ fn unquote(value: &str) -> String {
     value.to_string()
 }
 
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 fn is_path_var_ref(value: &str) -> bool {
     matches!(value, "$PATH" | "${PATH}" | "$path" | "${path}")
+}
+
+fn current_path_entries() -> Vec<PathBuf> {
+    std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect())
+        .unwrap_or_default()
+}
+
+fn normalise_path_key(path: &Path) -> String {
+    let text = path.to_string_lossy().replace('/', "\\");
+    if cfg!(windows) {
+        text.to_ascii_lowercase()
+    } else {
+        text
+    }
+}
+
+fn is_safe_env_key(key: &str) -> bool {
+    is_env_identifier(key)
+        && !matches!(
+            key,
+            "PATH"
+                | "BASH"
+                | "BASHOPTS"
+                | "BASH_ALIASES"
+                | "BASH_CMDS"
+                | "BASH_VERSINFO"
+                | "EUID"
+                | "IFS"
+                | "OPTARG"
+                | "OPTIND"
+                | "PIPESTATUS"
+                | "SHELLOPTS"
+                | "UID"
+        )
+        && !key.starts_with("__RUBASH_")
+}
+
+fn is_env_identifier(value: &str) -> bool {
+    let mut chars = value.chars();
+    match chars.next() {
+        Some(ch) if ch == '_' || ch.is_ascii_alphabetic() => {}
+        _ => return false,
+    }
+    chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
 fn is_identifierish(value: &str) -> bool {

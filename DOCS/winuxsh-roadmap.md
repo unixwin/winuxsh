@@ -72,7 +72,7 @@ status: active
 - [ ] 更多 prompt 自定义模板
 - [x] Phase 6 themes: 用户自定义主题加载 (从 ~/.winuxsh/themes/)
 - [x] zsh compat report CLI: 先输出扫描报告，不自动修改启动行为
-- [ ] zsh profile scanner: 安全导入 `.zshrc` 常见配置
+- [x] zsh profile scanner/apply 第一层: `[zsh].auto_apply` 安全导入 `.zshrc` env/PATH/alias
 - [ ] Oh My Zsh layout importer: 识别 `plugins=(...)`、主题、completion assets
 - [ ] zsh plugin tier importer: 优先导入 completion-only / alias-only 插件
 - [ ] 原生 autosuggestions: 参考 zsh-autosuggestions，用 reedline 实现
