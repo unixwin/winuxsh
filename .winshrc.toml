@@ -14,6 +14,8 @@ completion_dirs = [
 ]
 
 [theme]
+# Built-ins: default, dark, light, colorful.
+# Custom themes: ~/.winuxsh/themes/<name>.toml
 current_theme = "default"
 
 [shell]

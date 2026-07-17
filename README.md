@@ -67,7 +67,7 @@ cat Cargo.toml | grep name       # pipeline builtin + external
 prompt_format = "{user}@{host} {cwd} {symbol}"
 
 [theme]
-current_theme = "default"      # default | dark | light | colorful
+current_theme = "default"      # default | dark | light | colorful | ~/.winuxsh/themes/<name>.toml
 
 [editor]
 edit_mode = "emacs"          # emacs | vi
@@ -86,6 +86,38 @@ completion_dirs = [
 [winuxcmd]
 # optional override; auto-detected from PATH if not set
 # path = "D:/tools/winuxcmd/winuxcmd.exe"
+```
+
+Custom themes live in `~/.winuxsh/themes/<name>.toml` and are selected with
+`[theme].current_theme = "<name>"`. Built-in names (`default`, `dark`, `light`,
+`colorful`) remain reserved and stable.
+
+```toml
+[prompt_user]
+fg = "light cyan"
+bold = true
+
+[prompt_host]
+fg = "white"
+bold = true
+
+[prompt_dir]
+fg = "light green"
+bold = true
+
+[prompt_symbol]
+fg = "light magenta"
+bold = true
+
+[error]
+fg = "red"
+bold = true
+
+[warning]
+fg = "yellow"
+
+[success]
+fg = "green"
 ```
 
 ## Completion system

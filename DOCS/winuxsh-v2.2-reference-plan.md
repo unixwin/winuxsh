@@ -127,9 +127,11 @@ status: active
 
 ### Phase 6 - User Themes
 
-- Design a TOML theme schema under `~/.winuxsh/themes/*.toml`.
-- Add loader that falls back to existing built-in themes.
-- Keep built-in themes stable for compatibility.
+- [x] Design a TOML theme schema under `~/.winuxsh/themes/*.toml`.
+- [x] Add loader that falls back to existing built-in themes.
+- [x] Keep built-in themes stable for compatibility.
+- [x] Cover only the current `theme.rs` style surface: prompt user/host/dir/symbol, error, warning, success.
+- Verification: `cargo fmt --check`, `cargo test --lib -p winuxsh-runtime --locked`, `cargo test -p winuxsh-runtime --test completion --locked`, `cargo build --locked`, and `cargo test --test compat -- --ignored` passed.
 
 ## Obsidian Workflow
 

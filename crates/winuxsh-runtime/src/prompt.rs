@@ -4,13 +4,14 @@
 //! with substitutions: {user}, {host}, {cwd}, {symbol}.
 
 use std::borrow::Cow;
+
+use crate::theme::{by_name, Theme};
 use reedline::{Prompt, PromptEditMode, PromptHistorySearch};
-use crate::theme::by_name;
 
 /// A prompt that renders the configured template with theme-aware ANSI colours.
 pub struct WinuxshPrompt {
     template: String,
-    theme_name: String,
+    theme: Theme,
 }
 
 impl WinuxshPrompt {
@@ -18,12 +19,12 @@ impl WinuxshPrompt {
         let t = template.unwrap_or_else(|| "{user}@{host} {cwd} %# ".to_string());
         Self {
             template: t,
-            theme_name: theme_name.to_string(),
+            theme: by_name(theme_name),
         }
     }
 
     pub fn set_theme(&mut self, theme_name: &str) {
-        self.theme_name = theme_name.to_string();
+        self.theme = by_name(theme_name);
     }
 
     fn render_template(&self) -> String {
@@ -37,11 +38,10 @@ impl WinuxshPrompt {
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|_| "?".to_string());
 
-        let theme = by_name(&self.theme_name);
-        let user_s = theme.prompt_user.paint(&user).to_string();
-        let host_s = theme.prompt_host.paint(&host).to_string();
-        let dir_s = theme.prompt_dir.paint(&cwd).to_string();
-        let sym_s = theme.prompt_symbol.paint("%").to_string();
+        let user_s = self.theme.prompt_user.paint(&user).to_string();
+        let host_s = self.theme.prompt_host.paint(&host).to_string();
+        let dir_s = self.theme.prompt_dir.paint(&cwd).to_string();
+        let sym_s = self.theme.prompt_symbol.paint("%").to_string();
 
         self.template
             .replace("{user}", &user_s)

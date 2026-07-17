@@ -65,7 +65,7 @@ status: active
 - [x] Vi 模式 (reedline 原生支持,主要工作量在键位配置)
 - [x] Ctrl+R 历史搜索 (reedline 原生)
 - [ ] 更多 prompt 自定义模板
-- [ ] 用户自定义主题加载 (从 ~/.winuxsh/themes/)
+- [x] Phase 6 themes: 用户自定义主题加载 (从 ~/.winuxsh/themes/)
 
 ## 长期 - v3
 

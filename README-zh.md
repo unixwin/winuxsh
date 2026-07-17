@@ -67,7 +67,7 @@ cat Cargo.toml | grep name       # 内建 + 外部管道
 prompt_format = "{user}@{host} {cwd} {symbol}"
 
 [theme]
-current_theme = "default"      # default | dark | light | colorful
+current_theme = "default"      # default | dark | light | colorful | ~/.winuxsh/themes/<name>.toml
 
 [editor]
 edit_mode = "emacs"          # emacs | vi
@@ -86,6 +86,38 @@ completion_dirs = [
 [winuxcmd]
 # 可选覆盖；不配置则从 PATH 自动探测
 # path = "D:/tools/winuxcmd/winuxcmd.exe"
+```
+
+自定义主题放在 `~/.winuxsh/themes/<name>.toml`，然后通过
+`[theme].current_theme = "<name>"` 选择。内置主题名 `default`、`dark`、
+`light`、`colorful` 保留且行为稳定。
+
+```toml
+[prompt_user]
+fg = "light cyan"
+bold = true
+
+[prompt_host]
+fg = "white"
+bold = true
+
+[prompt_dir]
+fg = "light green"
+bold = true
+
+[prompt_symbol]
+fg = "light magenta"
+bold = true
+
+[error]
+fg = "red"
+bold = true
+
+[warning]
+fg = "yellow"
+
+[success]
+fg = "green"
 ```
 
 ## 补全系统
