@@ -11,7 +11,7 @@ use reedline::Reedline;
 use rubash::{executor::Executor, lexer::tokenize, parser::parse};
 
 use crate::completion::CompletionState;
-use crate::config::load as load_config;
+use crate::config::{load as load_config, EditorMode};
 use crate::prompt::WinuxshPrompt;
 
 use crate::winuxcmd;
@@ -22,6 +22,7 @@ pub struct Shell {
     pub completion_state: Arc<Mutex<CompletionState>>,
     pub prompt: WinuxshPrompt,
     pub history_path: std::path::PathBuf,
+    pub editor_mode: EditorMode,
     pub line_editor: Option<Reedline>,
 }
 
@@ -69,6 +70,7 @@ impl Shell {
             completion_state,
             prompt,
             history_path,
+            editor_mode: config.editor.edit_mode,
             line_editor: None,
         })
     }
@@ -164,6 +166,3 @@ impl Shell {
         Ok(self.executor.last_exit_code())
     }
 }
-
-
-

@@ -69,6 +69,9 @@ prompt_format = "{user}@{host} {cwd} {symbol}"
 [theme]
 current_theme = "default"      # default | dark | light | colorful
 
+[editor]
+edit_mode = "emacs"          # emacs | vi
+
 [aliases]
 ll = "ls -la"
 la = "ls -a"
@@ -97,7 +100,7 @@ Winuxsh inherits the MVP6 completion stack:
 
 ## Status
 
-This branch (`rewrite/v2-rubash`) is v1: core REPL + completion + theme + config. The plugin framework, Oh-My-Winuxsh, Vi mode, and `Ctrl+R` history search are tracked for later iterations.
+This branch (`rewrite/v2-rubash`) is v1: core REPL + completion + theme + config. Vi mode and `Ctrl+R` history search are available in v2.2; the plugin framework and Oh-My-Winuxsh are tracked for later iterations.
 
 ## License
 

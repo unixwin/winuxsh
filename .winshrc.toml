@@ -19,6 +19,10 @@ current_theme = "default"
 [shell]
 prompt_format = "{user}@{host} {cwd} {symbol}"
 
+[editor]
+# emacs (default) or vi
+edit_mode = "emacs"
+
 [winuxcmd]
 # Override path to winuxcmd.exe (auto-detected from PATH if not set)
 # path = "D:/tools/winuxcmd/winuxcmd.exe"

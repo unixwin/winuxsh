@@ -108,11 +108,12 @@ status: active
 
 ### Phase 3 - Edit Mode UX
 
-- Add config fields for editor mode:
+- [x] Add config fields for editor mode:
   - default `emacs`
   - optional `vi`
-- Wire reedline edit mode in `repl.rs`.
-- Confirm Ctrl+R remains active in both modes through reedline's common keybindings.
+- [x] Wire reedline edit mode in `repl.rs`.
+- [x] Confirm Ctrl+R remains active in both modes through reedline's common keybindings.
+- Verification: cargo fmt --check, cargo test --lib -p winuxsh-runtime --locked, and cargo test -p winuxsh-runtime --test completion --locked passed.
 
 ### Phase 4 - User Themes
 

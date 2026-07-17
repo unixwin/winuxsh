@@ -69,6 +69,9 @@ prompt_format = "{user}@{host} {cwd} {symbol}"
 [theme]
 current_theme = "default"      # default | dark | light | colorful
 
+[editor]
+edit_mode = "emacs"          # emacs | vi
+
 [aliases]
 ll = "ls -la"
 la = "ls -a"
@@ -97,7 +100,7 @@ completion_dirs = [
 
 ## 状态
 
-当前分支 `rewrite/v2-rubash` 是 v1：核心 REPL + 补全 + 主题 + 配置。插件框架、Oh-My-Winuxsh、Vi 模式、`Ctrl+R` 历史搜索将在后续迭代中实现。
+当前分支 `rewrite/v2-rubash` 是 v1：核心 REPL + 补全 + 主题 + 配置。Vi 模式和 `Ctrl+R` 历史搜索已在 v2.2 可用；插件框架和 Oh-My-Winuxsh 将在后续迭代中实现。
 
 ## 许可
 

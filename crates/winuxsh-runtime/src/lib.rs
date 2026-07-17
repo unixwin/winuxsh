@@ -14,7 +14,7 @@ pub mod theme;
 pub mod winuxcmd;
 
 pub use shell::Shell;
-pub use config::ShellConfig;
+pub use config::{EditorConfig, EditorMode, ShellConfig};
 pub use theme::Theme;
 pub use completion::WinuxshCompleter;
 pub use completion::CompletionState;
