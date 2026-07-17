@@ -7,18 +7,24 @@ use winuxsh_runtime::config::ZshCompatLevel;
 use winuxsh_runtime::zsh_compat::{
     apply_safe_aliases, apply_safe_env, completion_defs_from_report, safe_path_value,
     CompletionAsset, DiagnosticSeverity, ImportedAlias, ImportedEnv, ZshImportOptions,
-    ZshImportReport, scan,
+    ZshImportReport, PluginImportKind, PluginImportTier, scan,
 };
 
 #[test]
 fn scans_zshrc_and_oh_my_zsh_plugin_assets() {
     let temp = unique_temp_dir("winuxsh-zsh-compat");
     let omz = temp.join(".oh-my-zsh");
-    let plugin_dir = omz.join("plugins").join("git");
-    std::fs::create_dir_all(&plugin_dir).unwrap();
+    let git_plugin_dir = omz.join("plugins").join("git");
+    let alias_plugin_dir = omz.join("plugins").join("alias-only");
+    let completion_plugin_dir = omz.join("plugins").join("completion-only");
+    let native_plugin_dir = omz.join("plugins").join("zsh-autosuggestions");
+    std::fs::create_dir_all(&git_plugin_dir).unwrap();
+    std::fs::create_dir_all(&alias_plugin_dir).unwrap();
+    std::fs::create_dir_all(&completion_plugin_dir).unwrap();
+    std::fs::create_dir_all(&native_plugin_dir).unwrap();
 
     std::fs::write(
-        plugin_dir.join("git.plugin.zsh"),
+        git_plugin_dir.join("git.plugin.zsh"),
         r#"
 alias gst='git status'
 compdef _git gst=git-status
@@ -26,7 +32,22 @@ zle -N git_widget
 "#,
     )
     .unwrap();
-    std::fs::write(plugin_dir.join("_git"), "#compdef git gst\n").unwrap();
+    std::fs::write(git_plugin_dir.join("_git"), "#compdef git gst\n").unwrap();
+    std::fs::write(
+        alias_plugin_dir.join("alias-only.plugin.zsh"),
+        "alias gco='git checkout'\n",
+    )
+    .unwrap();
+    std::fs::write(
+        completion_plugin_dir.join("_ztarget"),
+        "#compdef ztarget\n_arguments '--example[example flag]'\n",
+    )
+    .unwrap();
+    std::fs::write(
+        native_plugin_dir.join("zsh-autosuggestions.plugin.zsh"),
+        "BUFFER=${BUFFER}\n",
+    )
+    .unwrap();
 
     let omz_text = omz.to_string_lossy().replace('\\', "/");
     std::fs::write(
@@ -35,7 +56,7 @@ zle -N git_widget
             r#"
 export ZSH="{}"
 ZSH_THEME="robbyrussell"
-plugins=(git zsh-autosuggestions)
+plugins=(git alias-only completion-only zsh-autosuggestions missing-plugin)
 alias ll='ls -l'
 export PATH="$HOME/bin:$PATH"
 fpath=("$ZSH/custom/completions" $fpath)
@@ -62,12 +83,52 @@ source $ZSH/oh-my-zsh.sh
     assert!(report.oh_my_zsh_detected);
     assert!(report.aliases.iter().any(|alias| alias.name == "ll" && alias.value == "ls -l"));
     assert!(report.aliases.iter().any(|alias| alias.name == "gst" && alias.value == "git status"));
-    assert!(report.plugins.iter().any(|plugin| plugin.name == "git" && plugin.source_dir.is_some()));
-    assert!(report.plugins.iter().any(|plugin| plugin.name == "zsh-autosuggestions" && plugin.source_dir.is_none()));
+    assert!(report.aliases.iter().any(|alias| {
+        alias.name == "gco" && alias.value == "git checkout" && alias.origin == "plugin"
+    }));
+
+    let git = plugin(&report, "git");
+    assert!(git.source_dir.is_some());
+    assert_eq!(git.import_kind, PluginImportKind::Partial);
+    assert_eq!(git.tier, PluginImportTier::Tier2Partial);
+    assert!(git.capabilities.iter().any(|cap| cap == "aliases"));
+    assert!(git.capabilities.iter().any(|cap| cap == "static_completions"));
+    assert!(git
+        .unsupported_features
+        .iter()
+        .any(|feature| feature == "zle"));
+
+    let alias_only = plugin(&report, "alias-only");
+    assert_eq!(alias_only.import_kind, PluginImportKind::AliasOnly);
+    assert_eq!(alias_only.tier, PluginImportTier::Tier1Safe);
+
+    let completion_only = plugin(&report, "completion-only");
+    assert_eq!(
+        completion_only.import_kind,
+        PluginImportKind::CompletionOnly
+    );
+    assert_eq!(completion_only.tier, PluginImportTier::Tier1Safe);
+
+    let native = plugin(&report, "zsh-autosuggestions");
+    assert_eq!(native.import_kind, PluginImportKind::NativeUx);
+    assert_eq!(native.tier, PluginImportTier::Tier3Native);
+    assert!(native
+        .capabilities
+        .iter()
+        .any(|capability| capability == "native_ux_required"));
+
+    let missing = plugin(&report, "missing-plugin");
+    assert_eq!(missing.import_kind, PluginImportKind::Missing);
+    assert_eq!(missing.tier, PluginImportTier::Missing);
+
     assert!(report
         .completion_assets
         .iter()
         .any(|asset| asset.commands.iter().any(|cmd| cmd == "git")));
+    assert!(report
+        .completion_assets
+        .iter()
+        .any(|asset| asset.commands.iter().any(|cmd| cmd == "ztarget")));
     assert!(report
         .zstyles
         .iter()
@@ -263,6 +324,17 @@ fn unique_temp_dir(prefix: &str) -> PathBuf {
         .unwrap()
         .as_nanos();
     std::env::temp_dir().join(format!("{}-{}-{}", prefix, std::process::id(), nanos))
+}
+
+fn plugin<'a>(
+    report: &'a ZshImportReport,
+    name: &str,
+) -> &'a winuxsh_runtime::zsh_compat::ImportedPlugin {
+    report
+        .plugins
+        .iter()
+        .find(|plugin| plugin.name == name)
+        .unwrap_or_else(|| panic!("expected plugin {name}, got {:?}", report.plugins))
 }
 
 fn env_lock() -> &'static Mutex<()> {

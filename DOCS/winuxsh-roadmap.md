@@ -74,7 +74,7 @@ status: active
 - [x] zsh compat report CLI: 先输出扫描报告，不自动修改启动行为
 - [x] zsh profile scanner/apply 第一层: `[zsh].auto_apply` 安全导入 `.zshrc` env/PATH/alias
 - [x] Oh My Zsh layout importer Phase 2a: 静态 `_cmd` / `#compdef` / `_arguments` completion 资产翻译
-- [ ] zsh plugin tier importer Phase 2b: 优先导入 completion-only / alias-only 插件
+- [x] zsh plugin tier importer Phase 2b: 插件分层报告 completion-only / alias-only / native-needed / unsupported
 - [ ] 原生 autosuggestions: 参考 zsh-autosuggestions，用 reedline 实现
 - [ ] 原生 syntax highlighting: 参考 zsh-syntax-highlighting，用 rubash/reedline 实现
 

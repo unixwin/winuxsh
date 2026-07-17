@@ -165,6 +165,12 @@ Plugin compatibility should be tiered:
 | 3 | zsh-autosuggestions / zsh-syntax-highlighting | native reedline/rubash implementation |
 | 4 | ZLE widgets, `zmodload`, `zpty`, deep zsh internals | report and skip |
 
+Implementation status: Phase 2b is implemented on `codex/zsh-compat-scanner`.
+The import report now includes explicit plugin tier metadata:
+`completion_only`, `alias_only`, `alias_and_completion`, `native_ux`,
+`partial`, `unsupported`, and `missing`. This keeps startup safe while giving
+users and agents a concrete compatibility map for common Oh My Zsh plugins.
+
 ## Phase 3 - Zsh Completion Compatibility
 
 Add an importer for zsh completion files:

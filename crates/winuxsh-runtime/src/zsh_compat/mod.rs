@@ -91,8 +91,10 @@ impl ZshImportReport {
             out.push("plugins detail:".to_string());
             for plugin in &self.plugins {
                 out.push(format!(
-                    "  - {} aliases={} completions={} dir={}",
+                    "  - {} kind={:?} tier={:?} aliases={} completions={} dir={}",
                     plugin.name,
+                    plugin.import_kind,
+                    plugin.tier,
                     plugin.alias_count,
                     plugin.completion_files.len(),
                     plugin
@@ -156,6 +158,32 @@ pub struct ImportedPlugin {
     pub completion_files: Vec<PathBuf>,
     pub alias_count: usize,
     pub diagnostics_count: usize,
+    pub tier: PluginImportTier,
+    pub import_kind: PluginImportKind,
+    pub capabilities: Vec<String>,
+    pub unsupported_features: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginImportTier {
+    Tier1Safe,
+    Tier2Partial,
+    Tier3Native,
+    Tier4Unsupported,
+    Missing,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginImportKind {
+    CompletionOnly,
+    AliasOnly,
+    AliasAndCompletion,
+    NativeUx,
+    Partial,
+    Unsupported,
+    Missing,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -520,14 +548,7 @@ fn scan_oh_my_zsh_layout(
             .find(|path| path.is_dir());
 
         let Some(source_dir) = source_dir else {
-            report.plugins.push(ImportedPlugin {
-                name: plugin_name,
-                source_dir: None,
-                plugin_script: None,
-                completion_files: Vec::new(),
-                alias_count: 0,
-                diagnostics_count: 1,
-            });
+            report.plugins.push(unresolved_plugin(plugin_name, 1));
             continue;
         };
 
@@ -562,15 +583,143 @@ fn scan_oh_my_zsh_layout(
             }
         }
 
+        let alias_count = report.aliases.len().saturating_sub(alias_before);
+        let diagnostics_count = report.diagnostics.len().saturating_sub(diagnostics_before);
+        let unsupported_features =
+            unsupported_features_since(&report.diagnostics, diagnostics_before);
+        let (tier, import_kind, capabilities) = classify_plugin(
+            &plugin_name,
+            alias_count,
+            !completion_files.is_empty(),
+            plugin_script.is_some(),
+            &unsupported_features,
+        );
+
         report.plugins.push(ImportedPlugin {
             name: plugin_name,
             source_dir: Some(source_dir),
             plugin_script,
             completion_files,
-            alias_count: report.aliases.len().saturating_sub(alias_before),
-            diagnostics_count: report.diagnostics.len().saturating_sub(diagnostics_before),
+            alias_count,
+            diagnostics_count,
+            tier,
+            import_kind,
+            capabilities,
+            unsupported_features,
         });
     }
+}
+
+fn unresolved_plugin(name: String, diagnostics_count: usize) -> ImportedPlugin {
+    ImportedPlugin {
+        name,
+        source_dir: None,
+        plugin_script: None,
+        completion_files: Vec::new(),
+        alias_count: 0,
+        diagnostics_count,
+        tier: PluginImportTier::Missing,
+        import_kind: PluginImportKind::Missing,
+        capabilities: Vec::new(),
+        unsupported_features: Vec::new(),
+    }
+}
+
+fn classify_plugin(
+    name: &str,
+    alias_count: usize,
+    has_completion: bool,
+    has_script: bool,
+    unsupported_features: &[String],
+) -> (PluginImportTier, PluginImportKind, Vec<String>) {
+    let has_aliases = alias_count > 0;
+    let has_safe_assets = has_aliases || has_completion;
+    let has_unsupported = !unsupported_features.is_empty();
+    let native_ux = is_native_ux_plugin(name)
+        || unsupported_features
+            .iter()
+            .any(|feature| matches!(feature.as_str(), "zle-buffer" | "zle-highlighting"));
+
+    let mut capabilities = Vec::new();
+    if has_aliases {
+        capabilities.push("aliases".to_string());
+    }
+    if has_completion {
+        capabilities.push("static_completions".to_string());
+    }
+    if native_ux {
+        capabilities.push("native_ux_required".to_string());
+    }
+    if has_unsupported {
+        capabilities.push("unsupported_zsh_internals".to_string());
+    }
+    if has_script && !has_safe_assets && !has_unsupported {
+        capabilities.push("script_unclassified".to_string());
+    }
+
+    if native_ux {
+        return (PluginImportTier::Tier3Native, PluginImportKind::NativeUx, capabilities);
+    }
+    if has_unsupported && has_safe_assets {
+        return (PluginImportTier::Tier2Partial, PluginImportKind::Partial, capabilities);
+    }
+    if has_unsupported {
+        return (
+            PluginImportTier::Tier4Unsupported,
+            PluginImportKind::Unsupported,
+            capabilities,
+        );
+    }
+
+    match (has_aliases, has_completion) {
+        (true, true) => (
+            PluginImportTier::Tier1Safe,
+            PluginImportKind::AliasAndCompletion,
+            capabilities,
+        ),
+        (true, false) => (
+            PluginImportTier::Tier1Safe,
+            PluginImportKind::AliasOnly,
+            capabilities,
+        ),
+        (false, true) => (
+            PluginImportTier::Tier1Safe,
+            PluginImportKind::CompletionOnly,
+            capabilities,
+        ),
+        (false, false) => (
+            PluginImportTier::Tier2Partial,
+            PluginImportKind::Partial,
+            capabilities,
+        ),
+    }
+}
+
+fn unsupported_features_since(
+    diagnostics: &[ZshCompatDiagnostic],
+    start_index: usize,
+) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut features = Vec::new();
+    for diagnostic in diagnostics.iter().skip(start_index) {
+        if diagnostic.severity == DiagnosticSeverity::Unsupported
+            && seen.insert(diagnostic.feature.clone())
+        {
+            features.push(diagnostic.feature.clone());
+        }
+    }
+    features
+}
+
+fn is_native_ux_plugin(name: &str) -> bool {
+    matches!(
+        name,
+        "zsh-autosuggestions"
+            | "zsh-syntax-highlighting"
+            | "fast-syntax-highlighting"
+            | "zsh-history-substring-search"
+            | "fzf-tab"
+    )
 }
 
 fn logical_lines(content: &str) -> Vec<(usize, String)> {
@@ -797,14 +946,7 @@ fn add_plugins(report: &mut ZshImportReport, plugins: Vec<String>) {
             continue;
         }
         if seen.insert(name.clone()) {
-            report.plugins.push(ImportedPlugin {
-                name,
-                source_dir: None,
-                plugin_script: None,
-                completion_files: Vec::new(),
-                alias_count: 0,
-                diagnostics_count: 0,
-            });
+            report.plugins.push(unresolved_plugin(name, 0));
         }
     }
 }
