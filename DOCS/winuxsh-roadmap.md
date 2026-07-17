@@ -6,7 +6,7 @@ status: active
 
 # Winuxsh Roadmap
 
-> 在 Windows 上还原 bash/zsh 使用体验的 Shell
+> Windows 原生、无隔离、给人和 agent 使用的 bash/zsh-like 终端
 > 核心公式: winuxsh = rubash (shell 引擎) + winuxcmd.exe (coreutils) + reedline (REPL)
 
 ## 已完成 (v2 重写)
@@ -48,6 +48,10 @@ status: active
 - [ ] 每个功能阶段先更新 Markdown 计划，再小步实现、测试、提交（v2.2 实施中）
 - [x] Obsidian vault 中维护 `winuxsh/` 文件夹作为项目长期记忆
 - [x] Nushell reference audit 落盘: `DOCS/nushell-reference-audit.md`
+- [x] zsh / Oh My Zsh / zsh 插件 reference audit 落盘: `DOCS/zsh-reference-audit.md`
+- [x] zsh-first 功能定位与现代 shell reference map 落盘: `DOCS/winuxsh-positioning-and-feature-map.md`
+- [x] Windows 原生 agent/user terminal 下一步计划落盘: `DOCS/winuxsh-next-development-plan.md`
+- [x] zsh 配置与插件兼容计划落盘: `DOCS/zsh-compatibility-plan.md`
 - [x] Phase 0 hygiene: 清理误建的空 `--help` 目录，保留 `.tmp/` 未跟踪
 
 ### 补全系统增强
@@ -66,6 +70,11 @@ status: active
 - [x] Ctrl+R 历史搜索 (reedline 原生)
 - [ ] 更多 prompt 自定义模板
 - [x] Phase 6 themes: 用户自定义主题加载 (从 ~/.winuxsh/themes/)
+- [ ] zsh profile scanner: 安全导入 `.zshrc` 常见配置
+- [ ] Oh My Zsh layout importer: 识别 `plugins=(...)`、主题、completion assets
+- [ ] zsh plugin tier importer: 优先导入 completion-only / alias-only 插件
+- [ ] 原生 autosuggestions: 参考 zsh-autosuggestions，用 reedline 实现
+- [ ] 原生 syntax highlighting: 参考 zsh-syntax-highlighting，用 rubash/reedline 实现
 
 ## 长期 - v3
 
@@ -78,10 +87,12 @@ status: active
 ### Oh-My-Winuxsh
 - [ ] 主题市场
 - [ ] 插件管理 CLI
+- [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
-### 作业控制
-- [ ] 前台/后台任务管理
-- [ ] jobs / fg / bg / kill 内建命令
+### Rubash 能力验证
+- [ ] 梳理 rubash 已通过的 bash 上游测试能力矩阵
+- [ ] 为 winuxsh host 层补充 PATH/env/cwd/home/stdout/stderr/exit-code 嵌入测试
+- [ ] 作业控制/内建命令语义优先走 rubash，不在 winuxsh 重复实现
 
 ## 关键架构决策 (锁定)
 
@@ -96,4 +107,4 @@ status: active
 
 ---
 
-参见: architecture.md | v2-plan.md | rubash-pr-windows-path.md | winuxsh-v2.2-reference-plan.md | winuxsh-v3-plan.md
+参见: architecture.md | v2-plan.md | rubash-pr-windows-path.md | winuxsh-v2.2-reference-plan.md | winuxsh-v3-plan.md | winuxsh-positioning-and-feature-map.md | winuxsh-next-development-plan.md | zsh-reference-audit.md | zsh-compatibility-plan.md

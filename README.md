@@ -2,9 +2,9 @@
 
 [中文](README-zh.md) | English
 
-A bash-compatible shell for Windows, built on [rubash](https://github.com/unixwin/rubash) + [winuxcmd](https://github.com/unixwin/WinuxCmd).
+A Windows-native bash/zsh-like terminal for humans and agents, built on [rubash](https://github.com/unixwin/rubash) + [winuxcmd](https://github.com/unixwin/WinuxCmd).
 
-Winuxsh does not implement its own shell language. Instead it acts as the Windows-facing interactive layer on top of `rubash` (the bash-compatible engine) and routes Unix utility calls through `winuxcmd.exe` via `PATH` injection. Winuxsh itself owns the experience layer: reedline REPL, completion system, theming, configuration, Ctrl+C handling, and Windows integration.
+Winuxsh does not implement its own shell language. Instead it acts as the Windows-native interactive and non-interactive terminal host on top of `rubash` (the bash-compatible engine) and routes Unix utility calls through `winuxcmd.exe` via `PATH` injection. It is not MSYS2, Git Bash, Cygwin, WSL, PowerShell compatibility mode, or Nushell semantics. `~` is the normal Windows user home, and env/PATH/cwd/stdout/stderr/exit-code remain native Windows process state.
 
 ## Architecture
 
@@ -132,7 +132,7 @@ Winuxsh inherits the MVP6 completion stack:
 
 ## Status
 
-This branch (`rewrite/v2-rubash`) is v1: core REPL + completion + theme + config. Vi mode and `Ctrl+R` history search are available in v2.2; the plugin framework and Oh-My-Winuxsh are tracked for later iterations.
+Current `master` is the rubash-backed rewrite: core REPL + completion + theme + config, plus v2.2 Vi mode, `Ctrl+R` history search, configured winuxcmd path, built-in winuxcmd completions, and user themes. Next work focuses on the Windows-native terminal contract, agent-friendly non-interactive behavior, and zsh-like UX polish.
 
 ## License
 

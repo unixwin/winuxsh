@@ -1,10 +1,12 @@
 # Winuxsh v2 Architecture
 
-> 基于 rubash + winuxcmd 的 Windows bash 兼容 Shell
+> 基于 rubash + winuxcmd 的 Windows 原生 bash/zsh-like terminal
 
 ## 项目定位
 
-winuxsh 是一个 Windows 原生 bash 兼容 shell，**不自己实现 shell 语言**，而是作为 **rubash lib**（bash 兼容引擎）的交互式前端 + **winuxcmd**（coreutils）的路由层。它的核心价值在于 Windows 集成体验：reedline REPL、补全系统、主题系统、Ctrl+C 处理、终端集成。
+winuxsh 是一个 Windows 原生、无隔离、给人和 agent 都可以直接使用的 bash/zsh-like terminal。它**不自己实现 shell 语言**，而是作为 **rubash lib**（bash 兼容引擎）的交互式前端 + **winuxcmd**（coreutils）的路由层。它的核心价值在于 Windows 原生进程/环境体验：reedline REPL、补全系统、主题系统、Ctrl+C 处理、终端集成，以及稳定的非交互式 agent 执行契约。
+
+winuxsh 不是 MSYS2、Git Bash、Cygwin 或 WSL 风格的隔离环境。`~` 指向普通 Windows 用户 home（PowerShell 中的 home / `USERPROFILE` / `dirs::home_dir()`），PATH、cwd、env、stdout、stderr、exit code 都是正常 Windows 进程状态。
 
 ## 三层架构
 
@@ -125,11 +127,12 @@ winuxsh/
 
 ## 版本规划
 
-- v1: 核心 REPL + 补全 + 主题 + 配置（当前分支）
-- v2: 插件框架 + Oh-My-Winuxsh
-- v3: 作业控制 UI 增强 + Vi mode
-- 未来: 跨平台 (Windows/Linux/macOS 共用 rubash 引擎)
+- v2.2: rubash rewrite 稳定化、补全增强、Vi/Ctrl+R、配置一致性、用户主题
+- v2.3: Windows 原生 terminal contract、agent 友好的非交互式行为、history/prompt/completion UX
+- v2.4: zsh-like 交互体验 polish（右 prompt、提示、补全菜单、默认配置）
+- v3: 插件/Oh-My-Winuxsh/package layer；shell 语义与作业控制仍优先由 rubash 提供
+- 非目标: Linux/macOS 原生 shell 产品；rubash 可跨平台复用，但 winuxsh 产品目标是 Windows
 
 ---
 
-*Last updated: 2026-07-13*
+*Last updated: 2026-07-17*

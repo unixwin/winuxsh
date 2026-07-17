@@ -2,9 +2,9 @@
 
 中文 | [English](README.md)
 
-一个面向 Windows 的 bash 兼容 shell，基于 [rubash](https://github.com/unixwin/rubash) + [winuxcmd](https://github.com/unixwin/WinuxCmd) 构建。
+一个面向人类用户和 agent 的 Windows 原生 bash/zsh-like terminal，基于 [rubash](https://github.com/unixwin/rubash) + [winuxcmd](https://github.com/unixwin/WinuxCmd) 构建。
 
-Winuxsh 不自己实现 shell 语言，而是作为 rubash（bash 兼容引擎）的 Windows 交互式前端，并通过 `PATH` 注入把 Unix 工具调用路由到 `winuxcmd.exe`。Winuxsh 自身负责体验层：reedline REPL、补全系统、主题、配置、Ctrl+C 处理、Windows 集成。
+Winuxsh 不自己实现 shell 语言，而是作为 rubash（bash 兼容引擎）的 Windows 原生交互式/非交互式终端宿主，并通过 `PATH` 注入把 Unix 工具调用路由到 `winuxcmd.exe`。它不是 MSYS2、Git Bash、Cygwin、WSL、PowerShell 兼容层，也不采用 Nushell 语义。`~` 就是普通 Windows 用户 home，env/PATH/cwd/stdout/stderr/exit-code 都保持 Windows 原生进程状态。
 
 ## 架构
 
@@ -132,7 +132,7 @@ fg = "green"
 
 ## 状态
 
-当前分支 `rewrite/v2-rubash` 是 v1：核心 REPL + 补全 + 主题 + 配置。Vi 模式和 `Ctrl+R` 历史搜索已在 v2.2 可用；插件框架和 Oh-My-Winuxsh 将在后续迭代中实现。
+当前 `master` 是 rubash-backed rewrite：核心 REPL + 补全 + 主题 + 配置，并已具备 v2.2 的 Vi 模式、`Ctrl+R` 历史搜索、可配置 winuxcmd 路径、内置 winuxcmd 补全和用户主题。下一步重点是 Windows 原生 terminal contract、agent 友好的非交互式行为，以及 zsh-like 交互体验 polish。
 
 ## 许可
 
