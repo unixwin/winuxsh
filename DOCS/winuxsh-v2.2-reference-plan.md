@@ -70,6 +70,12 @@ status: active
 
 ## v2.2 Execution Plan
 
+### Phase 0 - Preflight / Hygiene
+
+- [x] Removed the empty untracked `--help` directory created by accidental PowerShell alias probing.
+- [x] Kept `.tmp/` untracked and out of commits.
+- [x] Confirmed current local branch state is `master...origin/master [ahead 2]` before v2.2 implementation work.
+
 ### Phase 0 - Reference Audit
 
 - [x] Clone/read Nushell source outside the repository.
@@ -83,13 +89,14 @@ status: active
 
 ### Phase 1 - Completion Foundation
 
-- Fix the stale completion integration test.
-- Add bundled default completion definitions for a small first batch:
+- [x] Fix the stale completion integration test.
+- [ ] Add bundled default completion definitions for a small first batch:
   - `ls`
   - `grep`
   - `find`
-- Add tests proving bundled definitions load without user config and user TOML dirs still work.
-- Keep definitions derived from winuxcmd `--help` output or pinned WinuxCmd source/tag.
+- [ ] Add tests proving bundled definitions load without user config and user TOML dirs still work.
+- [ ] Keep definitions derived from `winuxcmd.exe <cmd> --help` output or pinned WinuxCmd source/tag.
+- Verification: `cargo fmt --check`, `cargo test --lib -p winuxsh-runtime --locked`, and `cargo test -p winuxsh-runtime --test completion --locked` passed.
 
 ### Phase 2 - Completion Expansion
 

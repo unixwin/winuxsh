@@ -45,11 +45,13 @@ status: active
 
 ### 工作方式
 - [x] 先做 Nushell / 现代 Windows shell reference audit，仅参考设计，不引入 Nushell 依赖，不 vendor 外部源码
-- [ ] 每个功能阶段先更新 Markdown 计划，再小步实现、测试、提交
+- [ ] 每个功能阶段先更新 Markdown 计划，再小步实现、测试、提交（v2.2 实施中）
 - [x] Obsidian vault 中维护 `winuxsh/` 文件夹作为项目长期记忆
 - [x] Nushell reference audit 落盘: `DOCS/nushell-reference-audit.md`
+- [x] Phase 0 hygiene: 清理误建的空 `--help` 目录，保留 `.tmp/` 未跟踪
 
 ### 补全系统增强
+- [x] Phase 1 baseline: 修复 completion integration test stale API (`load_completion_dirs`)
 - [ ] 扩充默认 TOML 补全定义的命令覆盖范围
 - [ ] bash 自动导入覆盖更复杂的 complete 调用模式
 - [ ] 补全三级缓存的 TTL/失效策略

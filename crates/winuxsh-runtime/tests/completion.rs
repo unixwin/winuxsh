@@ -19,7 +19,7 @@ fn loads_toml_definitions_from_dir() {
     let state = Arc::new(Mutex::new(CompletionState::new(PathBuf::from("."))));
     {
         let mut s = state.lock().unwrap();
-        s.load_completion_dir(&[fixture_dir]);
+        s.load_completion_dirs(&[fixture_dir]);
     }
 
     // Build a context where the cursor is right after `rg -`
