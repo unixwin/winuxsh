@@ -254,6 +254,12 @@ fn cache_key_to_filename(key: &str) -> String {
 // ExternalCompletionPlugin
 // ─────────────────────────────────────────────────────────────────────────────
 
+const DEFAULT_COMPLETION_DEFS: &[(&str, &str)] = &[
+    ("ls", include_str!("../../completions/defaults/ls.toml")),
+    ("grep", include_str!("../../completions/defaults/grep.toml")),
+    ("find", include_str!("../../completions/defaults/find.toml")),
+];
+
 /// Completion plugin that reads per-command completion definitions from a
 /// directory of TOML files and provides flag/argument completion for them.
 pub struct ExternalCompletionPlugin {
@@ -277,19 +283,39 @@ impl ExternalCompletionPlugin {
         self.definitions.keys().map(|s| s.as_str()).collect()
     }
 
-    /// Create an empty plugin (no definitions loaded).
+    /// Create a plugin with bundled winuxcmd completion definitions loaded.
     pub fn new() -> Self {
-        Self {
+        let mut plugin = Self {
             definitions: HashMap::new(),
             mem_cache: Mutex::new(HashMap::new()),
             cache_dir: resolve_cache_dir(),
+        };
+        plugin.load_builtin_defaults();
+        plugin
+    }
+
+    fn load_builtin_defaults(&mut self) {
+        for (name, contents) in DEFAULT_COMPLETION_DEFS {
+            match toml::from_str::<CommandDef>(contents) {
+                Ok(def) => {
+                    self.definitions.insert(def.command.clone(), def);
+                }
+                Err(e) => {
+                    log::warn!(
+                        "ExternalCompletionPlugin: failed to load built-in definition {}: {}",
+                        name,
+                        e
+                    );
+                }
+            }
         }
     }
 
     /// Load all `*.toml` and `*.bash` definition files from `dir`.
     ///
     /// Load order / priority:
-    ///   1. `*.toml` files are loaded first and take **highest priority**.
+    ///   0. Built-in winuxcmd defaults are loaded at construction time.
+    ///   1. User `*.toml` files are loaded first and take **highest priority**.
     ///      A user-written `fd.toml` will suppress auto-import of `fd.bash`.
     ///   2. `*.bash` files whose stem has no matching `.toml` are auto-imported.
     ///      The parsed result is written to the cache dir as

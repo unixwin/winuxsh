@@ -90,20 +90,20 @@ status: active
 ### Phase 1 - Completion Foundation
 
 - [x] Fix the stale completion integration test.
-- [ ] Add bundled default completion definitions for a small first batch:
+- [x] Add bundled default completion definitions for a small first batch:
   - `ls`
   - `grep`
   - `find`
-- [ ] Add tests proving bundled definitions load without user config and user TOML dirs still work.
-- [ ] Keep definitions derived from `winuxcmd.exe <cmd> --help` output or pinned WinuxCmd source/tag.
+- [x] Add tests proving bundled definitions load without user config and user TOML dirs still work.
+- [x] Keep definitions derived from `winuxcmd.exe <cmd> --help` output or pinned WinuxCmd source/tag.
 - Verification: `cargo fmt --check`, `cargo test --lib -p winuxsh-runtime --locked`, and `cargo test -p winuxsh-runtime --test completion --locked` passed.
 
 ### Phase 2 - Completion Expansion
 
-- Expand default definitions after the foundation is green:
+- [ ] Expand default definitions after the foundation is green:
   - `cat`, `cp`, `mv`, `rm`, `mkdir`, `touch`, `chmod`
-- Treat `tar` separately because behavior may come from bundled bsdtar/system tar; verify implementation before defining options.
-- Add value completions only where the value domain is clear and stable.
+- [ ] Treat `tar` separately because behavior may come from bundled bsdtar/system tar; verify implementation before defining options.
+- [ ] Add value completions only where the value domain is clear and stable.
 
 ### Phase 3 - Edit Mode UX
 

@@ -5,6 +5,7 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 use winuxsh_runtime::completion::{CompletionContext, CompletionState};
 
 #[test]
@@ -49,4 +50,81 @@ fn loads_toml_definitions_from_dir() {
         "expected --type in suggestions, got: {:?}",
         suggestions
     );
+}
+
+#[test]
+fn loads_builtin_winuxcmd_definitions_without_user_dirs() {
+    let state = Arc::new(Mutex::new(CompletionState::new(PathBuf::from("."))));
+    {
+        let mut s = state.lock().unwrap();
+        s.load_completion_dirs(&[]);
+    }
+
+    assert_suggests(&state, "ls -", "--all");
+    assert_suggests(&state, "grep -", "--ignore-case");
+    assert_suggests(&state, "find -", "-name");
+}
+
+#[test]
+fn user_toml_overrides_builtin_definition() {
+    let temp_dir = unique_temp_dir("winuxsh-completion-override");
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    std::fs::write(
+        temp_dir.join("ls.toml"),
+        r#"
+command = "ls"
+description = "test override"
+
+[[flags]]
+long = "--custom-only"
+description = "fixture override flag"
+"#,
+    )
+    .unwrap();
+
+    let state = Arc::new(Mutex::new(CompletionState::new(PathBuf::from("."))));
+    {
+        let mut s = state.lock().unwrap();
+        s.load_completion_dirs(&[temp_dir.clone()]);
+    }
+
+    assert_suggests(&state, "ls -", "--custom-only");
+    assert_not_suggests(&state, "ls -", "--all");
+
+    let _ = std::fs::remove_dir_all(temp_dir);
+}
+
+fn suggestions_for(state: &Arc<Mutex<CompletionState>>, input: &str) -> Vec<String> {
+    let ctx = CompletionContext::new(PathBuf::from("."), input.to_string(), input.len());
+    let s = state.lock().unwrap();
+    s.plugins
+        .iter()
+        .flat_map(|p| p.complete(&ctx).map(|r| r.completions).unwrap_or_default())
+        .collect()
+}
+
+fn assert_suggests(state: &Arc<Mutex<CompletionState>>, input: &str, expected: &str) {
+    let suggestions = suggestions_for(state, input);
+    assert!(
+        suggestions.iter().any(|s| s == expected),
+        "expected {expected} for {input:?}, got: {:?}",
+        suggestions
+    );
+}
+
+fn assert_not_suggests(state: &Arc<Mutex<CompletionState>>, input: &str, unexpected: &str) {
+    let suggestions = suggestions_for(state, input);
+    assert!(
+        !suggestions.iter().any(|s| s == unexpected),
+        "did not expect {unexpected} for {input:?}, got: {:?}",
+        suggestions
+    );
+}
+
+fn unique_temp_dir(prefix: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    std::env::temp_dir().join(format!("{}-{}-{}", prefix, std::process::id(), nanos))
 }
