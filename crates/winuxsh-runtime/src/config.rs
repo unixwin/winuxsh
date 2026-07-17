@@ -82,6 +82,7 @@ pub struct ZshConfig {
     pub compat_level: ZshCompatLevel,
     pub auto_apply: bool,
     pub autosuggestions: AutosuggestConfig,
+    pub syntax_highlighting: SyntaxHighlightConfig,
 }
 
 impl Default for ZshConfig {
@@ -95,6 +96,7 @@ impl Default for ZshConfig {
             compat_level: ZshCompatLevel::Safe,
             auto_apply: false,
             autosuggestions: AutosuggestConfig::default(),
+            syntax_highlighting: SyntaxHighlightConfig::default(),
         }
     }
 }
@@ -165,6 +167,83 @@ fn parse_autosuggest_strategy_value(value: &str) -> Vec<String> {
         .collect()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyntaxHighlightConfig {
+    pub enabled: bool,
+    pub highlighters: Vec<String>,
+    pub max_length: Option<usize>,
+    pub styles: HashMap<String, String>,
+}
+
+impl Default for SyntaxHighlightConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            highlighters: vec!["main".to_string()],
+            max_length: None,
+            styles: HashMap::new(),
+        }
+    }
+}
+
+impl SyntaxHighlightConfig {
+    pub fn with_env_overrides(mut self) -> Self {
+        if let Ok(value) = std::env::var("ZSH_HIGHLIGHT_HIGHLIGHTERS") {
+            let highlighters = parse_zsh_arrayish_value(&value);
+            if !highlighters.is_empty() {
+                self.highlighters = highlighters;
+            }
+        }
+        if let Ok(value) = std::env::var("ZSH_HIGHLIGHT_MAXLENGTH") {
+            match value.trim().parse::<usize>() {
+                Ok(max_length) => self.max_length = Some(max_length),
+                Err(err) => log::warn!("Invalid ZSH_HIGHLIGHT_MAXLENGTH '{}': {}", value, err),
+            }
+        }
+        if let Ok(value) = std::env::var("ZSH_HIGHLIGHT_STYLES") {
+            for (key, value) in parse_zsh_style_map_value(&value) {
+                self.styles.insert(key, value);
+            }
+        }
+        self
+    }
+
+    pub fn main_highlighter_enabled(&self) -> bool {
+        self.enabled
+            && self
+                .highlighters
+                .iter()
+                .any(|highlighter| highlighter.eq_ignore_ascii_case("main"))
+    }
+}
+
+fn parse_zsh_arrayish_value(value: &str) -> Vec<String> {
+    value
+        .trim()
+        .trim_start_matches('(')
+        .trim_end_matches(')')
+        .split(|ch: char| ch.is_whitespace() || ch == ',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(|part| part.trim_matches('"').trim_matches('\'').to_ascii_lowercase())
+        .collect()
+}
+
+fn parse_zsh_style_map_value(value: &str) -> Vec<(String, String)> {
+    value
+        .split(';')
+        .filter_map(|entry| {
+            let (key, value) = entry.split_once('=')?;
+            let key = key.trim();
+            let value = value.trim();
+            if key.is_empty() || value.is_empty() {
+                return None;
+            }
+            Some((key.to_ascii_lowercase(), value.to_string()))
+        })
+        .collect()
+}
+
 /// Top-level TOML structure.
 #[derive(Debug, Deserialize)]
 struct WinshrcToml {
@@ -212,6 +291,7 @@ struct ZshToml {
     compat_level: Option<String>,
     auto_apply: Option<bool>,
     autosuggestions: Option<AutosuggestToml>,
+    syntax_highlighting: Option<SyntaxHighlightToml>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -220,6 +300,14 @@ struct AutosuggestToml {
     strategy: Option<Vec<String>>,
     highlight_style: Option<String>,
     buffer_max_size: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SyntaxHighlightToml {
+    enabled: Option<bool>,
+    highlighters: Option<Vec<String>>,
+    max_length: Option<usize>,
+    styles: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -316,6 +404,10 @@ fn build_zsh_config(parsed: ZshToml) -> ZshConfig {
             .autosuggestions
             .map(build_autosuggest_config)
             .unwrap_or_default(),
+        syntax_highlighting: parsed
+            .syntax_highlighting
+            .map(build_syntax_highlight_config)
+            .unwrap_or_default(),
     }
 }
 
@@ -326,6 +418,16 @@ fn build_autosuggest_config(parsed: AutosuggestToml) -> AutosuggestConfig {
         strategies: parsed.strategy.unwrap_or(defaults.strategies),
         highlight_style: parsed.highlight_style.unwrap_or(defaults.highlight_style),
         buffer_max_size: parsed.buffer_max_size,
+    }
+}
+
+fn build_syntax_highlight_config(parsed: SyntaxHighlightToml) -> SyntaxHighlightConfig {
+    let defaults = SyntaxHighlightConfig::default();
+    SyntaxHighlightConfig {
+        enabled: parsed.enabled.unwrap_or(defaults.enabled),
+        highlighters: parsed.highlighters.unwrap_or(defaults.highlighters),
+        max_length: parsed.max_length,
+        styles: parsed.styles.unwrap_or_default(),
     }
 }
 
@@ -383,6 +485,15 @@ enabled = true
 strategy = ["history", "completion"]
 highlight_style = "fg=#ff00ff,bg=cyan,bold,underline"
 buffer_max_size = 20
+
+[zsh.syntax_highlighting]
+enabled = true
+highlighters = ["main"]
+max_length = 512
+
+[zsh.syntax_highlighting.styles]
+command = "fg=green,bold"
+unknown-token = "fg=red,bold"
 "#,
         );
 
@@ -403,6 +514,13 @@ buffer_max_size = 20
             "fg=#ff00ff,bg=cyan,bold,underline"
         );
         assert_eq!(config.zsh.autosuggestions.buffer_max_size, Some(20));
+        assert!(config.zsh.syntax_highlighting.enabled);
+        assert_eq!(config.zsh.syntax_highlighting.highlighters, vec!["main"]);
+        assert_eq!(config.zsh.syntax_highlighting.max_length, Some(512));
+        assert_eq!(
+            config.zsh.syntax_highlighting.styles.get("command").unwrap(),
+            "fg=green,bold"
+        );
     }
 
     #[test]
@@ -428,5 +546,33 @@ buffer_max_size = 20
         config.enabled = true;
         config.strategies = vec!["completion".to_string()];
         assert!(!config.history_strategy_enabled());
+    }
+
+    #[test]
+    fn parses_zsh_highlight_array_and_style_map_values() {
+        assert_eq!(
+            parse_zsh_arrayish_value("(main brackets)"),
+            vec!["main", "brackets"]
+        );
+        assert_eq!(
+            parse_zsh_style_map_value("path=fg=cyan;command=fg=green,bold"),
+            vec![
+                ("path".to_string(), "fg=cyan".to_string()),
+                ("command".to_string(), "fg=green,bold".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn main_highlighter_requires_enabled_main() {
+        let mut config = SyntaxHighlightConfig::default();
+        assert!(config.main_highlighter_enabled());
+
+        config.enabled = false;
+        assert!(!config.main_highlighter_enabled());
+
+        config.enabled = true;
+        config.highlighters = vec!["brackets".to_string()];
+        assert!(!config.main_highlighter_enabled());
     }
 }

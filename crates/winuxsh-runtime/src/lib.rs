@@ -11,13 +11,15 @@ pub mod ctrl_c;
 pub mod prompt;
 pub mod repl;
 pub mod shell;
+pub mod syntax_highlighting;
 pub mod theme;
 pub mod winuxcmd;
 pub mod zsh_compat;
 
 pub use shell::Shell;
 pub use config::{
-    AutosuggestConfig, EditorConfig, EditorMode, ShellConfig, ZshCompatLevel, ZshConfig,
+    AutosuggestConfig, EditorConfig, EditorMode, ShellConfig, SyntaxHighlightConfig,
+    ZshCompatLevel, ZshConfig,
 };
 pub use theme::Theme;
 pub use completion::WinuxshCompleter;

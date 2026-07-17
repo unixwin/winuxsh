@@ -90,7 +90,16 @@ fn first_hint_token(hint: &str) -> String {
 }
 
 pub fn parse_zsh_highlight_style(value: &str) -> Style {
-    let mut style = Style::new().fg(Color::Fixed(8));
+    parse_zsh_style(value, Style::new().fg(Color::Fixed(8)))
+}
+
+pub fn parse_zsh_style(value: &str, default_style: Style) -> Style {
+    let value = value.trim();
+    if value.eq_ignore_ascii_case("none") {
+        return Style::new();
+    }
+
+    let mut style = default_style;
 
     for part in value.split(',').map(str::trim).filter(|part| !part.is_empty()) {
         if let Some(color) = part.strip_prefix("fg=").and_then(parse_color) {
@@ -197,5 +206,10 @@ mod tests {
         assert_eq!(style.background, Some(Color::Cyan));
         assert!(style.is_bold);
         assert!(style.is_underline);
+    }
+
+    #[test]
+    fn none_style_returns_plain_style() {
+        assert!(parse_zsh_style("none", Style::new().fg(Color::Red)).is_plain());
     }
 }

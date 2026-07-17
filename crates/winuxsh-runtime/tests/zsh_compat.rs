@@ -62,6 +62,7 @@ export PATH="$HOME/bin:$PATH"
 fpath=("$ZSH/custom/completions" $fpath)
 bindkey -v
 zstyle ':completion:*' matcher-list 'm:{{a-z}}={{A-Z}}'
+ZSH_HIGHLIGHT_STYLES[path]='fg=cyan,underline'
 source $ZSH/oh-my-zsh.sh
 "#,
             omz_text
@@ -133,6 +134,10 @@ source $ZSH/oh-my-zsh.sh
         .zstyles
         .iter()
         .any(|style| style.context == ":completion:*" && style.key == "matcher-list"));
+    assert!(report
+        .highlight_styles
+        .iter()
+        .any(|style| style.key == "path" && style.value == "fg=cyan,underline"));
     assert!(report
         .diagnostics
         .iter()

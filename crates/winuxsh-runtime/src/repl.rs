@@ -10,6 +10,7 @@ use crate::autosuggest::HistoryAutosuggestHinter;
 use crate::completion::WinuxshCompleter;
 use crate::config::EditorMode;
 use crate::shell::Shell;
+use crate::syntax_highlighting::WinuxshSyntaxHighlighter;
 
 const HISTORY_SIZE: usize = 10000;
 const COMPLETION_MENU: &str = "completion_menu";
@@ -46,6 +47,11 @@ pub fn build_line_editor(shell: &mut Shell) -> anyhow::Result<Reedline> {
     if shell.autosuggest.history_strategy_enabled() {
         editor = editor.with_hinter(Box::new(HistoryAutosuggestHinter::new(
             &shell.autosuggest,
+        )));
+    }
+    if shell.syntax_highlighting.main_highlighter_enabled() {
+        editor = editor.with_highlighter(Box::new(WinuxshSyntaxHighlighter::new(
+            &shell.syntax_highlighting,
         )));
     }
 

@@ -53,6 +53,7 @@ pub struct ZshImportReport {
     pub theme: Option<String>,
     pub edit_mode: Option<String>,
     pub zstyles: Vec<ImportedZstyle>,
+    pub highlight_styles: Vec<ImportedHighlightStyle>,
     pub completion_assets: Vec<CompletionAsset>,
     pub oh_my_zsh_detected: bool,
     pub diagnostics: Vec<ZshCompatDiagnostic>,
@@ -77,6 +78,7 @@ impl ZshImportReport {
         out.push(format!("plugins: {}", self.plugins.len()));
         out.push(format!("completion assets: {}", self.completion_assets.len()));
         out.push(format!("zstyles: {}", self.zstyles.len()));
+        out.push(format!("highlight styles: {}", self.highlight_styles.len()));
         out.push(format!(
             "theme: {}",
             self.theme.as_deref().unwrap_or("(none)")
@@ -191,6 +193,14 @@ pub struct ImportedZstyle {
     pub context: String,
     pub key: String,
     pub values: Vec<String>,
+    pub source_file: Option<PathBuf>,
+    pub line: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportedHighlightStyle {
+    pub key: String,
+    pub value: String,
     pub source_file: Option<PathBuf>,
     pub line: Option<usize>,
 }
@@ -454,6 +464,16 @@ fn scan_content(
                 context,
                 key,
                 values,
+                source_file: source_file.map(Path::to_path_buf),
+                line: Some(line_no),
+            });
+            continue;
+        }
+
+        if let Some((key, value)) = parse_highlight_style_assignment(line) {
+            report.highlight_styles.push(ImportedHighlightStyle {
+                key,
+                value,
                 source_file: source_file.map(Path::to_path_buf),
                 line: Some(line_no),
             });
@@ -849,6 +869,15 @@ fn parse_zstyle(line: &str) -> Option<(String, String, Vec<String>)> {
     Some((words[0].clone(), words[1].clone(), words[2..].to_vec()))
 }
 
+fn parse_highlight_style_assignment(line: &str) -> Option<(String, String)> {
+    let rest = line.trim().strip_prefix("ZSH_HIGHLIGHT_STYLES[")?;
+    let (key, value) = rest.split_once("]=")?;
+    if key.is_empty() || key.contains(']') {
+        return None;
+    }
+    Some((key.to_ascii_lowercase(), unquote(value.trim())))
+}
+
 fn parse_compdef_line(line: &str) -> Option<Vec<String>> {
     let rest = if let Some(rest) = line.strip_prefix("#compdef ") {
         rest
@@ -925,7 +954,8 @@ fn record_assignment(
         "ZDOTDIR" | "ZSH" | "ZSH_CUSTOM" | "ZSH_CACHE_DIR" | "CASE_SENSITIVE"
         | "HYPHEN_INSENSITIVE" | "ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE"
         | "ZSH_AUTOSUGGEST_STRATEGY" | "ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE"
-        | "ZSH_HIGHLIGHT_STYLES" | "ZSH_HIGHLIGHT_HIGHLIGHTERS" => {
+        | "ZSH_HIGHLIGHT_STYLES" | "ZSH_HIGHLIGHT_HIGHLIGHTERS"
+        | "ZSH_HIGHLIGHT_MAXLENGTH" => {
             env_map.insert(key.clone(), expanded.clone());
         }
         _ => {}

@@ -219,6 +219,12 @@ Current supported subset:
 
 ## Phase 5 - Native Syntax Highlighting
 
+Implementation status: Phase 5a is implemented on `codex/zsh-compat-scanner`.
+Winuxsh now provides a native reedline highlighter for the
+zsh-syntax-highlighting `main` highlighter subset. It does not source
+`zsh-syntax-highlighting.zsh` and does not depend on ZLE variables such as
+`BUFFER` or `region_highlight`.
+
 Implement zsh-syntax-highlighting-like behavior natively:
 
 - command position known/unknown
@@ -234,8 +240,21 @@ Honor a subset of:
 - `ZSH_HIGHLIGHT_STYLES`
 - `ZSH_HIGHLIGHT_HIGHLIGHTERS`
 
+Current supported subset:
+
+- command position known/unknown highlighting
+- shell builtins, reserved words, command separators, redirections
+- existing paths and path prefixes
+- single/double quoted arguments, unquoted variables, command substitutions
+- single/double hyphen options, assignments, comments
+- `ZSH_HIGHLIGHT_STYLES[key]=...` scan/import for supported style keys
+- native TOML override under `[zsh.syntax_highlighting]`
+
 Do not run `zsh-syntax-highlighting.zsh`; it depends on ZLE internals and zsh
 parameters like `BUFFER`, `PREBUFFER`, and `region_highlight`.
+
+Later phases can add zsh's non-default highlighters such as `brackets`,
+`pattern`, `regexp`, `cursor`, and `line` once the main highlighter is stable.
 
 ## Phase 6 - Prompt and Theme Compatibility
 

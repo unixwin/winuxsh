@@ -11,7 +11,7 @@ use reedline::Reedline;
 use rubash::{executor::Executor, lexer::tokenize, parser::parse};
 
 use crate::completion::CompletionState;
-use crate::config::{load as load_config, AutosuggestConfig, EditorMode};
+use crate::config::{load as load_config, AutosuggestConfig, EditorMode, SyntaxHighlightConfig};
 use crate::prompt::WinuxshPrompt;
 use crate::zsh_compat::{
     apply_alias, apply_safe_aliases, apply_safe_env, completion_defs_from_report, scan,
@@ -28,6 +28,7 @@ pub struct Shell {
     pub history_path: std::path::PathBuf,
     pub editor_mode: EditorMode,
     pub autosuggest: AutosuggestConfig,
+    pub syntax_highlighting: SyntaxHighlightConfig,
     pub line_editor: Option<Reedline>,
 }
 
@@ -96,6 +97,16 @@ impl Shell {
             s.load_completion_dirs_with_definitions(&config.completion_dirs, zsh_completion_defs);
         }
 
+        let mut syntax_highlighting = config.zsh.syntax_highlighting.clone();
+        if let Some(report) = &zsh_report {
+            for style in &report.highlight_styles {
+                syntax_highlighting
+                    .styles
+                    .entry(style.key.clone())
+                    .or_insert_with(|| style.value.clone());
+            }
+        }
+
         Ok(Self {
             executor,
             completion_state,
@@ -103,6 +114,7 @@ impl Shell {
             history_path,
             editor_mode: config.editor.edit_mode,
             autosuggest: config.zsh.autosuggestions.with_env_overrides(),
+            syntax_highlighting: syntax_highlighting.with_env_overrides(),
             line_editor: None,
         })
     }
