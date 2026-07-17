@@ -70,6 +70,7 @@ status: active
 ## 长期 - v3
 
 ### 插件框架
+- [x] v3 design doc opened: winuxsh-v3-plan.md
 - [ ] 插件加载机制选型 (WASI / WASM / Rust dynlib)
 - [ ] 插件 API 定义
 - [ ] 插件市场
@@ -95,4 +96,4 @@ status: active
 
 ---
 
-参见: architecture.md | v2-plan.md | rubash-pr-windows-path.md
+参见: architecture.md | v2-plan.md | rubash-pr-windows-path.md | winuxsh-v2.2-reference-plan.md | winuxsh-v3-plan.md
