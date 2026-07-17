@@ -80,6 +80,8 @@ Also support familiar zsh environment variables where practical:
 
 ## Phase 1 - Zsh Profile Scanner
 
+Implementation interface audit: `DOCS/zsh-compatibility-interface-audit.md`.
+
 Build a scanner/parser for zsh profile files. It should read but not execute:
 
 - `${ZDOTDIR:-$HOME}/.zshrc`

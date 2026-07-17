@@ -52,6 +52,7 @@ status: active
 - [x] zsh-first 功能定位与现代 shell reference map 落盘: `DOCS/winuxsh-positioning-and-feature-map.md`
 - [x] Windows 原生 agent/user terminal 下一步计划落盘: `DOCS/winuxsh-next-development-plan.md`
 - [x] zsh 配置与插件兼容计划落盘: `DOCS/zsh-compatibility-plan.md`
+- [x] zsh 兼容接口可行性审计落盘: `DOCS/zsh-compatibility-interface-audit.md`
 - [x] Phase 0 hygiene: 清理误建的空 `--help` 目录，保留 `.tmp/` 未跟踪
 
 ### 补全系统增强
@@ -70,6 +71,7 @@ status: active
 - [x] Ctrl+R 历史搜索 (reedline 原生)
 - [ ] 更多 prompt 自定义模板
 - [x] Phase 6 themes: 用户自定义主题加载 (从 ~/.winuxsh/themes/)
+- [ ] zsh compat report CLI: 先输出扫描报告，不自动修改启动行为
 - [ ] zsh profile scanner: 安全导入 `.zshrc` 常见配置
 - [ ] Oh My Zsh layout importer: 识别 `plugins=(...)`、主题、completion assets
 - [ ] zsh plugin tier importer: 优先导入 completion-only / alias-only 插件
@@ -107,4 +109,4 @@ status: active
 
 ---
 
-参见: architecture.md | v2-plan.md | rubash-pr-windows-path.md | winuxsh-v2.2-reference-plan.md | winuxsh-v3-plan.md | winuxsh-positioning-and-feature-map.md | winuxsh-next-development-plan.md | zsh-reference-audit.md | zsh-compatibility-plan.md
+参见: architecture.md | v2-plan.md | rubash-pr-windows-path.md | winuxsh-v2.2-reference-plan.md | winuxsh-v3-plan.md | winuxsh-positioning-and-feature-map.md | winuxsh-next-development-plan.md | zsh-reference-audit.md | zsh-compatibility-plan.md | zsh-compatibility-interface-audit.md
