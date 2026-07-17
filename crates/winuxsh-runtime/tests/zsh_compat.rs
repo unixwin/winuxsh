@@ -5,8 +5,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use winuxsh_runtime::config::ZshCompatLevel;
 use winuxsh_runtime::zsh_compat::{
-    apply_safe_aliases, apply_safe_env, safe_path_value, DiagnosticSeverity, ImportedAlias,
-    ImportedEnv, ZshImportOptions, ZshImportReport, scan,
+    apply_safe_aliases, apply_safe_env, completion_defs_from_report, safe_path_value,
+    CompletionAsset, DiagnosticSeverity, ImportedAlias, ImportedEnv, ZshImportOptions,
+    ZshImportReport, scan,
 };
 
 #[test]
@@ -206,6 +207,52 @@ fn apply_safe_aliases_installs_rubash_aliases() {
         std::fs::read_to_string(&output).unwrap().trim(),
         "zsh-alias-ok"
     );
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn translates_static_zsh_arguments_completion_assets() {
+    let temp = unique_temp_dir("winuxsh-zsh-completion-translate");
+    std::fs::create_dir_all(&temp).unwrap();
+    let completion = temp.join("_autopep8");
+    std::fs::write(
+        &completion,
+        r#"
+#compdef autopep8 ap8
+_arguments -s -S \
+  "--help[show this help message and exit]:" \
+  "-h[show this help message and exit]:" \
+  "{--diff,-d}[print the diff for the fixed source]" \
+  "--jobs[number of parallel jobs]::jobs:_files" \
+  "*::args:_files"
+"#,
+    )
+    .unwrap();
+
+    let report = ZshImportReport {
+        completion_assets: vec![CompletionAsset {
+            source_file: completion,
+            commands: vec!["autopep8".to_string(), "ap8".to_string()],
+            kind: "#compdef".to_string(),
+        }],
+        ..Default::default()
+    };
+
+    let defs = completion_defs_from_report(&report);
+    assert_eq!(defs.len(), 2);
+
+    let autopep8 = defs.iter().find(|def| def.command == "autopep8").unwrap();
+    assert!(autopep8.flags.iter().any(|flag| flag.long.as_deref() == Some("--help")));
+    assert!(autopep8.flags.iter().any(|flag| flag.short.as_deref() == Some("-h")));
+    assert!(autopep8.flags.iter().any(|flag| {
+        flag.long.as_deref() == Some("--diff") && flag.short.as_deref() == Some("-d")
+    }));
+    assert!(autopep8.flags.iter().any(|flag| {
+        flag.long.as_deref() == Some("--jobs") && flag.takes_value
+    }));
+    assert!(!autopep8.flags.iter().any(|flag| flag.short.as_deref() == Some("-s")));
+    assert!(defs.iter().any(|def| def.command == "ap8"));
 
     let _ = std::fs::remove_dir_all(temp);
 }

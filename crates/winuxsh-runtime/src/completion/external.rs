@@ -290,6 +290,23 @@ impl ExternalCompletionPlugin {
         self.definitions.keys().map(|s| s.as_str()).collect()
     }
 
+    /// Add already-translated command definitions.
+    ///
+    /// This is used by compatibility importers such as zsh/Oh My Zsh. Callers
+    /// control priority by choosing when to invoke it relative to `load_dir()`.
+    pub fn load_definitions<I>(&mut self, definitions: I)
+    where
+        I: IntoIterator<Item = CommandDef>,
+    {
+        for def in definitions {
+            if let Some(existing) = self.definitions.get_mut(&def.command) {
+                merge_command_def(existing, def);
+            } else {
+                self.definitions.insert(def.command.clone(), def);
+            }
+        }
+    }
+
     /// Create a plugin with bundled winuxcmd completion definitions loaded.
     pub fn new() -> Self {
         let mut plugin = Self {
@@ -865,6 +882,57 @@ impl CompletionPlugin for ExternalCompletionPlugin {
 // ─────────────────────────────────────────────────────────────────────────────
 // Utilities
 // ─────────────────────────────────────────────────────────────────────────────
+
+fn merge_command_def(existing: &mut CommandDef, incoming: CommandDef) {
+    if existing.description.is_none() {
+        existing.description = incoming.description;
+    }
+
+    for flag in incoming.flags {
+        if let Some(existing_flag) = existing
+            .flags
+            .iter_mut()
+            .find(|existing_flag| same_flag(existing_flag, &flag))
+        {
+            merge_flag_def(existing_flag, flag);
+        } else {
+            existing.flags.push(flag);
+        }
+    }
+
+    for subcommand in incoming.subcommands {
+        if !existing
+            .subcommands
+            .iter()
+            .any(|existing_subcommand| existing_subcommand.name == subcommand.name)
+        {
+            existing.subcommands.push(subcommand);
+        }
+    }
+}
+
+fn merge_flag_def(existing: &mut FlagDef, incoming: FlagDef) {
+    if existing.short.is_none() {
+        existing.short = incoming.short;
+    }
+    if existing.long.is_none() {
+        existing.long = incoming.long;
+    }
+    if existing.description.is_none() {
+        existing.description = incoming.description;
+    }
+    if !existing.takes_value {
+        existing.takes_value = incoming.takes_value;
+    }
+    if existing.values_source.is_none() {
+        existing.values_source = incoming.values_source;
+    }
+}
+
+fn same_flag(left: &FlagDef, right: &FlagDef) -> bool {
+    left.long.is_some() && left.long == right.long
+        || left.short.is_some() && left.short == right.short
+}
 
 /// Locate a tool binary in PATH, returning its full path (for mtime checks).
 fn which_tool(name: &str) -> Option<PathBuf> {

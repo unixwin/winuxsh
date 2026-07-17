@@ -13,7 +13,10 @@ use rubash::{executor::Executor, lexer::tokenize, parser::parse};
 use crate::completion::CompletionState;
 use crate::config::{load as load_config, EditorMode};
 use crate::prompt::WinuxshPrompt;
-use crate::zsh_compat::{apply_alias, apply_safe_aliases, apply_safe_env, scan, ZshImportOptions};
+use crate::zsh_compat::{
+    apply_alias, apply_safe_aliases, apply_safe_env, completion_defs_from_report, scan,
+    ZshImportOptions,
+};
 
 use crate::winuxcmd;
 
@@ -81,11 +84,15 @@ impl Shell {
         let completion_state = Arc::new(Mutex::new(CompletionState::new(
             std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
         )));
+        let zsh_completion_defs = zsh_report
+            .as_ref()
+            .map(completion_defs_from_report)
+            .unwrap_or_default();
 
         // 9. Load completion dirs from config (inline, not in thread).
         {
             let mut s = completion_state.lock().unwrap();
-            s.load_completion_dirs(&config.completion_dirs);
+            s.load_completion_dirs_with_definitions(&config.completion_dirs, zsh_completion_defs);
         }
 
         Ok(Self {

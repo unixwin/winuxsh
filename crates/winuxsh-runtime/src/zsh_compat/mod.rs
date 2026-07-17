@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
+use crate::completion::external::{CommandDef, FlagDef, PathLiteral, ValuesSource};
 use crate::config::{EditorMode, ZshCompatLevel, ZshConfig};
 
 #[derive(Debug, Clone)]
@@ -301,6 +302,35 @@ pub fn safe_path_value(report: &ZshImportReport) -> Option<OsString> {
     }
 
     std::env::join_paths(parts).ok()
+}
+
+pub fn completion_defs_from_report(report: &ZshImportReport) -> Vec<CommandDef> {
+    let mut definitions: HashMap<String, CommandDef> = HashMap::new();
+
+    for asset in &report.completion_assets {
+        let flags = parse_zsh_completion_flags(&asset.source_file);
+        for command in &asset.commands {
+            if !is_safe_name(command) {
+                continue;
+            }
+            let def = definitions
+                .entry(command.clone())
+                .or_insert_with(|| CommandDef {
+                    command: command.clone(),
+                    description: Some(format!(
+                        "Imported from zsh completion asset {}",
+                        asset.source_file.display()
+                    )),
+                    flags: Vec::new(),
+                    subcommands: Vec::new(),
+                });
+            merge_flags(&mut def.flags, flags.clone());
+        }
+    }
+
+    let mut values: Vec<CommandDef> = definitions.into_values().collect();
+    values.sort_by(|left, right| left.command.cmp(&right.command));
+    values
 }
 
 fn default_zdotdir() -> PathBuf {
@@ -901,6 +931,243 @@ fn push_completion_asset(report: &mut ZshImportReport, asset: CompletionAsset) {
         return;
     }
     report.completion_assets.push(asset);
+}
+
+fn parse_zsh_completion_flags(path: &Path) -> Vec<FlagDef> {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    parse_zsh_argument_flags(&content)
+}
+
+fn parse_zsh_argument_flags(content: &str) -> Vec<FlagDef> {
+    let mut flags = Vec::new();
+
+    for (_, logical) in logical_lines(content) {
+        let Some(line) = strip_inline_comment(&logical) else {
+            continue;
+        };
+        let Some((_, rest)) = line.split_once("_arguments") else {
+            continue;
+        };
+
+        let mut seen_spec = false;
+        for word in split_shell_words(rest) {
+            if !seen_spec && is_arguments_control_word(&word) {
+                continue;
+            }
+            if let Some(flag) = parse_zsh_argument_flag(&word) {
+                seen_spec = true;
+                merge_flags(&mut flags, vec![flag]);
+            }
+        }
+    }
+
+    flags
+}
+
+fn is_arguments_control_word(word: &str) -> bool {
+    matches!(
+        word,
+        "-0" | "-A"
+            | "-C"
+            | "-M"
+            | "-O"
+            | "-R"
+            | "-S"
+            | "-W"
+            | "-a"
+            | "-c"
+            | "-e"
+            | "-i"
+            | "-n"
+            | "-s"
+            | "-w"
+    )
+}
+
+fn parse_zsh_argument_flag(word: &str) -> Option<FlagDef> {
+    let mut spec = word.trim();
+    if spec.is_empty()
+        || spec.starts_with(':')
+        || spec.starts_with('*')
+        || spec.chars().next().is_some_and(|ch| ch.is_ascii_digit())
+    {
+        return None;
+    }
+
+    while spec.starts_with('(') {
+        let close = matching_close_paren(spec)?;
+        spec = spec[close + 1..].trim_start();
+    }
+
+    let (flag_part, description, suffix) = split_zsh_description(spec);
+    let flag_part = flag_part.trim();
+    if flag_part.is_empty() {
+        return None;
+    }
+
+    let candidates = flag_candidates(flag_part);
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let short = candidates
+        .iter()
+        .find(|candidate| is_short_flag(candidate))
+        .cloned();
+    let long = candidates
+        .iter()
+        .find(|candidate| is_long_flag(candidate))
+        .cloned();
+
+    if short.is_none() && long.is_none() {
+        return None;
+    }
+
+    let takes_value = zsh_spec_takes_value(suffix);
+    let values_source = if takes_value && suffix.contains("_files") {
+        Some(ValuesSource::Path {
+            values_from: PathLiteral,
+        })
+    } else {
+        None
+    };
+
+    Some(FlagDef {
+        short,
+        long,
+        description,
+        takes_value,
+        values_source,
+    })
+}
+
+fn split_zsh_description(spec: &str) -> (&str, Option<String>, &str) {
+    let Some(open) = spec.find('[') else {
+        let flag_part = spec.split(':').next().unwrap_or(spec);
+        let suffix = spec.strip_prefix(flag_part).unwrap_or_default();
+        return (flag_part, None, suffix);
+    };
+
+    let Some(close_rel) = spec[open + 1..].find(']') else {
+        let flag_part = spec.split(':').next().unwrap_or(spec);
+        let suffix = spec.strip_prefix(flag_part).unwrap_or_default();
+        return (flag_part, None, suffix);
+    };
+
+    let close = open + 1 + close_rel;
+    let desc = spec[open + 1..close].trim();
+    let suffix = &spec[close + 1..];
+    (
+        &spec[..open],
+        (!desc.is_empty()).then(|| desc.to_string()),
+        suffix,
+    )
+}
+
+fn flag_candidates(flag_part: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+
+    if let Some((inside, _)) = braced_candidates(flag_part) {
+        for part in inside.split(',') {
+            push_flag_candidate(&mut candidates, part);
+        }
+        return candidates;
+    }
+
+    for part in flag_part.split(|ch: char| ch == ',' || ch.is_whitespace()) {
+        push_flag_candidate(&mut candidates, part);
+    }
+
+    candidates
+}
+
+fn braced_candidates(value: &str) -> Option<(&str, &str)> {
+    let open = value.find('{')?;
+    let close = value[open + 1..].find('}')? + open + 1;
+    Some((&value[open + 1..close], &value[close + 1..]))
+}
+
+fn push_flag_candidate(candidates: &mut Vec<String>, raw: &str) {
+    let candidate = raw
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .split_once('=')
+        .map(|(left, _)| left)
+        .unwrap_or(raw)
+        .split_once(':')
+        .map(|(left, _)| left)
+        .unwrap_or(raw)
+        .trim();
+
+    if (is_short_flag(candidate) || is_long_flag(candidate))
+        && !candidates.iter().any(|existing| existing == candidate)
+    {
+        candidates.push(candidate.to_string());
+    }
+}
+
+fn zsh_spec_takes_value(suffix: &str) -> bool {
+    suffix.contains("::")
+        || suffix.contains(":_")
+        || suffix.contains(":->")
+        || suffix.matches(':').count() >= 2
+}
+
+fn is_short_flag(value: &str) -> bool {
+    value.starts_with('-') && !value.starts_with("--") && value.len() == 2
+}
+
+fn is_long_flag(value: &str) -> bool {
+    value.starts_with("--") && value.len() > 2
+}
+
+fn matching_close_paren(value: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    for (index, ch) in value.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn merge_flags(target: &mut Vec<FlagDef>, incoming: Vec<FlagDef>) {
+    for flag in incoming {
+        if let Some(existing) = target.iter_mut().find(|existing| same_flag(existing, &flag)) {
+            if existing.short.is_none() {
+                existing.short = flag.short.clone();
+            }
+            if existing.long.is_none() {
+                existing.long = flag.long.clone();
+            }
+            if existing.description.is_none() {
+                existing.description = flag.description.clone();
+            }
+            if !existing.takes_value {
+                existing.takes_value = flag.takes_value;
+            }
+            if existing.values_source.is_none() {
+                existing.values_source = flag.values_source.clone();
+            }
+        } else {
+            target.push(flag);
+        }
+    }
+}
+
+fn same_flag(left: &FlagDef, right: &FlagDef) -> bool {
+    left.long.is_some() && left.long == right.long
+        || left.short.is_some() && left.short == right.short
 }
 
 fn split_shell_words(input: &str) -> Vec<String> {

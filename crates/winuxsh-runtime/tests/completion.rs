@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use winuxsh_runtime::completion::{CompletionContext, CompletionState};
+use winuxsh_runtime::completion::external::{CommandDef, FlagDef};
 
 #[test]
 fn loads_toml_definitions_from_dir() {
@@ -97,6 +98,97 @@ description = "fixture override flag"
 
     assert_suggests(&state, "ls -", "--custom-only");
     assert_not_suggests(&state, "ls -", "--all");
+
+    let _ = std::fs::remove_dir_all(temp_dir);
+}
+
+#[test]
+fn translated_zsh_definitions_are_loaded_before_user_dirs() {
+    let imported = CommandDef {
+        command: "ztool".to_string(),
+        description: Some("imported from zsh".to_string()),
+        flags: vec![FlagDef {
+            short: None,
+            long: Some("--zsh-imported".to_string()),
+            description: Some("zsh imported flag".to_string()),
+            takes_value: false,
+            values_source: None,
+        }],
+        subcommands: Vec::new(),
+    };
+
+    let state = Arc::new(Mutex::new(CompletionState::new(PathBuf::from("."))));
+    {
+        let mut s = state.lock().unwrap();
+        s.load_completion_dirs_with_definitions(&[], vec![imported]);
+    }
+
+    assert_suggests(&state, "ztool -", "--zsh-imported");
+}
+
+#[test]
+fn translated_zsh_definitions_merge_with_builtins() {
+    let imported = CommandDef {
+        command: "ls".to_string(),
+        description: Some("imported zsh ls".to_string()),
+        flags: vec![FlagDef {
+            short: None,
+            long: Some("--zsh-extra".to_string()),
+            description: Some("extra zsh flag".to_string()),
+            takes_value: false,
+            values_source: None,
+        }],
+        subcommands: Vec::new(),
+    };
+
+    let state = Arc::new(Mutex::new(CompletionState::new(PathBuf::from("."))));
+    {
+        let mut s = state.lock().unwrap();
+        s.load_completion_dirs_with_definitions(&[], vec![imported]);
+    }
+
+    assert_suggests(&state, "ls -", "--all");
+    assert_suggests(&state, "ls -", "--zsh-extra");
+}
+
+#[test]
+fn user_toml_overrides_translated_zsh_definitions() {
+    let temp_dir = unique_temp_dir("winuxsh-zsh-completion-override");
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    std::fs::write(
+        temp_dir.join("ztool.toml"),
+        r#"
+command = "ztool"
+description = "user override"
+
+[[flags]]
+long = "--user-only"
+description = "user override flag"
+"#,
+    )
+    .unwrap();
+
+    let imported = CommandDef {
+        command: "ztool".to_string(),
+        description: Some("imported from zsh".to_string()),
+        flags: vec![FlagDef {
+            short: None,
+            long: Some("--zsh-imported".to_string()),
+            description: Some("zsh imported flag".to_string()),
+            takes_value: false,
+            values_source: None,
+        }],
+        subcommands: Vec::new(),
+    };
+
+    let state = Arc::new(Mutex::new(CompletionState::new(PathBuf::from("."))));
+    {
+        let mut s = state.lock().unwrap();
+        s.load_completion_dirs_with_definitions(&[temp_dir.clone()], vec![imported]);
+    }
+
+    assert_suggests(&state, "ztool -", "--user-only");
+    assert_not_suggests(&state, "ztool -", "--zsh-imported");
 
     let _ = std::fs::remove_dir_all(temp_dir);
 }

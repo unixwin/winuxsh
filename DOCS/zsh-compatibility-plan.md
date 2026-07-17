@@ -129,6 +129,14 @@ Tests:
 
 ## Phase 2 - Oh My Zsh Layout Importer
 
+Implementation status: Phase 2a is implemented on `codex/zsh-compat-scanner`.
+Static completion assets already discovered by the scanner are translated into
+winuxsh `CommandDef` records. This covers `#compdef`, simple `compdef`, and
+simple `_arguments` option specs. It does not execute zsh completion functions
+and does not attempt dynamic `compadd`, `_describe`, cache, or ZLE behavior.
+Translated definitions merge with built-in winuxcmd defaults, while user TOML
+completion definitions still take highest priority.
+
 Support Oh My Zsh-like discovery:
 
 - `$ZSH/plugins/<plugin>/<plugin>.plugin.zsh`

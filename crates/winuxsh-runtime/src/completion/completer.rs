@@ -8,7 +8,9 @@ use reedline::{Completer, Span, Suggestion};
 use crate::completion::{CompletionContext, CompletionPlugin, CompletionResult};
 use crate::completion::path::PathCompleter;
 use crate::completion::variables::VariableCompleter;
-use crate::completion::external::{CommandCompletionPlugin, ExternalCompletionPlugin};
+use crate::completion::external::{
+    CommandCompletionPlugin, CommandDef, ExternalCompletionPlugin,
+};
 
 /// State shared with completer
 pub struct CompletionState {
@@ -37,6 +39,16 @@ impl CompletionState {
     /// Each directory is scanned for `<cmd>.toml` and `<cmd>.bash` files.
     /// Also registers the `CommandCompletionPlugin` if not already present.
     pub fn load_completion_dirs(&mut self, dirs: &[PathBuf]) {
+        self.load_completion_dirs_with_definitions(dirs, Vec::new());
+    }
+
+    /// Load translated definitions before user directories, so native TOML
+    /// files remain the highest-priority override surface.
+    pub fn load_completion_dirs_with_definitions(
+        &mut self,
+        dirs: &[PathBuf],
+        definitions: Vec<CommandDef>,
+    ) {
         let has_command_plugin = self
             .plugins
             .iter()
@@ -45,6 +57,7 @@ impl CompletionState {
             self.add_plugin(Arc::new(CommandCompletionPlugin));
         }
         let mut external = ExternalCompletionPlugin::new();
+        external.load_definitions(definitions);
         for dir in dirs {
             external.load_dir(dir);
         }
