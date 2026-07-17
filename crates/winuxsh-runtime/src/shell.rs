@@ -30,15 +30,15 @@ impl Shell {
     /// Construct a fresh shell: load config, install Ctrl+C handler, inject
     /// winuxcmd onto PATH, set up completion state and history.
     pub fn new() -> anyhow::Result<Self> {
-        // 1. WinuxCmd PATH injection (best-effort).
-        if let Err(e) = winuxcmd::ensure_on_path() {
+        // 1. Load config from ~/.winshrc.toml.
+        let config = load_config();
+
+        // 2. WinuxCmd PATH injection (best-effort), honoring config override.
+        if let Err(e) = winuxcmd::ensure_on_path_with_override(config.winuxcmd_path.as_deref()) {
             log::warn!("winuxcmd not on PATH: {}", e);
         }
 
-        // 2. Load config from ~/.winshrc.toml.
-        let config = load_config();
-
-        // 3. Build rubash Executor.
+        // 3. Build rubash Executor after PATH injection.
         let mut executor = Executor::new();
 
         // 4. Wire aliases from config into rubash.

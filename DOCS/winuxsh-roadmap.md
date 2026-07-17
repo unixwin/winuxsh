@@ -58,6 +58,9 @@ status: active
 - [ ] bash 自动导入覆盖更复杂的 complete 调用模式
 - [ ] 补全三级缓存的 TTL/失效策略
 
+### 配置一致性
+- [x] Phase 5 config: [winuxcmd].path 参与 PATH injection
+
 ### 用户体验
 - [x] Vi 模式 (reedline 原生支持,主要工作量在键位配置)
 - [x] Ctrl+R 历史搜索 (reedline 原生)

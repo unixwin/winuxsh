@@ -1,11 +1,12 @@
 //! winuxcmd integration via PATH injection.
 //!
 //! rubash's `Executor` looks up external commands via `find_user_command()`,
-//! which walks `PATH`. We don't use FFI/DLL — we just prepend the directory
+//! which walks `PATH`. We don't use FFI/DLL -- we just prepend the directory
 //! containing `winuxcmd.exe` to the process `PATH` so rubash finds it first.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
 use anyhow::{anyhow, Result};
 
 /// Locate `winuxcmd.exe` by checking, in order:
@@ -17,14 +18,8 @@ pub fn find_winuxcmd() -> Option<PathBuf> {
     // 1. WINUXCMD_PATH override
     if let Ok(p) = std::env::var("WINUXCMD_PATH") {
         let path = PathBuf::from(&p);
-        if path.is_file() {
-            return Some(path);
-        }
-        if path.is_dir() {
-            let candidate = path.join("winuxcmd.exe");
-            if candidate.is_file() {
-                return Some(candidate);
-            }
+        if let Some(exe) = resolve_winuxcmd_override(&path) {
+            return Some(exe);
         }
     }
 
@@ -63,8 +58,52 @@ pub fn find_winuxcmd() -> Option<PathBuf> {
 /// command lookup finds winuxcmd-provided coreutils first. Returns the
 /// directory that was injected, or an error if winuxcmd couldn't be found.
 pub fn ensure_on_path() -> Result<PathBuf> {
-    let exe = find_winuxcmd().ok_or_else(|| anyhow!("winuxcmd.exe not found (looked in WINUXCMD_PATH, exe dir, and PATH)"))?;
-    let dir = exe.parent().ok_or_else(|| anyhow!("winuxcmd.exe has no parent directory"))?.to_path_buf();
+    ensure_on_path_with_override(None)
+}
+
+/// Same as `ensure_on_path`, but an explicit config override takes precedence.
+/// The override may point either to `winuxcmd.exe` or to its containing dir.
+pub fn ensure_on_path_with_override(override_path: Option<&Path>) -> Result<PathBuf> {
+    let exe = match override_path {
+        Some(path) => resolve_winuxcmd_override(path).ok_or_else(|| {
+            anyhow!(
+                "configured winuxcmd path '{}' does not point to winuxcmd.exe or a containing directory",
+                path.display()
+            )
+        })?,
+        None => find_winuxcmd().ok_or_else(|| {
+            anyhow!("winuxcmd.exe not found (looked in WINUXCMD_PATH, exe dir, and PATH)")
+        })?,
+    };
+    prepend_exe_dir_to_path(&exe)
+}
+
+fn resolve_winuxcmd_override(path: &Path) -> Option<PathBuf> {
+    if path.is_file()
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.eq_ignore_ascii_case("winuxcmd.exe"))
+            .unwrap_or(false)
+    {
+        return Some(path.to_path_buf());
+    }
+
+    if path.is_dir() {
+        let candidate = path.join("winuxcmd.exe");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+fn prepend_exe_dir_to_path(exe: &Path) -> Result<PathBuf> {
+    let dir = exe
+        .parent()
+        .ok_or_else(|| anyhow!("winuxcmd.exe has no parent directory"))?
+        .to_path_buf();
 
     let current_path = std::env::var("PATH").unwrap_or_default();
     let dir_str = dir.to_string_lossy().to_string();
@@ -82,11 +121,13 @@ pub fn ensure_on_path() -> Result<PathBuf> {
         .collect();
     parts.insert(0, dir_str.clone());
     let new_path = parts.join(if cfg!(windows) { ";" } else { ":" });
-    // On Windows, `std::env::set_var` normalizes &quot;PATH&quot; to &quot;Path&quot;.
-    // Rubash internally uses `env_vars.get(&quot;PATH&quot;)` (all caps), which
-    // is case-sensitive in the HashMap.  Force the all-caps entry so rubash
+    // On Windows, `std::env::set_var` normalizes "PATH" to "Path".
+    // Rubash internally uses `env_vars.get("PATH")` (all caps), which
+    // is case-sensitive in the HashMap. Force the all-caps entry so rubash
     // can find it.
     #[cfg(windows)]
+    std::env::set_var("PATH", &new_path);
+    #[cfg(not(windows))]
     std::env::set_var("PATH", &new_path);
     log::debug!("winuxcmd PATH injected: {}", dir_str);
     Ok(dir)
@@ -130,7 +171,12 @@ pub fn list_commands() -> Vec<String> {
                 let mut cmds: Vec<String> = Vec::new();
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if path.extension().and_then(|e| e.to_str()).map(|s| s.eq_ignore_ascii_case("exe")).unwrap_or(false) {
+                    if path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(|s| s.eq_ignore_ascii_case("exe"))
+                        .unwrap_or(false)
+                    {
                         if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
                             if stem != "winuxcmd" {
                                 cmds.push(stem.to_string());
@@ -147,4 +193,53 @@ pub fn list_commands() -> Vec<String> {
     Vec::new()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
+    #[test]
+    fn override_can_point_to_exe_file() {
+        let dir = unique_temp_dir("winuxcmd-file-override");
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("winuxcmd.exe");
+        std::fs::write(&exe, b"").unwrap();
+
+        assert_eq!(resolve_winuxcmd_override(&exe), Some(exe.clone()));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn override_can_point_to_containing_dir() {
+        let dir = unique_temp_dir("winuxcmd-dir-override");
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("winuxcmd.exe");
+        std::fs::write(&exe, b"").unwrap();
+
+        assert_eq!(resolve_winuxcmd_override(&dir), Some(exe));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn invalid_override_is_ignored_by_resolver() {
+        let dir = unique_temp_dir("winuxcmd-invalid-override");
+        std::fs::create_dir_all(&dir).unwrap();
+        let other = dir.join("other.exe");
+        std::fs::write(&other, b"").unwrap();
+
+        assert_eq!(resolve_winuxcmd_override(&other), None);
+        assert_eq!(resolve_winuxcmd_override(&dir), None);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn unique_temp_dir(prefix: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("{}-{}-{}", prefix, std::process::id(), nanos))
+    }
+}

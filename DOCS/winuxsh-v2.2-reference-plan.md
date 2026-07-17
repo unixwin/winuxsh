@@ -87,9 +87,12 @@ status: active
 - [x] Decide what maps cleanly to winuxsh and what is explicitly out of scope.
 - Audit note: `DOCS/nushell-reference-audit.md`
 
-### Phase 1 - Completion Foundation
+### Phase 1 - Completion Test Baseline
 
 - [x] Fix the stale completion integration test.
+
+### Phase 2 - Built-in Completion Foundation
+
 - [x] Add bundled default completion definitions for a small first batch:
   - `ls`
   - `grep`
@@ -98,7 +101,7 @@ status: active
 - [x] Keep definitions derived from `winuxcmd.exe <cmd> --help` output or pinned WinuxCmd source/tag.
 - Verification: `cargo fmt --check`, `cargo test --lib -p winuxsh-runtime --locked`, and `cargo test -p winuxsh-runtime --test completion --locked` passed.
 
-### Phase 2 - Completion Expansion
+### Phase 3 - Completion Expansion
 
 - [x] Expand default definitions after the foundation is green:
   - `cat`, `cp`, `mv`, `rm`, `mkdir`, `touch`, `chmod`
@@ -106,7 +109,7 @@ status: active
 - [x] Add value completions only where the value domain is clear and stable.
 - Verification: `cargo fmt --check`, `cargo test --lib -p winuxsh-runtime --locked`, and `cargo test -p winuxsh-runtime --test completion --locked` passed.
 
-### Phase 3 - Edit Mode UX
+### Phase 4 - Reedline UX
 
 - [x] Add config fields for editor mode:
   - default `emacs`
@@ -115,7 +118,14 @@ status: active
 - [x] Confirm Ctrl+R remains active in both modes through reedline's common keybindings.
 - Verification: cargo fmt --check, cargo test --lib -p winuxsh-runtime --locked, and cargo test -p winuxsh-runtime --test completion --locked passed.
 
-### Phase 4 - User Themes
+### Phase 5 - Config Consistency
+
+- [x] Honor `[winuxcmd].path` during PATH injection.
+- [x] Keep `winuxcmd.exe` integrated through PATH only, with no FFI/DLL path.
+- [x] Re-run `cargo build --locked` and compat tests because shell startup/PATH changes are affected.
+- Verification: `cargo fmt --check`, `cargo test --lib -p winuxsh-runtime --locked`, `cargo test -p winuxsh-runtime --test completion --locked`, `cargo build --locked`, and `cargo test --test compat -- --ignored` passed.
+
+### Phase 6 - User Themes
 
 - Design a TOML theme schema under `~/.winuxsh/themes/*.toml`.
 - Add loader that falls back to existing built-in themes.
