@@ -82,6 +82,8 @@ Also support familiar zsh environment variables where practical:
 
 Implementation interface audit: `DOCS/zsh-compatibility-interface-audit.md`.
 
+Current implementation status: report-only scanner and `--zsh-compat-report` / `--zsh-compat-report-json` CLI are implemented on `codex/zsh-compat-scanner`; automatic startup import remains disabled.
+
 Build a scanner/parser for zsh profile files. It should read but not execute:
 
 - `${ZDOTDIR:-$HOME}/.zshrc`

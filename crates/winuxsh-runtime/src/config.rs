@@ -42,6 +42,61 @@ pub struct EditorConfig {
     pub edit_mode: EditorMode,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZshCompatLevel {
+    Safe,
+    Warn,
+    Experimental,
+}
+
+impl Default for ZshCompatLevel {
+    fn default() -> Self {
+        Self::Safe
+    }
+}
+
+impl ZshCompatLevel {
+    fn from_config_value(value: &str) -> Self {
+        match value.to_ascii_lowercase().as_str() {
+            "safe" => Self::Safe,
+            "warn" => Self::Warn,
+            "experimental" => Self::Experimental,
+            other => {
+                log::warn!(
+                    "Unknown zsh compat_level '{}', falling back to safe",
+                    other
+                );
+                Self::Safe
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ZshConfig {
+    pub enabled: bool,
+    pub zdotdir: Option<PathBuf>,
+    pub import_zshrc: bool,
+    pub import_oh_my_zsh: bool,
+    pub plugins: Vec<String>,
+    pub compat_level: ZshCompatLevel,
+    pub auto_apply: bool,
+}
+
+impl Default for ZshConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            zdotdir: None,
+            import_zshrc: true,
+            import_oh_my_zsh: true,
+            plugins: Vec::new(),
+            compat_level: ZshCompatLevel::Safe,
+            auto_apply: false,
+        }
+    }
+}
+
 /// Top-level TOML structure.
 #[derive(Debug, Deserialize)]
 struct WinshrcToml {
@@ -51,6 +106,7 @@ struct WinshrcToml {
     aliases: Option<HashMap<String, String>>,
     completions: Option<CompletionsToml>,
     winuxcmd: Option<WinuxCmdToml>,
+    zsh: Option<ZshToml>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -78,6 +134,17 @@ struct WinuxCmdToml {
     path: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ZshToml {
+    enabled: Option<bool>,
+    zdotdir: Option<String>,
+    import_zshrc: Option<bool>,
+    import_oh_my_zsh: Option<bool>,
+    plugins: Option<Vec<String>>,
+    compat_level: Option<String>,
+    auto_apply: Option<bool>,
+}
+
 #[derive(Debug, Clone)]
 pub struct FullConfig {
     pub shell: ShellConfig,
@@ -86,6 +153,7 @@ pub struct FullConfig {
     pub aliases: HashMap<String, String>,
     pub completion_dirs: Vec<PathBuf>,
     pub winuxcmd_path: Option<PathBuf>,
+    pub zsh: ZshConfig,
 }
 
 impl Default for FullConfig {
@@ -97,6 +165,7 @@ impl Default for FullConfig {
             aliases: HashMap::new(),
             completion_dirs: Vec::new(),
             winuxcmd_path: None,
+            zsh: ZshConfig::default(),
         }
     }
 }
@@ -124,6 +193,8 @@ pub fn load() -> FullConfig {
 }
 
 fn build_config(parsed: WinshrcToml) -> FullConfig {
+    let zsh = parsed.zsh.map(build_zsh_config).unwrap_or_default();
+
     FullConfig {
         shell: ShellConfig {
             prompt_format: parsed.shell.and_then(|s| s.prompt_format),
@@ -148,6 +219,22 @@ fn build_config(parsed: WinshrcToml) -> FullConfig {
             .map(PathBuf::from)
             .collect(),
         winuxcmd_path: parsed.winuxcmd.and_then(|w| w.path).map(PathBuf::from),
+        zsh,
+    }
+}
+
+fn build_zsh_config(parsed: ZshToml) -> ZshConfig {
+    ZshConfig {
+        enabled: parsed.enabled.unwrap_or(false),
+        zdotdir: parsed.zdotdir.map(PathBuf::from),
+        import_zshrc: parsed.import_zshrc.unwrap_or(true),
+        import_oh_my_zsh: parsed.import_oh_my_zsh.unwrap_or(true),
+        plugins: parsed.plugins.unwrap_or_default(),
+        compat_level: parsed
+            .compat_level
+            .map(|level| ZshCompatLevel::from_config_value(&level))
+            .unwrap_or_default(),
+        auto_apply: parsed.auto_apply.unwrap_or(false),
     }
 }
 
@@ -185,5 +272,29 @@ edit_mode = "unknown"
 "#,
         );
         assert_eq!(config.editor.edit_mode, EditorMode::Emacs);
+    }
+
+    #[test]
+    fn parses_zsh_config() {
+        let config = parse_config(
+            r#"
+[zsh]
+enabled = true
+zdotdir = "C:/Users/me"
+import_zshrc = false
+import_oh_my_zsh = true
+plugins = ["git", "zsh-autosuggestions"]
+compat_level = "warn"
+auto_apply = true
+"#,
+        );
+
+        assert!(config.zsh.enabled);
+        assert_eq!(config.zsh.zdotdir, Some(PathBuf::from("C:/Users/me")));
+        assert!(!config.zsh.import_zshrc);
+        assert!(config.zsh.import_oh_my_zsh);
+        assert_eq!(config.zsh.plugins, vec!["git", "zsh-autosuggestions"]);
+        assert_eq!(config.zsh.compat_level, ZshCompatLevel::Warn);
+        assert!(config.zsh.auto_apply);
     }
 }

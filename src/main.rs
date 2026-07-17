@@ -6,6 +6,8 @@
 //!   winuxsh script.sh        → execute a script file
 //!   winuxsh --help | -h      → usage
 //!   winuxsh --version        → version (winuxsh / rubash / winuxcmd)
+//!   winuxsh --zsh-compat-report      → scan zsh config and print report
+//!   winuxsh --zsh-compat-report-json → scan zsh config and print JSON report
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -42,6 +44,14 @@ fn run(args: &[String]) -> anyhow::Result<()> {
         }
         "--version" | "-V" => {
             print_version();
+            Ok(())
+        }
+        "--zsh-compat-report" => {
+            print_zsh_compat_report(false)?;
+            Ok(())
+        }
+        "--zsh-compat-report-json" => {
+            print_zsh_compat_report(true)?;
             Ok(())
         }
         "-c" => {
@@ -83,6 +93,20 @@ fn print_usage() {
     println!("  winuxsh script.sh [args...]  Execute a script file");
     println!("  winuxsh --help, -h          Show this help");
     println!("  winuxsh --version, -V       Show version info");
+    println!("  winuxsh --zsh-compat-report      Scan zsh config and show a safe import report");
+    println!("  winuxsh --zsh-compat-report-json Scan zsh config and show a JSON import report");
+}
+
+fn print_zsh_compat_report(json: bool) -> anyhow::Result<()> {
+    let config = winuxsh_runtime::config::load();
+    let options = winuxsh_runtime::zsh_compat::ZshImportOptions::for_report(&config.zsh);
+    let report = winuxsh_runtime::zsh_compat::scan(&options);
+    if json {
+        println!("{}", report.to_json_pretty()?);
+    } else {
+        println!("{}", report.to_human());
+    }
+    Ok(())
 }
 
 fn print_version() {

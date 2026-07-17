@@ -12,9 +12,10 @@ pub mod repl;
 pub mod shell;
 pub mod theme;
 pub mod winuxcmd;
+pub mod zsh_compat;
 
 pub use shell::Shell;
-pub use config::{EditorConfig, EditorMode, ShellConfig};
+pub use config::{EditorConfig, EditorMode, ShellConfig, ZshCompatLevel, ZshConfig};
 pub use theme::Theme;
 pub use completion::WinuxshCompleter;
 pub use completion::CompletionState;

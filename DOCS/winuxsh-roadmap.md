@@ -71,7 +71,7 @@ status: active
 - [x] Ctrl+R 历史搜索 (reedline 原生)
 - [ ] 更多 prompt 自定义模板
 - [x] Phase 6 themes: 用户自定义主题加载 (从 ~/.winuxsh/themes/)
-- [ ] zsh compat report CLI: 先输出扫描报告，不自动修改启动行为
+- [x] zsh compat report CLI: 先输出扫描报告，不自动修改启动行为
 - [ ] zsh profile scanner: 安全导入 `.zshrc` 常见配置
 - [ ] Oh My Zsh layout importer: 识别 `plugins=(...)`、主题、completion assets
 - [ ] zsh plugin tier importer: 优先导入 completion-only / alias-only 插件
