@@ -10,6 +10,8 @@ use serde::Deserialize;
 pub struct ShellConfig {
     /// Prompt template (e.g. "{user}@{host} {cwd} {symbol}")
     pub prompt_format: Option<String>,
+    /// Optional right-side prompt template.
+    pub right_prompt_format: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -259,6 +261,7 @@ struct WinshrcToml {
 #[derive(Debug, Deserialize)]
 struct ShellToml {
     prompt_format: Option<String>,
+    right_prompt_format: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -359,10 +362,12 @@ pub fn load() -> FullConfig {
 
 fn build_config(parsed: WinshrcToml) -> FullConfig {
     let zsh = parsed.zsh.map(build_zsh_config).unwrap_or_default();
+    let shell = parsed.shell;
 
     FullConfig {
         shell: ShellConfig {
-            prompt_format: parsed.shell.and_then(|s| s.prompt_format),
+            prompt_format: shell.as_ref().and_then(|s| s.prompt_format.clone()),
+            right_prompt_format: shell.and_then(|s| s.right_prompt_format),
         },
         editor: EditorConfig {
             edit_mode: parsed
@@ -454,6 +459,23 @@ edit_mode = "vi"
 "#,
         );
         assert_eq!(config.editor.edit_mode, EditorMode::Vi);
+    }
+
+    #[test]
+    fn parses_prompt_formats() {
+        let config = parse_config(
+            r#"
+[shell]
+prompt_format = "{cwd} %# "
+right_prompt_format = "{user}@{host}"
+"#,
+        );
+
+        assert_eq!(config.shell.prompt_format.as_deref(), Some("{cwd} %# "));
+        assert_eq!(
+            config.shell.right_prompt_format.as_deref(),
+            Some("{user}@{host}")
+        );
     }
 
     #[test]

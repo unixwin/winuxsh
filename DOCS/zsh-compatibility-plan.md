@@ -258,6 +258,11 @@ Later phases can add zsh's non-default highlighters such as `brackets`,
 
 ## Phase 6 - Prompt and Theme Compatibility
 
+Implementation status: Phase 6a is implemented on `codex/zsh-compat-scanner`.
+Winuxsh now translates common static zsh prompt assignments into native
+winuxsh prompt templates and reports unsupported dynamic segments. It does not
+source theme scripts or execute prompt substitutions.
+
 Translate common zsh prompt/theme forms:
 
 - `PROMPT`
@@ -269,6 +274,32 @@ Translate common zsh prompt/theme forms:
 
 Native output should become winuxsh prompt/theme config, not arbitrary zsh theme
 execution.
+
+First-pass scope:
+
+- scan `.zshrc` and simple Oh My Zsh theme files for `PROMPT` / `PS1` and
+  `RPROMPT` / `RPS1`.
+- translate common prompt escapes into winuxsh placeholders:
+  `{user}`, `{host}`, `{cwd}`, `{symbol}`.
+- strip or report color/style escapes and unsupported dynamic command
+  substitutions.
+- let native `[shell].prompt_format` override imported zsh prompts.
+- expose translated prompts in `--zsh-compat-report` and
+  `--zsh-compat-report-json`.
+
+Current supported subset:
+
+- `PROMPT` / `PS1` and `RPROMPT` / `RPS1` from `.zshrc`.
+- static Oh My Zsh theme files under `$ZSH/themes` or `$ZSH_CUSTOM/themes`.
+- prompt escapes `%n`, `%m`, `%M`, `%~`, `%/`, `%d`, `%c`, `%C`, `%1~`,
+  `%2~`, `%3~`, `%#`, and `%%`.
+- color/style escapes `%F{...}`, `%K{...}`, `%f`, `%k`, `%B`, `%b`, `%U`,
+  `%u`, `%S`, `%s`, `%{...%}` are stripped safely.
+- unsupported prompt substitutions such as `$(git_prompt_info)`, `${...}`,
+  backticks, `%D{...}`, and conditional `%(... )` are reported as
+  unsupported prompt segments.
+- native `[shell].prompt_format` and `[shell].right_prompt_format` remain
+  authoritative over imported zsh prompts.
 
 ## Phase 7 - Oh-My-Winuxsh Compatibility Layer
 

@@ -7,7 +7,7 @@ use winuxsh_runtime::config::ZshCompatLevel;
 use winuxsh_runtime::zsh_compat::{
     apply_safe_aliases, apply_safe_env, completion_defs_from_report, safe_path_value,
     CompletionAsset, DiagnosticSeverity, ImportedAlias, ImportedEnv, ZshImportOptions,
-    ZshImportReport, PluginImportKind, PluginImportTier, scan,
+    PluginImportKind, PluginImportTier, ZshImportReport, scan, translate_zsh_prompt,
 };
 
 #[test]
@@ -179,6 +179,120 @@ zmodload zsh/zpty
         .any(|diag| diag.feature == "zmodload" && diag.severity == DiagnosticSeverity::Unsupported));
 
     let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn scans_profile_prompts_and_static_oh_my_zsh_theme() {
+    let temp = unique_temp_dir("winuxsh-zsh-prompt");
+    let omz = temp.join(".oh-my-zsh");
+    let theme_dir = omz.join("themes");
+    std::fs::create_dir_all(&theme_dir).unwrap();
+    std::fs::write(
+        theme_dir.join("simple.zsh-theme"),
+        "PROMPT='%F{blue}%n@%m:%2~ $(git_prompt_info)%f %# '\nRPROMPT='%D{%H:%M}'\n",
+    )
+    .unwrap();
+
+    let omz_text = omz.to_string_lossy().replace('\\', "/");
+    std::fs::write(
+        temp.join(".zshrc"),
+        format!(
+            r#"
+export ZSH="{}"
+ZSH_THEME="simple"
+PROMPT='%n@%m:%~ %# '
+source $ZSH/oh-my-zsh.sh
+"#,
+            omz_text
+        ),
+    )
+    .unwrap();
+
+    let report = scan(&ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: true,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    });
+
+    let prompt = report.prompt.as_ref().unwrap();
+    assert_eq!(prompt.origin, "profile");
+    assert_eq!(
+        prompt.translated_format.as_deref(),
+        Some("{user}@{host}:{cwd} {symbol} ")
+    );
+
+    let right_prompt = report.right_prompt.as_ref().unwrap();
+    assert_eq!(right_prompt.origin, "theme");
+    assert_eq!(right_prompt.translated_format, None);
+    assert!(right_prompt
+        .unsupported_segments
+        .iter()
+        .any(|segment| segment == "%D{%H:%M}"));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn imports_theme_prompt_when_profile_prompt_is_absent() {
+    let temp = unique_temp_dir("winuxsh-zsh-theme-prompt");
+    let omz = temp.join(".oh-my-zsh");
+    let theme_dir = omz.join("themes");
+    std::fs::create_dir_all(&theme_dir).unwrap();
+    std::fs::write(
+        theme_dir.join("minimal.zsh-theme"),
+        "PROMPT='%B%F{green}%3~%f%b %# '\n",
+    )
+    .unwrap();
+
+    let omz_text = omz.to_string_lossy().replace('\\', "/");
+    std::fs::write(
+        temp.join(".zshrc"),
+        format!(
+            r#"
+export ZSH="{}"
+ZSH_THEME="minimal"
+source $ZSH/oh-my-zsh.sh
+"#,
+            omz_text
+        ),
+    )
+    .unwrap();
+
+    let report = scan(&ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: true,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    });
+
+    let prompt = report.prompt.as_ref().unwrap();
+    assert_eq!(prompt.origin, "theme");
+    assert_eq!(
+        prompt.translated_format.as_deref(),
+        Some("{cwd} {symbol} ")
+    );
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn translates_zsh_prompt_common_subset_and_reports_dynamic_segments() {
+    let translation =
+        translate_zsh_prompt("%B%F{blue}%n@%m:%3~ $(git_prompt_info)%f%b %# ");
+
+    assert_eq!(
+        translation.format.as_deref(),
+        Some("{user}@{host}:{cwd} {symbol} ")
+    );
+    assert!(translation
+        .unsupported_segments
+        .iter()
+        .any(|segment| segment == "$(git_prompt_info)"));
 }
 
 #[test]

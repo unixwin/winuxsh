@@ -74,8 +74,25 @@ impl Shell {
             }
         }
 
-        // 6. Prompt + theme.
-        let prompt = WinuxshPrompt::new(config.shell.prompt_format.clone(), &config.theme_name);
+        // 6. Prompt + theme. Native TOML stays authoritative; zsh prompt
+        // imports only fill empty native prompt fields.
+        let prompt_format = config.shell.prompt_format.clone().or_else(|| {
+            zsh_report.as_ref().and_then(|report| {
+                report
+                    .prompt
+                    .as_ref()
+                    .and_then(|prompt| prompt.translated_format.clone())
+            })
+        });
+        let right_prompt_format = config.shell.right_prompt_format.clone().or_else(|| {
+            zsh_report.as_ref().and_then(|report| {
+                report
+                    .right_prompt
+                    .as_ref()
+                    .and_then(|prompt| prompt.translated_format.clone())
+            })
+        });
+        let prompt = WinuxshPrompt::new(prompt_format, right_prompt_format, &config.theme_name);
 
         // 7. History file in home dir.
         let history_path = dirs::home_dir()

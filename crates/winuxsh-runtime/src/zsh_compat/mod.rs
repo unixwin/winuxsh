@@ -51,6 +51,8 @@ pub struct ZshImportReport {
     pub fpath_entries: Vec<PathBuf>,
     pub plugins: Vec<ImportedPlugin>,
     pub theme: Option<String>,
+    pub prompt: Option<ImportedPrompt>,
+    pub right_prompt: Option<ImportedPrompt>,
     pub edit_mode: Option<String>,
     pub zstyles: Vec<ImportedZstyle>,
     pub highlight_styles: Vec<ImportedHighlightStyle>,
@@ -82,6 +84,20 @@ impl ZshImportReport {
         out.push(format!(
             "theme: {}",
             self.theme.as_deref().unwrap_or("(none)")
+        ));
+        out.push(format!(
+            "prompt: {}",
+            self.prompt
+                .as_ref()
+                .and_then(|prompt| prompt.translated_format.as_deref())
+                .unwrap_or("(none)")
+        ));
+        out.push(format!(
+            "right prompt: {}",
+            self.right_prompt
+                .as_ref()
+                .and_then(|prompt| prompt.translated_format.as_deref())
+                .unwrap_or("(none)")
         ));
         out.push(format!(
             "edit mode: {}",
@@ -206,6 +222,22 @@ pub struct ImportedHighlightStyle {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ImportedPrompt {
+    pub value: String,
+    pub translated_format: Option<String>,
+    pub unsupported_segments: Vec<String>,
+    pub source_file: Option<PathBuf>,
+    pub line: Option<usize>,
+    pub origin: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ZshPromptTranslation {
+    pub format: Option<String>,
+    pub unsupported_segments: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct CompletionAsset {
     pub source_file: PathBuf,
     pub commands: Vec<String>,
@@ -233,6 +265,7 @@ pub enum DiagnosticSeverity {
 enum ScanMode {
     Profile,
     Plugin,
+    Theme,
 }
 
 pub fn scan(options: &ZshImportOptions) -> ZshImportReport {
@@ -450,11 +483,7 @@ fn scan_content(
                 value,
                 source_file: source_file.map(Path::to_path_buf),
                 line: Some(line_no),
-                origin: match mode {
-                    ScanMode::Profile => "profile",
-                    ScanMode::Plugin => "plugin",
-                }
-                .to_string(),
+                origin: scan_mode_origin(mode).to_string(),
             });
             continue;
         }
@@ -494,16 +523,18 @@ fn scan_content(
             continue;
         }
 
-        if mode == ScanMode::Plugin {
-            continue;
-        }
-
         if let Some(values) = parse_named_array(line, "plugins") {
+            if mode != ScanMode::Profile {
+                continue;
+            }
             add_plugins(report, values);
             continue;
         }
 
         if let Some(values) = parse_named_array(line, "path") {
+            if mode != ScanMode::Profile {
+                continue;
+            }
             for value in values {
                 add_path_entry(report, env_map, &value, true);
             }
@@ -511,6 +542,9 @@ fn scan_content(
         }
 
         if let Some(values) = parse_named_array(line, "fpath") {
+            if mode != ScanMode::Profile {
+                continue;
+            }
             for value in values {
                 add_fpath_entry(report, env_map, &value);
             }
@@ -530,8 +564,30 @@ fn scan_content(
         }
 
         if let Some((key, value)) = parse_assignment(line) {
+            if is_prompt_assignment(&key) && mode != ScanMode::Plugin {
+                record_prompt_assignment(
+                    key,
+                    value,
+                    source_file,
+                    line_no,
+                    report,
+                    scan_mode_origin(mode),
+                );
+                continue;
+            }
+            if mode != ScanMode::Profile {
+                continue;
+            }
             record_assignment(key, value, source_file, line_no, report, env_map);
         }
+    }
+}
+
+fn scan_mode_origin(mode: ScanMode) -> &'static str {
+    match mode {
+        ScanMode::Profile => "profile",
+        ScanMode::Plugin => "plugin",
+        ScanMode::Theme => "theme",
     }
 }
 
@@ -548,6 +604,8 @@ fn scan_oh_my_zsh_layout(
         .get("ZSH_CUSTOM")
         .map(PathBuf::from)
         .unwrap_or_else(|| zsh_dir.join("custom"));
+
+    scan_oh_my_zsh_theme(&zsh_dir, &zsh_custom, report, env_map);
 
     let plugin_names = merged_plugin_names(report, &options.plugins);
     report.plugins.clear();
@@ -628,6 +686,47 @@ fn scan_oh_my_zsh_layout(
             unsupported_features,
         });
     }
+}
+
+fn scan_oh_my_zsh_theme(
+    zsh_dir: &Path,
+    zsh_custom: &Path,
+    report: &mut ZshImportReport,
+    env_map: &mut HashMap<String, String>,
+) {
+    let Some(theme_name) = report.theme.clone() else {
+        return;
+    };
+    if theme_name == "random" || theme_name.starts_with('$') || !is_safe_name(&theme_name) {
+        report.diagnostics.push(ZshCompatDiagnostic {
+            severity: DiagnosticSeverity::Unsupported,
+            feature: "theme".to_string(),
+            message: format!("dynamic or unsafe zsh theme skipped: {}", theme_name),
+            source_file: None,
+            line: None,
+        });
+        return;
+    }
+
+    let theme_file_name = format!("{}.zsh-theme", theme_name);
+    let Some(theme_file) = [
+        zsh_custom.join("themes").join(&theme_file_name),
+        zsh_dir.join("themes").join(&theme_file_name),
+    ]
+    .into_iter()
+    .find(|path| path.is_file())
+    else {
+        report.diagnostics.push(ZshCompatDiagnostic {
+            severity: DiagnosticSeverity::Info,
+            feature: "theme".to_string(),
+            message: format!("zsh theme file not found: {}", theme_name),
+            source_file: None,
+            line: None,
+        });
+        return;
+    };
+
+    scan_profile_file(&theme_file, report, env_map, ScanMode::Theme);
 }
 
 fn unresolved_plugin(name: String, diagnostics_count: usize) -> ImportedPlugin {
@@ -926,6 +1025,348 @@ fn parse_assignment(line: &str) -> Option<(String, String)> {
         return None;
     }
     Some((key.to_string(), unquote(value.trim())))
+}
+
+fn is_prompt_assignment(key: &str) -> bool {
+    matches!(key, "PROMPT" | "PS1" | "RPROMPT" | "RPS1")
+}
+
+fn is_right_prompt_assignment(key: &str) -> bool {
+    matches!(key, "RPROMPT" | "RPS1")
+}
+
+fn record_prompt_assignment(
+    key: String,
+    value: String,
+    source_file: Option<&Path>,
+    line_no: usize,
+    report: &mut ZshImportReport,
+    origin: &str,
+) {
+    let value = decode_prompt_value(&value);
+    let translation = translate_zsh_prompt(&value);
+    let imported = ImportedPrompt {
+        value,
+        translated_format: translation.format,
+        unsupported_segments: translation.unsupported_segments,
+        source_file: source_file.map(Path::to_path_buf),
+        line: Some(line_no),
+        origin: origin.to_string(),
+    };
+
+    let target = if is_right_prompt_assignment(&key) {
+        &mut report.right_prompt
+    } else {
+        &mut report.prompt
+    };
+    if origin == "theme" && target.is_some() {
+        return;
+    }
+    *target = Some(imported);
+}
+
+pub fn translate_zsh_prompt(value: &str) -> ZshPromptTranslation {
+    let decoded = decode_prompt_value(value);
+    let chars: Vec<char> = decoded.chars().collect();
+    let mut out = String::new();
+    let mut unsupported_segments = Vec::new();
+    let mut i = 0usize;
+
+    while i < chars.len() {
+        match chars[i] {
+            '%' => {
+                let Some(next) = chars.get(i + 1).copied() else {
+                    out.push('%');
+                    i += 1;
+                    continue;
+                };
+
+                match next {
+                    '%' => {
+                        out.push('%');
+                        i += 2;
+                    }
+                    '#' => {
+                        out.push_str("{symbol}");
+                        i += 2;
+                    }
+                    'n' => {
+                        out.push_str("{user}");
+                        i += 2;
+                    }
+                    'm' | 'M' => {
+                        out.push_str("{host}");
+                        i += 2;
+                    }
+                    '~' | '/' | 'd' | 'c' | 'C' => {
+                        out.push_str("{cwd}");
+                        i += 2;
+                    }
+                    '0'..='9' => {
+                        let mut j = i + 1;
+                        while chars.get(j).is_some_and(|ch| ch.is_ascii_digit()) {
+                            j += 1;
+                        }
+                        if matches!(chars.get(j), Some('~' | '/' | 'd' | 'c' | 'C')) {
+                            out.push_str("{cwd}");
+                            i = j + 1;
+                        } else {
+                            let next_i = (j + 1).min(chars.len());
+                            push_unsupported_segment(
+                                &mut unsupported_segments,
+                                chars_to_string(&chars[i..next_i]),
+                            );
+                            i = next_i;
+                        }
+                    }
+                    'F' | 'K' => {
+                        if matches!(chars.get(i + 2), Some('{')) {
+                            i = take_braced(&chars, i + 2).unwrap_or(i + 2);
+                        } else {
+                            i += 2;
+                        }
+                    }
+                    'f' | 'k' | 'B' | 'b' | 'U' | 'u' | 'S' | 's' | 'E' => {
+                        i += 2;
+                    }
+                    '{' => {
+                        i = take_nonprinting_prompt_escape(&chars, i + 2).unwrap_or(i + 2);
+                    }
+                    '(' => {
+                        let next_i = take_balanced(&chars, i + 1, '(', ')').unwrap_or(i + 2);
+                        push_unsupported_segment(
+                            &mut unsupported_segments,
+                            chars_to_string(&chars[i..next_i]),
+                        );
+                        i = next_i;
+                    }
+                    'D' => {
+                        let next_i = if matches!(chars.get(i + 2), Some('{')) {
+                            take_braced(&chars, i + 2).unwrap_or(i + 2)
+                        } else {
+                            i + 2
+                        };
+                        push_unsupported_segment(
+                            &mut unsupported_segments,
+                            chars_to_string(&chars[i..next_i]),
+                        );
+                        i = next_i;
+                    }
+                    _ => {
+                        let next_i = (i + 2).min(chars.len());
+                        push_unsupported_segment(
+                            &mut unsupported_segments,
+                            chars_to_string(&chars[i..next_i]),
+                        );
+                        i = next_i;
+                    }
+                }
+            }
+            '$' if matches!(chars.get(i + 1), Some('(')) => {
+                let next_i = take_balanced(&chars, i + 1, '(', ')').unwrap_or(i + 2);
+                push_unsupported_segment(
+                    &mut unsupported_segments,
+                    chars_to_string(&chars[i..next_i]),
+                );
+                i = next_i;
+            }
+            '$' if matches!(chars.get(i + 1), Some('{')) => {
+                let next_i = take_braced(&chars, i + 1).unwrap_or(i + 2);
+                push_unsupported_segment(
+                    &mut unsupported_segments,
+                    chars_to_string(&chars[i..next_i]),
+                );
+                i = next_i;
+            }
+            '$' if chars
+                .get(i + 1)
+                .is_some_and(|ch| *ch == '_' || ch.is_ascii_alphabetic()) =>
+            {
+                let next_i = take_variable_like(&chars, i);
+                push_unsupported_segment(
+                    &mut unsupported_segments,
+                    chars_to_string(&chars[i..next_i]),
+                );
+                i = next_i;
+            }
+            '`' => {
+                let next_i = take_backtick_command(&chars, i).unwrap_or(i + 1);
+                push_unsupported_segment(
+                    &mut unsupported_segments,
+                    chars_to_string(&chars[i..next_i]),
+                );
+                i = next_i;
+            }
+            ch => {
+                out.push(ch);
+                i += 1;
+            }
+        }
+    }
+
+    let format = clean_prompt_template(&out);
+    ZshPromptTranslation {
+        format: (!format.trim().is_empty()).then_some(format),
+        unsupported_segments,
+    }
+}
+
+fn decode_prompt_value(value: &str) -> String {
+    let trimmed = value.trim();
+    if let Some(inner) = trimmed.strip_prefix("$'").and_then(|v| v.strip_suffix('\'')) {
+        return decode_c_style_escapes(inner);
+    }
+    if let Some(inner) = trimmed.strip_prefix("$\"").and_then(|v| v.strip_suffix('"')) {
+        return decode_c_style_escapes(inner);
+    }
+    let decoded = if is_wrapped_quote(trimmed) {
+        unquote(trimmed)
+    } else {
+        value.to_string()
+    };
+    decode_c_style_escapes(&decoded)
+}
+
+fn is_wrapped_quote(value: &str) -> bool {
+    value.len() >= 2
+        && ((value.starts_with('\'') && value.ends_with('\''))
+            || (value.starts_with('"') && value.ends_with('"')))
+}
+
+fn decode_c_style_escapes(value: &str) -> String {
+    let mut out = String::new();
+    let mut chars = value.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            out.push(ch);
+            continue;
+        }
+
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some('r') => out.push('\r'),
+            Some('t') => out.push('\t'),
+            Some('a') => out.push('\x07'),
+            Some('b') => out.push('\x08'),
+            Some('e') | Some('E') => out.push('\x1b'),
+            Some('\\') => out.push('\\'),
+            Some('\'') => out.push('\''),
+            Some('"') => out.push('"'),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
+fn take_braced(chars: &[char], open_index: usize) -> Option<usize> {
+    take_balanced(chars, open_index, '{', '}')
+}
+
+fn take_nonprinting_prompt_escape(chars: &[char], start_index: usize) -> Option<usize> {
+    let mut i = start_index;
+    while i + 1 < chars.len() {
+        if chars[i] == '%' && chars[i + 1] == '}' {
+            return Some(i + 2);
+        }
+        i += 1;
+    }
+    None
+}
+
+fn take_balanced(chars: &[char], open_index: usize, open: char, close: char) -> Option<usize> {
+    if chars.get(open_index).copied() != Some(open) {
+        return None;
+    }
+
+    let mut depth = 0usize;
+    let mut single = false;
+    let mut double = false;
+    let mut escaped = false;
+
+    for (offset, ch) in chars[open_index..].iter().copied().enumerate() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        match ch {
+            '\'' if !double => single = !single,
+            '"' if !single => double = !double,
+            ch if ch == open && !single && !double => depth += 1,
+            ch if ch == close && !single && !double => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(open_index + offset + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn take_variable_like(chars: &[char], dollar_index: usize) -> usize {
+    let mut i = dollar_index + 1;
+    while chars
+        .get(i)
+        .is_some_and(|ch| *ch == '_' || ch.is_ascii_alphanumeric())
+    {
+        i += 1;
+    }
+    i
+}
+
+fn take_backtick_command(chars: &[char], start_index: usize) -> Option<usize> {
+    let mut escaped = false;
+    for i in start_index + 1..chars.len() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if chars[i] == '\\' {
+            escaped = true;
+            continue;
+        }
+        if chars[i] == '`' {
+            return Some(i + 1);
+        }
+    }
+    None
+}
+
+fn chars_to_string(chars: &[char]) -> String {
+    chars.iter().collect()
+}
+
+fn push_unsupported_segment(segments: &mut Vec<String>, segment: String) {
+    if segment.trim().is_empty() || segments.iter().any(|existing| existing == &segment) {
+        return;
+    }
+    segments.push(segment);
+}
+
+fn clean_prompt_template(value: &str) -> String {
+    let mut out = String::new();
+    let mut previous_space = false;
+    for ch in value.chars() {
+        if ch == ' ' {
+            if previous_space {
+                continue;
+            }
+            previous_space = true;
+        } else {
+            previous_space = false;
+        }
+        out.push(ch);
+    }
+    out
 }
 
 fn record_assignment(

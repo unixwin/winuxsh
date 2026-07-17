@@ -77,6 +77,7 @@ status: active
 - [x] zsh plugin tier importer Phase 2b: 插件分层报告 completion-only / alias-only / native-needed / unsupported
 - [x] 原生 autosuggestions Phase 4a: 参考 zsh-autosuggestions，用 reedline history hinter 实现
 - [x] 原生 syntax highlighting Phase 5a: 参考 zsh-syntax-highlighting main highlighter，用 reedline 实现
+- [x] zsh prompt/theme compatibility Phase 6a: 扫描 `PROMPT` / `RPROMPT` 与简单 Oh My Zsh theme，翻译为 native prompt template
 
 ## 长期 - v3
 
