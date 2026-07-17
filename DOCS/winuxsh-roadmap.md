@@ -39,9 +39,15 @@ status: active
         修复了 cargo fmt --check 与 Cargo.lock tracked 问题，CI 全绿
 
 ### 脚本执行改进
-- [ ] 从逐行 execute_line 切换到 execute_script_file 以支持 heredoc / 多行 continuation
+- [x] T-4: execute_script 整体 tokenize+parse+execute，支持 heredoc / continuation / 多行 if/for (commit 792416f)
 
 ## 中期 - v2.2
+
+### 工作方式
+- [x] 先做 Nushell / 现代 Windows shell reference audit，仅参考设计，不引入 Nushell 依赖，不 vendor 外部源码
+- [ ] 每个功能阶段先更新 Markdown 计划，再小步实现、测试、提交
+- [x] Obsidian vault 中维护 `winuxsh/` 文件夹作为项目长期记忆
+- [x] Nushell reference audit 落盘: `DOCS/nushell-reference-audit.md`
 
 ### 补全系统增强
 - [ ] 扩充默认 TOML 补全定义的命令覆盖范围

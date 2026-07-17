@@ -1,0 +1,122 @@
+---
+tags: [winuxsh, roadmap, v2.2, reference, nushell]
+created: 2026-07-17
+status: active
+---
+
+# Winuxsh v2.2 Nushell Reference Plan
+
+> Goal: before changing runtime behavior, use modern Windows shell references to keep
+> winuxsh aligned with its target experience: bash/zsh-like workflow on Windows,
+> powered by rubash + winuxcmd + reedline.
+
+## Reference Scope
+
+- Nushell is a **reference source only**. Do not add Nushell crates to winuxsh and do not vendor downloaded source into this repository.
+- Current Nushell reference snapshot: `%TEMP%/winuxsh-reference/nushell`, commit `c1675b7`.
+- Clone/read Nushell outside the repository to study how a modern Windows-friendly shell structures:
+  - completion metadata and argument/value completion
+  - command discovery and PATH integration
+  - history search and edit modes
+  - theming / prompt customization
+  - config loading and compatibility migration
+- Treat Nushell as UX/architecture reference, not shell-language reference. Winuxsh targets bash/zsh-like behavior via rubash, not Nushell syntax or pipeline semantics.
+- Keep winuxsh's locked architecture:
+  - shell language semantics stay in rubash
+  - coreutils stay as winuxcmd.exe through PATH injection
+  - REPL/frontend behavior stays in reedline
+  - no winuxcmd FFI/DLL reintroduction
+  - no PowerShell wildcard semantics in winuxsh command execution
+
+## Candidate References
+
+### Nushell
+
+- Repository: `https://github.com/nushell/nushell`
+- Reference use:
+  - REPL loop boundaries and engine/frontend separation
+  - completion provider organization
+  - config file layout and migration approach
+  - history/search UX and edit-mode settings
+  - prompt/theme conventions
+- Out of scope:
+  - Nushell language semantics
+  - structured data pipeline model
+  - plugin ABI/runtime unless planning v3 plugin framework
+  - replacing rubash or reedline
+
+### Existing local/runtime references
+
+- `reedline 0.33.0`
+  - Reference use: direct implementation source for Vi mode and Ctrl+R history search.
+  - Current finding: default common keybindings already map Ctrl+R to `SearchHistory`; Vi uses `Vi::new(default_vi_insert_keybindings(), default_vi_normal_keybindings())`.
+- `winuxcmd.exe 0.12.0`
+  - Reference use: command list and command-specific `--help` output for default completion definitions.
+  - Current finding: installed via Winget portable zip.
+- `rubash` pinned rev `f08d6d68e4901332c0003be5339f9f80f6251ae2`
+  - Reference use: shell behavior boundary only. Do not duplicate lexer/parser/executor logic in winuxsh.
+
+## Current Guardrails Before Feature Work
+
+- Fix completion integration test drift:
+  - `crates/winuxsh-runtime/tests/completion.rs` still calls `load_completion_dir`.
+  - implementation now exposes `load_completion_dirs`.
+  - Confirmed by `cargo test -p winuxsh-runtime --test completion --locked` on 2026-07-17.
+- Re-run:
+  - `cargo fmt --check`
+  - `cargo test --lib -p winuxsh-runtime --locked`
+  - `cargo test -p winuxsh-runtime --test completion --locked`
+  - `cargo test --test compat -- --ignored` when winuxcmd is available
+
+## v2.2 Execution Plan
+
+### Phase 0 - Reference Audit
+
+- [x] Clone/read Nushell source outside the repository.
+- [x] Summarize relevant patterns into Obsidian/repo docs:
+  - completion model
+  - history/editing model
+  - prompt/theme model
+  - config/profile model
+- [x] Decide what maps cleanly to winuxsh and what is explicitly out of scope.
+- Audit note: `DOCS/nushell-reference-audit.md`
+
+### Phase 1 - Completion Foundation
+
+- Fix the stale completion integration test.
+- Add bundled default completion definitions for a small first batch:
+  - `ls`
+  - `grep`
+  - `find`
+- Add tests proving bundled definitions load without user config and user TOML dirs still work.
+- Keep definitions derived from winuxcmd `--help` output or pinned WinuxCmd source/tag.
+
+### Phase 2 - Completion Expansion
+
+- Expand default definitions after the foundation is green:
+  - `cat`, `cp`, `mv`, `rm`, `mkdir`, `touch`, `chmod`
+- Treat `tar` separately because behavior may come from bundled bsdtar/system tar; verify implementation before defining options.
+- Add value completions only where the value domain is clear and stable.
+
+### Phase 3 - Edit Mode UX
+
+- Add config fields for editor mode:
+  - default `emacs`
+  - optional `vi`
+- Wire reedline edit mode in `repl.rs`.
+- Confirm Ctrl+R remains active in both modes through reedline's common keybindings.
+
+### Phase 4 - User Themes
+
+- Design a TOML theme schema under `~/.winuxsh/themes/*.toml`.
+- Add loader that falls back to existing built-in themes.
+- Keep built-in themes stable for compatibility.
+
+## Obsidian Workflow
+
+- Maintain `winuxsh/` folder in the vault as the active project memory area.
+- Before feature implementation, update the relevant Markdown plan/checklist.
+- After each phase, sync:
+  - `DOCS/winuxsh-roadmap.md`
+  - `DOCS/winuxsh-v2.2-reference-plan.md`
+  - Obsidian `winuxsh/` copies
