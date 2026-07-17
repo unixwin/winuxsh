@@ -63,6 +63,13 @@ fn loads_builtin_winuxcmd_definitions_without_user_dirs() {
     assert_suggests(&state, "ls -", "--all");
     assert_suggests(&state, "grep -", "--ignore-case");
     assert_suggests(&state, "find -", "-name");
+    assert_suggests(&state, "cat -", "--number");
+    assert_suggests(&state, "cp -", "--recursive");
+    assert_suggests(&state, "mv -", "--target-directory");
+    assert_suggests(&state, "rm -", "--force");
+    assert_suggests(&state, "mkdir -", "--parents");
+    assert_suggests(&state, "touch -", "--no-create");
+    assert_suggests(&state, "chmod -", "--recursive");
 }
 
 #[test]

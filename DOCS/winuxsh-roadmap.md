@@ -53,6 +53,7 @@ status: active
 ### 补全系统增强
 - [x] Phase 1 baseline: 修复 completion integration test stale API (`load_completion_dirs`)
 - [x] Phase 2 foundation: 内置 `ls` / `grep` / `find` 默认补全定义
+- [x] Phase 3 expansion: 内置 `cat` / `cp` / `mv` / `rm` / `mkdir` / `touch` / `chmod` 默认补全定义
 - [ ] 扩充默认 TOML 补全定义的命令覆盖范围
 - [ ] bash 自动导入覆盖更复杂的 complete 调用模式
 - [ ] 补全三级缓存的 TTL/失效策略

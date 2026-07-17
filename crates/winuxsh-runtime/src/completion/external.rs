@@ -255,9 +255,16 @@ fn cache_key_to_filename(key: &str) -> String {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DEFAULT_COMPLETION_DEFS: &[(&str, &str)] = &[
+    ("cat", include_str!("../../completions/defaults/cat.toml")),
+    ("chmod", include_str!("../../completions/defaults/chmod.toml")),
+    ("cp", include_str!("../../completions/defaults/cp.toml")),
     ("ls", include_str!("../../completions/defaults/ls.toml")),
-    ("grep", include_str!("../../completions/defaults/grep.toml")),
     ("find", include_str!("../../completions/defaults/find.toml")),
+    ("grep", include_str!("../../completions/defaults/grep.toml")),
+    ("mkdir", include_str!("../../completions/defaults/mkdir.toml")),
+    ("mv", include_str!("../../completions/defaults/mv.toml")),
+    ("rm", include_str!("../../completions/defaults/rm.toml")),
+    ("touch", include_str!("../../completions/defaults/touch.toml")),
 ];
 
 /// Completion plugin that reads per-command completion definitions from a

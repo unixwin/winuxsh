@@ -100,10 +100,11 @@ status: active
 
 ### Phase 2 - Completion Expansion
 
-- [ ] Expand default definitions after the foundation is green:
+- [x] Expand default definitions after the foundation is green:
   - `cat`, `cp`, `mv`, `rm`, `mkdir`, `touch`, `chmod`
 - [ ] Treat `tar` separately because behavior may come from bundled bsdtar/system tar; verify implementation before defining options.
-- [ ] Add value completions only where the value domain is clear and stable.
+- [x] Add value completions only where the value domain is clear and stable.
+- Verification: `cargo fmt --check`, `cargo test --lib -p winuxsh-runtime --locked`, and `cargo test -p winuxsh-runtime --test completion --locked` passed.
 
 ### Phase 3 - Edit Mode UX
 
