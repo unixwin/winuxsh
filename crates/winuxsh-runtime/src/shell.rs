@@ -14,8 +14,8 @@ use crate::completion::CompletionState;
 use crate::config::{load as load_config, AutosuggestConfig, EditorMode, SyntaxHighlightConfig};
 use crate::prompt::WinuxshPrompt;
 use crate::zsh_compat::{
-    apply_alias, apply_safe_aliases, apply_safe_env, completion_defs_from_report, scan,
-    ZshImportOptions,
+    apply_alias, apply_safe_aliases, apply_safe_env, completion_defs_from_report,
+    git_prompt_format_from_report, scan, ZshImportOptions,
 };
 
 use crate::winuxcmd;
@@ -92,7 +92,15 @@ impl Shell {
                     .and_then(|prompt| prompt.translated_format.clone())
             })
         });
-        let prompt = WinuxshPrompt::new(prompt_format, right_prompt_format, &config.theme_name);
+        let git_prompt_format = zsh_report
+            .as_ref()
+            .and_then(git_prompt_format_from_report);
+        let prompt = WinuxshPrompt::new(
+            prompt_format,
+            right_prompt_format,
+            git_prompt_format,
+            &config.theme_name,
+        );
 
         // 7. History file in home dir.
         let history_path = dirs::home_dir()

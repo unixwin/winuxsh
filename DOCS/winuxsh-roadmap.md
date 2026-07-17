@@ -78,6 +78,7 @@ status: active
 - [x] 原生 autosuggestions Phase 4a: 参考 zsh-autosuggestions，用 reedline history hinter 实现
 - [x] 原生 syntax highlighting Phase 5a: 参考 zsh-syntax-highlighting main highlighter，用 reedline 实现
 - [x] zsh prompt/theme compatibility Phase 6a: 扫描 `PROMPT` / `RPROMPT` 与简单 Oh My Zsh theme，翻译为 native prompt template
+- [x] zsh Git prompt compatibility Phase 6b: 将 `$(git_prompt_info)` 桥接到 native `{git_prompt}` / `.git/HEAD` 渲染
 
 ## 长期 - v3
 

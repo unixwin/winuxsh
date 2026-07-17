@@ -7,7 +7,8 @@ use winuxsh_runtime::config::ZshCompatLevel;
 use winuxsh_runtime::zsh_compat::{
     apply_safe_aliases, apply_safe_env, completion_defs_from_report, safe_path_value,
     CompletionAsset, DiagnosticSeverity, ImportedAlias, ImportedEnv, ZshImportOptions,
-    PluginImportKind, PluginImportTier, ZshImportReport, scan, translate_zsh_prompt,
+    PluginImportKind, PluginImportTier, ZshImportReport, git_prompt_format_from_report, scan,
+    translate_zsh_prompt,
 };
 
 #[test]
@@ -189,7 +190,7 @@ fn scans_profile_prompts_and_static_oh_my_zsh_theme() {
     std::fs::create_dir_all(&theme_dir).unwrap();
     std::fs::write(
         theme_dir.join("simple.zsh-theme"),
-        "PROMPT='%F{blue}%n@%m:%2~ $(git_prompt_info)%f %# '\nRPROMPT='%D{%H:%M}'\n",
+        "PROMPT='%F{blue}%n@%m:%2~ $(git_prompt_info)%f %# '\nRPROMPT='%D{%H:%M}'\nZSH_THEME_GIT_PROMPT_PREFIX='git:('\nZSH_THEME_GIT_PROMPT_SUFFIX=')'\n",
     )
     .unwrap();
 
@@ -231,6 +232,10 @@ source $ZSH/oh-my-zsh.sh
         .unsupported_segments
         .iter()
         .any(|segment| segment == "%D{%H:%M}"));
+    assert_eq!(
+        git_prompt_format_from_report(&report).as_deref(),
+        Some("git:({git_branch})")
+    );
 
     let _ = std::fs::remove_dir_all(temp);
 }
@@ -243,7 +248,7 @@ fn imports_theme_prompt_when_profile_prompt_is_absent() {
     std::fs::create_dir_all(&theme_dir).unwrap();
     std::fs::write(
         theme_dir.join("minimal.zsh-theme"),
-        "PROMPT='%B%F{green}%3~%f%b %# '\n",
+        "PROMPT='%B%F{green}%3~%f%b \\$(git_prompt_info) %# '\nZSH_THEME_GIT_PROMPT_PREFIX='['\nZSH_THEME_GIT_PROMPT_SUFFIX=']'\n",
     )
     .unwrap();
 
@@ -274,7 +279,11 @@ source $ZSH/oh-my-zsh.sh
     assert_eq!(prompt.origin, "theme");
     assert_eq!(
         prompt.translated_format.as_deref(),
-        Some("{cwd} {symbol} ")
+        Some("{cwd} {git_prompt} {symbol} ")
+    );
+    assert_eq!(
+        git_prompt_format_from_report(&report).as_deref(),
+        Some("[{git_branch}]")
     );
 
     let _ = std::fs::remove_dir_all(temp);
@@ -287,12 +296,18 @@ fn translates_zsh_prompt_common_subset_and_reports_dynamic_segments() {
 
     assert_eq!(
         translation.format.as_deref(),
-        Some("{user}@{host}:{cwd} {symbol} ")
+        Some("{user}@{host}:{cwd} {git_prompt} {symbol} ")
     );
-    assert!(translation
+    assert!(!translation
         .unsupported_segments
         .iter()
         .any(|segment| segment == "$(git_prompt_info)"));
+
+    let escaped = translate_zsh_prompt(r"%~ \$(git_prompt_info) %# ");
+    assert_eq!(
+        escaped.format.as_deref(),
+        Some("{cwd} {git_prompt} {symbol} ")
+    );
 }
 
 #[test]

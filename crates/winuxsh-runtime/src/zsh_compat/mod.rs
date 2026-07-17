@@ -53,6 +53,7 @@ pub struct ZshImportReport {
     pub theme: Option<String>,
     pub prompt: Option<ImportedPrompt>,
     pub right_prompt: Option<ImportedPrompt>,
+    pub git_prompt: ImportedGitPrompt,
     pub edit_mode: Option<String>,
     pub zstyles: Vec<ImportedZstyle>,
     pub highlight_styles: Vec<ImportedHighlightStyle>,
@@ -98,6 +99,10 @@ impl ZshImportReport {
                 .as_ref()
                 .and_then(|prompt| prompt.translated_format.as_deref())
                 .unwrap_or("(none)")
+        ));
+        out.push(format!(
+            "git prompt: {}",
+            git_prompt_format_from_report(self).unwrap_or_else(|| "(none)".to_string())
         ));
         out.push(format!(
             "edit mode: {}",
@@ -231,6 +236,25 @@ pub struct ImportedPrompt {
     pub origin: String,
 }
 
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct ImportedGitPrompt {
+    pub prefix: Option<String>,
+    pub suffix: Option<String>,
+    pub dirty: Option<String>,
+    pub clean: Option<String>,
+    pub variables: Vec<ImportedGitPromptVar>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportedGitPromptVar {
+    pub key: String,
+    pub value: String,
+    pub translated_value: Option<String>,
+    pub source_file: Option<PathBuf>,
+    pub line: Option<usize>,
+    pub origin: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ZshPromptTranslation {
     pub format: Option<String>,
@@ -293,7 +317,24 @@ pub fn scan(options: &ZshImportOptions) -> ZshImportReport {
         scan_oh_my_zsh_layout(options, &mut report, &mut env_map);
     }
 
+    refresh_prompt_translations(&mut report);
+
     report
+}
+
+pub fn git_prompt_format_from_report(report: &ZshImportReport) -> Option<String> {
+    if report.git_prompt.variables.is_empty() {
+        return None;
+    }
+    let mut format = String::new();
+    if let Some(prefix) = &report.git_prompt.prefix {
+        format.push_str(prefix);
+    }
+    format.push_str("{git_branch}");
+    if let Some(suffix) = &report.git_prompt.suffix {
+        format.push_str(suffix);
+    }
+    Some(clean_prompt_template(&format))
 }
 
 pub fn apply_safe_env(report: &ZshImportReport) -> SafeApplySummary {
@@ -566,6 +607,17 @@ fn scan_content(
         if let Some((key, value)) = parse_assignment(line) {
             if is_prompt_assignment(&key) && mode != ScanMode::Plugin {
                 record_prompt_assignment(
+                    key,
+                    value,
+                    source_file,
+                    line_no,
+                    report,
+                    scan_mode_origin(mode),
+                );
+                continue;
+            }
+            if is_git_prompt_assignment(&key) && mode != ScanMode::Plugin {
+                record_git_prompt_assignment(
                     key,
                     value,
                     source_file,
@@ -1035,6 +1087,43 @@ fn is_right_prompt_assignment(key: &str) -> bool {
     matches!(key, "RPROMPT" | "RPS1")
 }
 
+fn is_git_prompt_assignment(key: &str) -> bool {
+    key.starts_with("ZSH_THEME_GIT_PROMPT_")
+}
+
+fn record_git_prompt_assignment(
+    key: String,
+    value: String,
+    source_file: Option<&Path>,
+    line_no: usize,
+    report: &mut ZshImportReport,
+    origin: &str,
+) {
+    let value = decode_prompt_value(&value);
+    let translated_value = translate_zsh_prompt_literal(&value);
+    let short_key = key
+        .strip_prefix("ZSH_THEME_GIT_PROMPT_")
+        .unwrap_or(&key)
+        .to_ascii_lowercase();
+
+    match short_key.as_str() {
+        "prefix" => report.git_prompt.prefix = Some(translated_value.clone()),
+        "suffix" => report.git_prompt.suffix = Some(translated_value.clone()),
+        "dirty" => report.git_prompt.dirty = Some(translated_value.clone()),
+        "clean" => report.git_prompt.clean = Some(translated_value.clone()),
+        _ => {}
+    }
+
+    report.git_prompt.variables.push(ImportedGitPromptVar {
+        key,
+        value,
+        translated_value: Some(translated_value),
+        source_file: source_file.map(Path::to_path_buf),
+        line: Some(line_no),
+        origin: origin.to_string(),
+    });
+}
+
 fn record_prompt_assignment(
     key: String,
     value: String,
@@ -1065,6 +1154,17 @@ fn record_prompt_assignment(
     *target = Some(imported);
 }
 
+fn refresh_prompt_translations(report: &mut ZshImportReport) {
+    for prompt in [&mut report.prompt, &mut report.right_prompt]
+        .into_iter()
+        .flatten()
+    {
+        let translation = translate_zsh_prompt(&prompt.value);
+        prompt.translated_format = translation.format;
+        prompt.unsupported_segments = translation.unsupported_segments;
+    }
+}
+
 pub fn translate_zsh_prompt(value: &str) -> ZshPromptTranslation {
     let decoded = decode_prompt_value(value);
     let chars: Vec<char> = decoded.chars().collect();
@@ -1074,6 +1174,24 @@ pub fn translate_zsh_prompt(value: &str) -> ZshPromptTranslation {
 
     while i < chars.len() {
         match chars[i] {
+            '\\' if matches!(chars.get(i + 1), Some('$'))
+                && matches!(chars.get(i + 2), Some('(')) =>
+            {
+                if let Some((next_i, command)) = command_substitution_at(&chars, i + 1) {
+                    if is_git_prompt_info_command(&command) {
+                        out.push_str("{git_prompt}");
+                    } else {
+                        push_unsupported_segment(
+                            &mut unsupported_segments,
+                            chars_to_string(&chars[i + 1..next_i]),
+                        );
+                    }
+                    i = next_i;
+                } else {
+                    out.push(chars[i]);
+                    i += 1;
+                }
+            }
             '%' => {
                 let Some(next) = chars.get(i + 1).copied() else {
                     out.push('%');
@@ -1163,12 +1281,19 @@ pub fn translate_zsh_prompt(value: &str) -> ZshPromptTranslation {
                 }
             }
             '$' if matches!(chars.get(i + 1), Some('(')) => {
-                let next_i = take_balanced(&chars, i + 1, '(', ')').unwrap_or(i + 2);
-                push_unsupported_segment(
-                    &mut unsupported_segments,
-                    chars_to_string(&chars[i..next_i]),
-                );
-                i = next_i;
+                if let Some((next_i, command)) = command_substitution_at(&chars, i) {
+                    if is_git_prompt_info_command(&command) {
+                        out.push_str("{git_prompt}");
+                    } else {
+                        push_unsupported_segment(
+                            &mut unsupported_segments,
+                            chars_to_string(&chars[i..next_i]),
+                        );
+                    }
+                    i = next_i;
+                } else {
+                    i += 2;
+                }
             }
             '$' if matches!(chars.get(i + 1), Some('{')) => {
                 let next_i = take_braced(&chars, i + 1).unwrap_or(i + 2);
@@ -1191,10 +1316,15 @@ pub fn translate_zsh_prompt(value: &str) -> ZshPromptTranslation {
             }
             '`' => {
                 let next_i = take_backtick_command(&chars, i).unwrap_or(i + 1);
-                push_unsupported_segment(
-                    &mut unsupported_segments,
-                    chars_to_string(&chars[i..next_i]),
-                );
+                let command = chars_to_string(&chars[i + 1..next_i.saturating_sub(1)]);
+                if is_git_prompt_info_command(&command) {
+                    out.push_str("{git_prompt}");
+                } else {
+                    push_unsupported_segment(
+                        &mut unsupported_segments,
+                        chars_to_string(&chars[i..next_i]),
+                    );
+                }
                 i = next_i;
             }
             ch => {
@@ -1209,6 +1339,10 @@ pub fn translate_zsh_prompt(value: &str) -> ZshPromptTranslation {
         format: (!format.trim().is_empty()).then_some(format),
         unsupported_segments,
     }
+}
+
+fn translate_zsh_prompt_literal(value: &str) -> String {
+    translate_zsh_prompt(value).format.unwrap_or_default()
 }
 
 fn decode_prompt_value(value: &str) -> String {
@@ -1275,6 +1409,23 @@ fn take_nonprinting_prompt_escape(chars: &[char], start_index: usize) -> Option<
         i += 1;
     }
     None
+}
+
+fn command_substitution_at(chars: &[char], dollar_index: usize) -> Option<(usize, String)> {
+    if !matches!(chars.get(dollar_index), Some('$'))
+        || !matches!(chars.get(dollar_index + 1), Some('('))
+    {
+        return None;
+    }
+    let next_i = take_balanced(chars, dollar_index + 1, '(', ')')?;
+    let command = chars_to_string(&chars[dollar_index + 2..next_i.saturating_sub(1)])
+        .trim()
+        .to_string();
+    Some((next_i, command))
+}
+
+fn is_git_prompt_info_command(command: &str) -> bool {
+    command.trim() == "git_prompt_info"
 }
 
 fn take_balanced(chars: &[char], open_index: usize, open: char, close: char) -> Option<usize> {

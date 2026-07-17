@@ -295,11 +295,26 @@ Current supported subset:
   `%2~`, `%3~`, `%#`, and `%%`.
 - color/style escapes `%F{...}`, `%K{...}`, `%f`, `%k`, `%B`, `%b`, `%U`,
   `%u`, `%S`, `%s`, `%{...%}` are stripped safely.
-- unsupported prompt substitutions such as `$(git_prompt_info)`, `${...}`,
-  backticks, `%D{...}`, and conditional `%(... )` are reported as
-  unsupported prompt segments.
+- unsupported prompt substitutions such as `${...}`, backticks, `%D{...}`,
+  `git_prompt_status`, `git_prompt_ahead`, and conditional `%(... )` are
+  reported as unsupported prompt segments.
 - native `[shell].prompt_format` and `[shell].right_prompt_format` remain
   authoritative over imported zsh prompts.
+
+Implementation status: Phase 6b is implemented on
+`codex/zsh-compat-scanner`.
+
+Phase 6b adds a native bridge for common Oh My Zsh Git prompt forms:
+
+- translate `$(git_prompt_info)` and escaped `\$(git_prompt_info)` to a native
+  `{git_prompt}` placeholder.
+- scan `ZSH_THEME_GIT_PROMPT_PREFIX` and `ZSH_THEME_GIT_PROMPT_SUFFIX` from
+  `.zshrc` or static theme files, stripping zsh color/style escapes.
+- render `{git_prompt}` from native `.git/HEAD` discovery instead of executing
+  zsh Git helper functions.
+- keep detailed `git_prompt_status`, `git_prompt_ahead`, async Git, dirty, and
+  per-file status segments report-only until a tested native status provider
+  exists.
 
 ## Phase 7 - Oh-My-Winuxsh Compatibility Layer
 
