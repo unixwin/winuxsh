@@ -188,6 +188,12 @@ Fallback:
 
 ## Phase 4 - Native Autosuggestions
 
+Implementation status: Phase 4a is implemented on `codex/zsh-compat-scanner`.
+The first implementation is intentionally native and narrow: winuxsh now wires
+a reedline history hinter into the REPL, honors familiar zsh-autosuggestions
+configuration names where they map cleanly, and keeps completion/match-prev-cmd
+strategies report-only until tests exist.
+
 Implement zsh-autosuggestions behavior natively in reedline:
 
 - history strategy first
@@ -202,6 +208,14 @@ Honor familiar config names when set:
 - `ZSH_AUTOSUGGEST_STRATEGY`
 - `ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE`
 - selected widget lists if they can map to reedline events
+
+Current supported subset:
+
+- `history` strategy via native reedline hints.
+- `ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE` subset: `fg=`, `bg=`, `bold`,
+  `underline`, `italic`, `standout` / `reverse`.
+- `ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE`.
+- Native TOML override under `[zsh.autosuggestions]`.
 
 ## Phase 5 - Native Syntax Highlighting
 

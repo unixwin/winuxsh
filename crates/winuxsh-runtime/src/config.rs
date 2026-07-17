@@ -81,6 +81,7 @@ pub struct ZshConfig {
     pub plugins: Vec<String>,
     pub compat_level: ZshCompatLevel,
     pub auto_apply: bool,
+    pub autosuggestions: AutosuggestConfig,
 }
 
 impl Default for ZshConfig {
@@ -93,8 +94,75 @@ impl Default for ZshConfig {
             plugins: Vec::new(),
             compat_level: ZshCompatLevel::Safe,
             auto_apply: false,
+            autosuggestions: AutosuggestConfig::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutosuggestConfig {
+    pub enabled: bool,
+    pub strategies: Vec<String>,
+    pub highlight_style: String,
+    pub buffer_max_size: Option<usize>,
+}
+
+impl Default for AutosuggestConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            strategies: vec!["history".to_string()],
+            highlight_style: "fg=8".to_string(),
+            buffer_max_size: None,
+        }
+    }
+}
+
+impl AutosuggestConfig {
+    pub fn with_env_overrides(mut self) -> Self {
+        if let Ok(value) = std::env::var("ZSH_AUTOSUGGEST_STRATEGY") {
+            let strategies = parse_autosuggest_strategy_value(&value);
+            if !strategies.is_empty() {
+                self.strategies = strategies;
+            }
+        }
+        if let Ok(value) = std::env::var("ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE") {
+            if !value.trim().is_empty() {
+                self.highlight_style = value;
+            }
+        }
+        if let Ok(value) = std::env::var("ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE") {
+            match value.trim().parse::<usize>() {
+                Ok(max_size) => self.buffer_max_size = Some(max_size),
+                Err(err) => log::warn!(
+                    "Invalid ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE '{}': {}",
+                    value,
+                    err
+                ),
+            }
+        }
+        self
+    }
+
+    pub fn history_strategy_enabled(&self) -> bool {
+        self.enabled
+            && self
+                .strategies
+                .iter()
+                .any(|strategy| strategy.eq_ignore_ascii_case("history"))
+    }
+}
+
+fn parse_autosuggest_strategy_value(value: &str) -> Vec<String> {
+    value
+        .trim()
+        .trim_start_matches('(')
+        .trim_end_matches(')')
+        .split(|ch: char| ch.is_whitespace() || ch == ',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(|part| part.trim_matches('"').trim_matches('\'').to_ascii_lowercase())
+        .collect()
 }
 
 /// Top-level TOML structure.
@@ -143,6 +211,15 @@ struct ZshToml {
     plugins: Option<Vec<String>>,
     compat_level: Option<String>,
     auto_apply: Option<bool>,
+    autosuggestions: Option<AutosuggestToml>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AutosuggestToml {
+    enabled: Option<bool>,
+    strategy: Option<Vec<String>>,
+    highlight_style: Option<String>,
+    buffer_max_size: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -235,6 +312,20 @@ fn build_zsh_config(parsed: ZshToml) -> ZshConfig {
             .map(|level| ZshCompatLevel::from_config_value(&level))
             .unwrap_or_default(),
         auto_apply: parsed.auto_apply.unwrap_or(false),
+        autosuggestions: parsed
+            .autosuggestions
+            .map(build_autosuggest_config)
+            .unwrap_or_default(),
+    }
+}
+
+fn build_autosuggest_config(parsed: AutosuggestToml) -> AutosuggestConfig {
+    let defaults = AutosuggestConfig::default();
+    AutosuggestConfig {
+        enabled: parsed.enabled.unwrap_or(defaults.enabled),
+        strategies: parsed.strategy.unwrap_or(defaults.strategies),
+        highlight_style: parsed.highlight_style.unwrap_or(defaults.highlight_style),
+        buffer_max_size: parsed.buffer_max_size,
     }
 }
 
@@ -286,6 +377,12 @@ import_oh_my_zsh = true
 plugins = ["git", "zsh-autosuggestions"]
 compat_level = "warn"
 auto_apply = true
+
+[zsh.autosuggestions]
+enabled = true
+strategy = ["history", "completion"]
+highlight_style = "fg=#ff00ff,bg=cyan,bold,underline"
+buffer_max_size = 20
 "#,
         );
 
@@ -296,5 +393,40 @@ auto_apply = true
         assert_eq!(config.zsh.plugins, vec!["git", "zsh-autosuggestions"]);
         assert_eq!(config.zsh.compat_level, ZshCompatLevel::Warn);
         assert!(config.zsh.auto_apply);
+        assert!(config.zsh.autosuggestions.enabled);
+        assert_eq!(
+            config.zsh.autosuggestions.strategies,
+            vec!["history", "completion"]
+        );
+        assert_eq!(
+            config.zsh.autosuggestions.highlight_style,
+            "fg=#ff00ff,bg=cyan,bold,underline"
+        );
+        assert_eq!(config.zsh.autosuggestions.buffer_max_size, Some(20));
+    }
+
+    #[test]
+    fn parses_zsh_autosuggest_strategy_env_style() {
+        assert_eq!(
+            parse_autosuggest_strategy_value("(history completion)"),
+            vec!["history", "completion"]
+        );
+        assert_eq!(
+            parse_autosuggest_strategy_value("history,match_prev_cmd"),
+            vec!["history", "match_prev_cmd"]
+        );
+    }
+
+    #[test]
+    fn history_strategy_requires_enabled_history() {
+        let mut config = AutosuggestConfig::default();
+        assert!(config.history_strategy_enabled());
+
+        config.enabled = false;
+        assert!(!config.history_strategy_enabled());
+
+        config.enabled = true;
+        config.strategies = vec!["completion".to_string()];
+        assert!(!config.history_strategy_enabled());
     }
 }

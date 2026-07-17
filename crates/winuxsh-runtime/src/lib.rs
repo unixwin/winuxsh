@@ -4,6 +4,7 @@
 //! This crate provides the interactive shell experience: reedline REPL,
 //! completion system, theming, configuration, and Windows integration.
 
+pub mod autosuggest;
 pub mod completion;
 pub mod config;
 pub mod ctrl_c;
@@ -15,7 +16,9 @@ pub mod winuxcmd;
 pub mod zsh_compat;
 
 pub use shell::Shell;
-pub use config::{EditorConfig, EditorMode, ShellConfig, ZshCompatLevel, ZshConfig};
+pub use config::{
+    AutosuggestConfig, EditorConfig, EditorMode, ShellConfig, ZshCompatLevel, ZshConfig,
+};
 pub use theme::Theme;
 pub use completion::WinuxshCompleter;
 pub use completion::CompletionState;

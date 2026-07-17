@@ -11,7 +11,7 @@ use reedline::Reedline;
 use rubash::{executor::Executor, lexer::tokenize, parser::parse};
 
 use crate::completion::CompletionState;
-use crate::config::{load as load_config, EditorMode};
+use crate::config::{load as load_config, AutosuggestConfig, EditorMode};
 use crate::prompt::WinuxshPrompt;
 use crate::zsh_compat::{
     apply_alias, apply_safe_aliases, apply_safe_env, completion_defs_from_report, scan,
@@ -27,6 +27,7 @@ pub struct Shell {
     pub prompt: WinuxshPrompt,
     pub history_path: std::path::PathBuf,
     pub editor_mode: EditorMode,
+    pub autosuggest: AutosuggestConfig,
     pub line_editor: Option<Reedline>,
 }
 
@@ -101,6 +102,7 @@ impl Shell {
             prompt,
             history_path,
             editor_mode: config.editor.edit_mode,
+            autosuggest: config.zsh.autosuggestions.with_env_overrides(),
             line_editor: None,
         })
     }

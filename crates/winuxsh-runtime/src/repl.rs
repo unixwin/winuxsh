@@ -6,6 +6,7 @@ use reedline::{
     MenuBuilder, Reedline, ReedlineEvent, ReedlineMenu, Signal, Vi,
 };
 
+use crate::autosuggest::HistoryAutosuggestHinter;
 use crate::completion::WinuxshCompleter;
 use crate::config::EditorMode;
 use crate::shell::Shell;
@@ -36,11 +37,17 @@ pub fn build_line_editor(shell: &mut Shell) -> anyhow::Result<Reedline> {
         ListMenu::default().with_name(HISTORY_MENU),
     ));
 
-    let editor = Reedline::create()
+    let mut editor = Reedline::create()
         .with_history(Box::new(history))
         .with_menu(completion_menu)
         .with_menu(history_menu)
         .with_edit_mode(build_edit_mode(shell.editor_mode));
+
+    if shell.autosuggest.history_strategy_enabled() {
+        editor = editor.with_hinter(Box::new(HistoryAutosuggestHinter::new(
+            &shell.autosuggest,
+        )));
+    }
 
     Ok(editor)
 }
