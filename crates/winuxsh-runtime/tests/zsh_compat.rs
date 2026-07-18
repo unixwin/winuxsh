@@ -347,6 +347,120 @@ alias dps='docker ps --format table'
 }
 
 #[test]
+fn imports_native_kubectl_preset_when_omz_plugin_dir_is_missing() {
+    let temp = unique_temp_dir("winuxsh-zsh-native-kubectl-preset");
+    std::fs::create_dir_all(&temp).unwrap();
+    std::fs::write(
+        temp.join(".zshrc"),
+        r#"
+plugins=(kubectl)
+"#,
+    )
+    .unwrap();
+
+    let report = scan(&ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: true,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    });
+
+    let kubectl = plugin(&report, "kubectl");
+    assert!(kubectl.source_dir.is_none());
+    assert_eq!(kubectl.import_kind, PluginImportKind::Partial);
+    assert_eq!(kubectl.tier, PluginImportTier::Tier2Partial);
+    assert!(kubectl.alias_count >= 80);
+    assert!(kubectl
+        .capabilities
+        .iter()
+        .any(|cap| cap == "native_aliases"));
+    assert!(kubectl
+        .capabilities
+        .iter()
+        .any(|cap| cap == "dynamic_completions_required"));
+    assert!(report.aliases.iter().any(|alias| {
+        alias.name == "k" && alias.value == "kubectl" && alias.origin == "native-plugin:kubectl"
+    }));
+    assert!(report.aliases.iter().any(|alias| {
+        alias.name == "kgp"
+            && alias.value == "kubectl get pods"
+            && alias.origin == "native-plugin:kubectl"
+    }));
+    assert!(report.aliases.iter().any(|alias| {
+        alias.name == "krrd"
+            && alias.value == "kubectl rollout restart deployment"
+            && alias.origin == "native-plugin:kubectl"
+    }));
+
+    let source = report
+        .dynamic_completion_sources
+        .iter()
+        .find(|source| source.command == "kubectl")
+        .expect("expected kubectl dynamic completion preset");
+    assert_eq!(source.args, vec!["completion", "zsh"]);
+    assert_eq!(source.origin, "native-plugin:kubectl");
+
+    let plan = import_plan_toml(
+        &ZshImportOptions {
+            enabled: true,
+            zdotdir: temp.clone(),
+            import_zshrc: true,
+            import_oh_my_zsh: true,
+            plugins: Vec::new(),
+            compat_level: ZshCompatLevel::Safe,
+        },
+        &report,
+    );
+    assert!(plan.contains("\"k\" = \"kubectl\""));
+    assert!(plan.contains("[zsh.dynamic_completions]"));
+    assert!(plan.contains("enabled = false"));
+    assert!(plan.contains("commands = [\"kubectl\"]"));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn native_kubectl_preset_does_not_override_user_aliases() {
+    let temp = unique_temp_dir("winuxsh-zsh-native-kubectl-preset-no-override");
+    std::fs::create_dir_all(&temp).unwrap();
+    std::fs::write(
+        temp.join(".zshrc"),
+        r#"
+plugins=(kubectl)
+alias kgp='kubectl get pods -A'
+"#,
+    )
+    .unwrap();
+
+    let report = scan(&ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: true,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    });
+
+    let kgp_aliases: Vec<_> = report
+        .aliases
+        .iter()
+        .filter(|alias| alias.name == "kgp")
+        .collect();
+    assert_eq!(kgp_aliases.len(), 1);
+    assert_eq!(kgp_aliases[0].value, "kubectl get pods -A");
+    assert_eq!(kgp_aliases[0].origin, "profile");
+    assert!(report.aliases.iter().any(|alias| {
+        alias.name == "kaf"
+            && alias.value == "kubectl apply -f"
+            && alias.origin == "native-plugin:kubectl"
+    }));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
 fn reports_dynamic_completion_generators_in_plugin_scripts() {
     let temp = unique_temp_dir("winuxsh-zsh-dynamic-completion");
     let kubectl_plugin_dir = temp.join(".oh-my-zsh").join("plugins").join("kubectl");
@@ -421,6 +535,8 @@ alias k=kubectl
         &report,
     );
     assert!(plan.contains("dynamic zsh completion generators detected: 1"));
+    assert!(plan.contains("[zsh.dynamic_completions]"));
+    assert!(plan.contains("commands = [\"kubectl\"]"));
 
     let _ = std::fs::remove_dir_all(temp);
 }

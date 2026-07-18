@@ -519,6 +519,24 @@ Current implementation:
 - Tests cover config parsing, allowlist rejection, successful `.cmd` generator
   execution, and cache reuse after the generator disappears.
 
+## Phase 10 - Real-World Plugin Presets
+
+Implementation status: Phase 10a is implemented on
+`codex/zsh-compat-scanner`.
+
+Phase 10 adds per-plugin presets for high-value Oh My Zsh plugins where a safe
+native mapping is clear:
+
+- `plugins=(kubectl)` without a readable Oh My Zsh plugin directory now receives
+  a conservative native alias pack derived from the upstream Oh My Zsh kubectl
+  plugin.
+- Function-like aliases and `eval`/`compdef` helper functions remain skipped.
+- The native kubectl preset also registers the structured dynamic completion
+  source `kubectl completion zsh`.
+- Import plans now emit a disabled `[zsh.dynamic_completions]` suggestion block
+  with discovered command allowlist entries, so users can review and opt in.
+- User aliases discovered from `.zshrc` still win over native preset aliases.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh

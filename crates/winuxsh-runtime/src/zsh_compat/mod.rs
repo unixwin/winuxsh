@@ -115,6 +115,124 @@ const NATIVE_DOCKER_ALIASES: &[(&str, &str)] = &[
     ("dxcit", "docker container exec -it"),
 ];
 
+const NATIVE_KUBECTL_ALIASES: &[(&str, &str)] = &[
+    ("k", "kubectl"),
+    ("kaf", "kubectl apply -f"),
+    ("kapk", "kubectl apply -k"),
+    ("keti", "kubectl exec -t -i"),
+    ("kcuc", "kubectl config use-context"),
+    ("kcsc", "kubectl config set-context"),
+    ("kcdc", "kubectl config delete-context"),
+    ("kccc", "kubectl config current-context"),
+    ("kcgc", "kubectl config get-contexts"),
+    ("kdel", "kubectl delete"),
+    ("kdelf", "kubectl delete -f"),
+    ("kdelk", "kubectl delete -k"),
+    ("kge", "kubectl get events --sort-by=\".lastTimestamp\""),
+    ("kgew", "kubectl get events --sort-by=\".lastTimestamp\" --watch"),
+    ("kgp", "kubectl get pods"),
+    ("kgpl", "kubectl get pods -l"),
+    ("kgpn", "kubectl get pods -n"),
+    ("kgpsl", "kubectl get pods --show-labels"),
+    ("kgpa", "kubectl get pods --all-namespaces"),
+    ("kgpw", "kubectl get pods --watch"),
+    ("kgpwide", "kubectl get pods -o wide"),
+    ("kep", "kubectl edit pods"),
+    ("kdp", "kubectl describe pods"),
+    ("kdelp", "kubectl delete pods"),
+    ("kgpall", "kubectl get pods --all-namespaces -o wide"),
+    ("kgs", "kubectl get svc"),
+    ("kgsa", "kubectl get svc --all-namespaces"),
+    ("kgsw", "kubectl get svc --watch"),
+    ("kgswide", "kubectl get svc -o wide"),
+    ("kes", "kubectl edit svc"),
+    ("kds", "kubectl describe svc"),
+    ("kdels", "kubectl delete svc"),
+    ("kgi", "kubectl get ingress"),
+    ("kgia", "kubectl get ingress --all-namespaces"),
+    ("kei", "kubectl edit ingress"),
+    ("kdi", "kubectl describe ingress"),
+    ("kdeli", "kubectl delete ingress"),
+    ("kgns", "kubectl get namespaces"),
+    ("kens", "kubectl edit namespace"),
+    ("kdns", "kubectl describe namespace"),
+    ("kdelns", "kubectl delete namespace"),
+    ("kcn", "kubectl config set-context --current --namespace"),
+    ("kgcm", "kubectl get configmaps"),
+    ("kgcma", "kubectl get configmaps --all-namespaces"),
+    ("kecm", "kubectl edit configmap"),
+    ("kdcm", "kubectl describe configmap"),
+    ("kdelcm", "kubectl delete configmap"),
+    ("kgsec", "kubectl get secret"),
+    ("kgseca", "kubectl get secret --all-namespaces"),
+    ("kdsec", "kubectl describe secret"),
+    ("kdelsec", "kubectl delete secret"),
+    ("kgd", "kubectl get deployment"),
+    ("kgda", "kubectl get deployment --all-namespaces"),
+    ("kgdw", "kubectl get deployment --watch"),
+    ("kgdwide", "kubectl get deployment -o wide"),
+    ("ked", "kubectl edit deployment"),
+    ("kdd", "kubectl describe deployment"),
+    ("kdeld", "kubectl delete deployment"),
+    ("ksd", "kubectl scale deployment"),
+    ("krsd", "kubectl rollout status deployment"),
+    ("krrd", "kubectl rollout restart deployment"),
+    ("kgrs", "kubectl get replicaset"),
+    ("kdrs", "kubectl describe replicaset"),
+    ("kers", "kubectl edit replicaset"),
+    ("krh", "kubectl rollout history"),
+    ("kru", "kubectl rollout undo"),
+    ("kgss", "kubectl get statefulset"),
+    ("kgssa", "kubectl get statefulset --all-namespaces"),
+    ("kgssw", "kubectl get statefulset --watch"),
+    ("kgsswide", "kubectl get statefulset -o wide"),
+    ("kess", "kubectl edit statefulset"),
+    ("kdss", "kubectl describe statefulset"),
+    ("kdelss", "kubectl delete statefulset"),
+    ("ksss", "kubectl scale statefulset"),
+    ("krsss", "kubectl rollout status statefulset"),
+    ("krrss", "kubectl rollout restart statefulset"),
+    ("kpf", "kubectl port-forward"),
+    ("kga", "kubectl get all"),
+    ("kgaa", "kubectl get all --all-namespaces"),
+    ("kl", "kubectl logs"),
+    ("kl1h", "kubectl logs --since 1h"),
+    ("kl1m", "kubectl logs --since 1m"),
+    ("kl1s", "kubectl logs --since 1s"),
+    ("klf", "kubectl logs -f"),
+    ("klf1h", "kubectl logs --since 1h -f"),
+    ("klf1m", "kubectl logs --since 1m -f"),
+    ("klf1s", "kubectl logs --since 1s -f"),
+    ("kcp", "kubectl cp"),
+    ("kgno", "kubectl get nodes"),
+    ("kgnosl", "kubectl get nodes --show-labels"),
+    ("keno", "kubectl edit node"),
+    ("kdno", "kubectl describe node"),
+    ("kdelno", "kubectl delete node"),
+    ("kgpvc", "kubectl get pvc"),
+    ("kgpvca", "kubectl get pvc --all-namespaces"),
+    ("kgpvcw", "kubectl get pvc --watch"),
+    ("kepvc", "kubectl edit pvc"),
+    ("kdpvc", "kubectl describe pvc"),
+    ("kdelpvc", "kubectl delete pvc"),
+    ("kdsa", "kubectl describe sa"),
+    ("kdelsa", "kubectl delete sa"),
+    ("kgds", "kubectl get daemonset"),
+    ("kgdsa", "kubectl get daemonset --all-namespaces"),
+    ("kgdsw", "kubectl get daemonset --watch"),
+    ("keds", "kubectl edit daemonset"),
+    ("kdds", "kubectl describe daemonset"),
+    ("kdelds", "kubectl delete daemonset"),
+    ("kgcj", "kubectl get cronjob"),
+    ("kecj", "kubectl edit cronjob"),
+    ("kdcj", "kubectl describe cronjob"),
+    ("kdelcj", "kubectl delete cronjob"),
+    ("kgj", "kubectl get job"),
+    ("kej", "kubectl edit job"),
+    ("kdj", "kubectl describe job"),
+    ("kdelj", "kubectl delete job"),
+];
+
 #[derive(Debug, Clone)]
 pub struct ZshImportOptions {
     pub enabled: bool,
@@ -600,7 +718,15 @@ pub fn import_plan_toml(options: &ZshImportOptions, report: &ZshImportReport) ->
             "# dynamic zsh completion generators detected: {}",
             report.dynamic_completion_sources.len()
         ));
-        out.push("# They require a native winuxsh completion provider/cache before use.".to_string());
+        out.push("# They remain disabled until you explicitly set enabled = true.".to_string());
+        out.push("[zsh.dynamic_completions]".to_string());
+        out.push("enabled = false".to_string());
+        out.push(format!(
+            "commands = {}",
+            toml_array(&dynamic_completion_commands_for_import_plan(report))
+        ));
+        out.push("timeout_millis = 1500".to_string());
+        out.push("cache_ttl_secs = 86400".to_string());
     }
 
     out.join("\n")
@@ -1541,8 +1667,14 @@ fn scan_oh_my_zsh_layout(
 
         let Some(source_dir) = source_dir else {
             let alias_count = apply_native_plugin_pack(report, &plugin_name);
-            if alias_count > 0 {
-                report.plugins.push(native_alias_plugin(plugin_name, alias_count));
+            let has_dynamic_completion =
+                apply_native_dynamic_completion_preset(report, &plugin_name);
+            if alias_count > 0 || has_dynamic_completion {
+                report.plugins.push(native_plugin_preset(
+                    plugin_name,
+                    alias_count,
+                    has_dynamic_completion,
+                ));
             } else {
                 report.plugins.push(unresolved_plugin(plugin_name, 1));
             }
@@ -1663,7 +1795,16 @@ fn unresolved_plugin(name: String, diagnostics_count: usize) -> ImportedPlugin {
     }
 }
 
-fn native_alias_plugin(name: String, alias_count: usize) -> ImportedPlugin {
+fn native_plugin_preset(name: String, alias_count: usize, has_dynamic_completion: bool) -> ImportedPlugin {
+    let mut capabilities = Vec::new();
+    if alias_count > 0 {
+        capabilities.push("native_aliases".to_string());
+        capabilities.push("aliases".to_string());
+    }
+    if has_dynamic_completion {
+        capabilities.push("dynamic_completions_required".to_string());
+    }
+
     ImportedPlugin {
         name,
         source_dir: None,
@@ -1671,9 +1812,17 @@ fn native_alias_plugin(name: String, alias_count: usize) -> ImportedPlugin {
         completion_files: Vec::new(),
         alias_count,
         diagnostics_count: 0,
-        tier: PluginImportTier::Tier1Safe,
-        import_kind: PluginImportKind::AliasOnly,
-        capabilities: vec!["native_aliases".to_string(), "aliases".to_string()],
+        tier: if has_dynamic_completion {
+            PluginImportTier::Tier2Partial
+        } else {
+            PluginImportTier::Tier1Safe
+        },
+        import_kind: if has_dynamic_completion {
+            PluginImportKind::Partial
+        } else {
+            PluginImportKind::AliasOnly
+        },
+        capabilities,
         unsupported_features: Vec::new(),
     }
 }
@@ -1706,6 +1855,33 @@ fn native_plugin_aliases(plugin_name: &str) -> Option<&'static [(&'static str, &
     match plugin_name {
         "git" => Some(NATIVE_GIT_ALIASES),
         "docker" => Some(NATIVE_DOCKER_ALIASES),
+        "kubectl" => Some(NATIVE_KUBECTL_ALIASES),
+        _ => None,
+    }
+}
+
+fn apply_native_dynamic_completion_preset(report: &mut ZshImportReport, plugin_name: &str) -> bool {
+    let Some((command, args)) = native_dynamic_completion_source(plugin_name) else {
+        return false;
+    };
+
+    push_dynamic_completion_source(
+        report,
+        DynamicCompletionSource {
+            command: command.to_string(),
+            args: args.iter().map(|arg| (*arg).to_string()).collect(),
+            target_shell: "zsh".to_string(),
+            source_file: None,
+            line: None,
+            origin: format!("native-plugin:{}", plugin_name),
+        },
+    );
+    true
+}
+
+fn native_dynamic_completion_source(plugin_name: &str) -> Option<(&'static str, &'static [&'static str])> {
+    match plugin_name {
+        "kubectl" => Some(("kubectl", &["completion", "zsh"])),
         _ => None,
     }
 }
@@ -2476,6 +2652,21 @@ fn aliases_for_import_plan(report: &ZshImportReport) -> Vec<(String, String)> {
     let mut aliases: Vec<(String, String)> = aliases.into_iter().collect();
     aliases.sort_by(|left, right| left.0.cmp(&right.0));
     aliases
+}
+
+fn dynamic_completion_commands_for_import_plan(report: &ZshImportReport) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut commands = Vec::new();
+    for source in &report.dynamic_completion_sources {
+        if source.target_shell == "zsh"
+            && is_safe_name(&source.command)
+            && seen.insert(source.command.clone())
+        {
+            commands.push(source.command.clone());
+        }
+    }
+    commands.sort();
+    commands
 }
 
 fn compat_level_name(level: ZshCompatLevel) -> &'static str {

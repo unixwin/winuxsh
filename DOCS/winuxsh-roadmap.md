@@ -102,6 +102,7 @@ status: active
 - [x] Phase 8d dynamic completion translation: 用注入 runner 将 `tool completion zsh` 输出翻译为 winuxsh `CommandDef`，尚不在启动时执行外部命令
 - [x] Phase 8e dynamic completion runner: 显式 allowlist + timeout 执行动态 generator，默认不运行外部命令
 - [x] Phase 9 dynamic completion provider: `[zsh.dynamic_completions]` 配置、磁盘缓存、启动接入，默认关闭
+- [x] Phase 10a kubectl preset: `plugins=(kubectl)` 缺少 OMZ 目录时提供 native alias pack + disabled dynamic completion preset
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证
