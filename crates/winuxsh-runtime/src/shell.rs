@@ -841,8 +841,15 @@ impl Shell {
         normalize_cd_windows_drive_args(&mut ast);
         normalize_winuxcmd_slash_drive_args(&mut ast);
 
-        let code = match self.executor.execute_ast(&ast) {
-            Ok(()) => self.executor.last_exit_code(),
+        let execution = self
+            .execute_host_synced_simple_ast(&ast)
+            .unwrap_or_else(|| match self.executor.execute_ast(&ast) {
+                Ok(()) => Ok(self.executor.last_exit_code()),
+                Err(err) => Err(err),
+            });
+
+        let code = match execution {
+            Ok(code) => code,
             Err(rubash::executor::ExecuteError::ExitCode(code)) => code,
             Err(rubash::executor::ExecuteError::Return(code)) => code,
             Err(rubash::executor::ExecuteError::CommandNotFound(cmd)) => {
@@ -857,6 +864,28 @@ impl Shell {
 
         self.sync_process_cwd_from_executor_pwd();
         Ok(code)
+    }
+
+    fn execute_host_synced_simple_ast(
+        &mut self,
+        ast: &Ast,
+    ) -> Option<Result<i32, rubash::executor::ExecuteError>> {
+        if !is_host_synced_simple_sequence(ast) {
+            return None;
+        }
+
+        for command in &ast.commands {
+            match self.executor.execute_command(command) {
+                Ok(()) => {
+                    self.sync_process_cwd_from_executor_pwd();
+                }
+                Err(rubash::executor::ExecuteError::ExitCode(code)) => return Some(Ok(code)),
+                Err(rubash::executor::ExecuteError::Return(code)) => return Some(Ok(code)),
+                Err(err) => return Some(Err(err)),
+            }
+        }
+
+        Some(Ok(self.executor.last_exit_code()))
     }
 }
 
@@ -885,11 +914,84 @@ fn normalize_cd_windows_drive_args(ast: &mut Ast) {
         }
 
         for word in command.words.iter_mut().skip(1) {
-            if let Some(normalized) = windows_drive_path_to_slash_drive(word) {
+            if let Some(normalized) =
+                cd_tilde_path_to_slash_drive(word).or_else(|| windows_drive_path_to_slash_drive(word))
+            {
                 *word = normalized;
             }
         }
     }
+}
+
+fn cd_tilde_path_to_slash_drive(value: &str) -> Option<String> {
+    if !cfg!(windows) {
+        return None;
+    }
+
+    let rest = if value == "~" {
+        ""
+    } else {
+        value.strip_prefix("~/")?
+    };
+
+    let home = std::env::var("HOME")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            std::env::var("USERPROFILE")
+                .ok()
+                .filter(|value| !value.is_empty())
+        })?;
+    let home = windows_drive_path_to_slash_drive(&home).unwrap_or_else(|| home.replace('\\', "/"));
+    if rest.is_empty() {
+        Some(home)
+    } else {
+        Some(format!("{}/{}", home.trim_end_matches('/'), rest))
+    }
+}
+
+fn is_host_synced_simple_sequence(ast: &Ast) -> bool {
+    if !cfg!(windows) || !ast.commands.iter().any(is_cd_command) {
+        return false;
+    }
+
+    ast.commands.iter().all(is_host_synced_simple_command)
+}
+
+fn is_host_synced_simple_command(command: &rubash::parser::CommandNode) -> bool {
+    command.pipe.is_none()
+        && !command.background
+        && command.and_or.is_none()
+        && !command.inverted
+        && command.pipeline_command.is_none()
+        && command.and_or_list.is_none()
+        && command.time_command.is_none()
+        && command.background_command.is_none()
+        && command.inverted_command.is_none()
+        && !command.subshell
+        && !command.subshell_end
+        && command.for_command.is_none()
+        && command.arithmetic_command.is_none()
+        && command.if_command.is_none()
+        && command.loop_command.is_none()
+        && command.conditional_command.is_none()
+        && command.subshell_command.is_none()
+        && command.case_command.is_none()
+        && command.select_command.is_none()
+        && command.function_command.is_none()
+        && command.brace_group.is_none()
+        && command.coproc_command.is_none()
+        && !command
+            .words
+            .first()
+            .is_some_and(|word| word == "set" || word == "trap")
+}
+
+fn is_cd_command(command: &rubash::parser::CommandNode) -> bool {
+    command
+        .words
+        .first()
+        .is_some_and(|word| word.eq_ignore_ascii_case("cd"))
 }
 
 fn normalize_winuxcmd_slash_drive_args(ast: &mut Ast) {

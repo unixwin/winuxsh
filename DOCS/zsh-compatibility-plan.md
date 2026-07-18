@@ -1058,6 +1058,40 @@ contract:
 - command completion treats empty command position and partial command words
   correctly, so blank Tab lists commands and `gre<Tab>` can suggest `grep`.
 
+## Phase 17 - Host Contract Test Matrix
+
+Implementation status: completed on `master`.
+
+This phase turns the Windows-native behavior fixed after Phase 16h into
+binary-level regression tests. The tests should exercise the same `winuxsh -c`
+surface used by agents and scripts, not only internal unit helpers.
+
+Coverage target:
+
+- `cwd`: `cd`, `pwd`, and a native Windows child process agree.
+- `PATH`: executables discovered through child-process `PATH` can run.
+- `env`: exported rubash variables reach native Windows child processes.
+- `home`: `~` resolves to the normal Windows user home, not an isolated prefix.
+- `stdout` / `stderr`: redirection keeps streams separated.
+- `exit-code`: nonzero shell exit status becomes the process exit status.
+
+Implementation notes:
+
+- added a binary integration test suite for `winuxsh -c` host behavior.
+- simple top-level scripts containing `cd` now execute through a conservative
+  host-synced wrapper so `cd; pwd; native-child` agree on cwd immediately.
+- `cd ~` is normalized before rubash execution so `~` remains the normal
+  Windows home while visible `pwd` output stays `C:/...`.
+- complex AST scripts still use rubash whole-file execution for heredoc,
+  continuation, loops, functions, and other bash semantics.
+
+Rules:
+
+- do not change rubash parser/executor semantics.
+- do not introduce MSYS2/Git Bash style path authority.
+- keep `/c/...` as compatibility input only; default visible paths stay
+  Windows-native `C:/...`.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh

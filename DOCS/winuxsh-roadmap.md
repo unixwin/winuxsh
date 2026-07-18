@@ -125,7 +125,7 @@ status: active
 
 ### Rubash 能力验证
 - [ ] 梳理 rubash 已通过的 bash 上游测试能力矩阵
-- [ ] 为 winuxsh host 层补充 PATH/env/cwd/home/stdout/stderr/exit-code 嵌入测试
+- [x] Phase 17 host contract matrix: 为 winuxsh host 层补充 PATH/env/cwd/home/stdout/stderr/exit-code 二进制级集成测试
 - [ ] 作业控制/内建命令语义优先走 rubash，不在 winuxsh 重复实现
 
 ## 关键架构决策 (锁定)
