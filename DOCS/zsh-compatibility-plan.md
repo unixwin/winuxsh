@@ -318,6 +318,19 @@ Phase 6b adds a native bridge for common Oh My Zsh Git prompt forms:
 
 ## Phase 7 - Oh-My-Winuxsh Compatibility Layer
 
+Implementation status: Phase 7a is implemented on
+`codex/zsh-compat-scanner`.
+
+Phase 7a adds a safe local import-plan command:
+
+- `winuxsh --zsh-compat-import-plan` scans the current zsh setup and prints a
+  reviewable `.winshrc.toml` patch.
+- The command must not write `~/.winshrc.toml` or copy plugin/theme files.
+- The generated patch should enable `[zsh]` safe auto-apply, preserve zsh
+  plugin names, and include native prompt/editor/alias translations where they
+  are already supported.
+- Unsupported features remain visible through `--zsh-compat-report`.
+
 Once the importer works, build a local package layer:
 
 - install/import zsh-compatible completion packs

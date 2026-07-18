@@ -91,6 +91,7 @@ status: active
 ### Oh-My-Winuxsh
 - [ ] 主题市场
 - [ ] 插件管理 CLI
+- [x] Phase 7a import-plan CLI: `--zsh-compat-import-plan` 输出可审阅 `.winshrc.toml` patch，不自动写用户配置
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证

@@ -7,7 +7,7 @@ use winuxsh_runtime::config::ZshCompatLevel;
 use winuxsh_runtime::zsh_compat::{
     apply_safe_aliases, apply_safe_env, completion_defs_from_report, safe_path_value,
     CompletionAsset, DiagnosticSeverity, ImportedAlias, ImportedEnv, ZshImportOptions,
-    PluginImportKind, PluginImportTier, ZshImportReport, git_prompt_format_from_report, scan,
+    PluginImportKind, PluginImportTier, ZshImportReport, git_prompt_format_from_report, import_plan_toml, scan,
     translate_zsh_prompt,
 };
 
@@ -310,6 +310,45 @@ fn translates_zsh_prompt_common_subset_and_reports_dynamic_segments() {
     );
 }
 
+#[test]
+fn emits_reviewable_import_plan_toml() {
+    let temp = unique_temp_dir("winuxsh-zsh-import-plan");
+    std::fs::create_dir_all(&temp).unwrap();
+    std::fs::write(
+        temp.join(".zshrc"),
+        r#"
+plugins=(git zsh-autosuggestions)
+alias ll='ls -l'
+bindkey -v
+PROMPT='%n:%~ %# '
+RPROMPT='%m'
+"#,
+    )
+    .unwrap();
+
+    let options = ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: false,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    };
+    let report = scan(&options);
+    let plan = import_plan_toml(&options, &report);
+
+    toml::from_str::<toml::Value>(&plan).unwrap();
+    assert!(plan.contains("[zsh]"));
+    assert!(plan.contains("auto_apply = true"));
+    assert!(plan.contains("plugins = [\"git\", \"zsh-autosuggestions\"]"));
+    assert!(plan.contains("[editor]"));
+    assert!(plan.contains("edit_mode = \"vi\""));
+    assert!(plan.contains("prompt_format = \"{user}:{cwd} {symbol} \""));
+    assert!(plan.contains("right_prompt_format = \"{host}\""));
+    assert!(plan.contains("\"ll\" = \"ls -l\""));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
 #[test]
 fn safe_path_value_prepends_imported_entries_and_dedupes() {
     let _lock = env_lock().lock().unwrap();
