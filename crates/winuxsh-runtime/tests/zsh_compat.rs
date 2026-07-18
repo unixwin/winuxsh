@@ -904,6 +904,63 @@ bindkey '^G' widgety-cancel
 }
 
 #[test]
+fn suggests_native_widget_presets_for_recognized_zle_plugins() {
+    let temp = unique_temp_dir("winuxsh-zsh-native-widget-presets");
+    let plugin_dir = temp
+        .join(".oh-my-zsh")
+        .join("plugins")
+        .join("native-widgets");
+    std::fs::create_dir_all(&plugin_dir).unwrap();
+    std::fs::write(
+        temp.join(".zshrc"),
+        r#"
+plugins=(native-widgets)
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        plugin_dir.join("native-widgets.plugin.zsh"),
+        r#"
+zle -N autosuggest-accept _zsh_autosuggest_widget_accept
+bindkey '^ ' autosuggest-accept
+zle -N history-substring-search-up
+zle -N history-substring-search-down
+bindkey '^[[A' history-substring-search-up
+bindkey '^[[B' history-substring-search-down
+"#,
+    )
+    .unwrap();
+
+    let report = scan(&ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: true,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    });
+
+    let plan = import_plan_toml(
+        &ZshImportOptions {
+            enabled: true,
+            zdotdir: temp.clone(),
+            import_zshrc: true,
+            import_oh_my_zsh: true,
+            plugins: Vec::new(),
+            compat_level: ZshCompatLevel::Safe,
+        },
+        &report,
+    );
+
+    assert!(plan.contains("[zsh.native_widgets]"));
+    assert!(plan.contains("enabled = false"));
+    assert!(plan.contains("presets = [\"autosuggestions\", \"history_substring_search\"]"));
+    assert!(plan.contains("import_bindkeys = true"));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
 fn builds_runtime_completion_commands_from_explicit_allowlist() {
     let report = ZshImportReport {
         dynamic_completion_sources: vec![

@@ -877,6 +877,13 @@ pub fn import_plan_toml(options: &ZshImportOptions, report: &ZshImportReport) ->
         ));
         out.push("# Review and translate these into native reedline widgets/keybindings.".to_string());
         out.push("# winuxsh never sources ZLE widget function bodies directly.".to_string());
+        let presets = native_widget_presets_for_import_plan(report);
+        if !presets.is_empty() {
+            out.push("[zsh.native_widgets]".to_string());
+            out.push("enabled = false".to_string());
+            out.push(format!("presets = {}", toml_array(&presets)));
+            out.push("import_bindkeys = true".to_string());
+        }
         for todo in native_widget_todos_for_import_plan(report) {
             out.push(format!("# {}", todo));
         }
@@ -2971,6 +2978,21 @@ fn native_widget_todos_for_import_plan(report: &ZshImportReport) -> Vec<String> 
     }
     todos.sort();
     todos
+}
+
+fn native_widget_presets_for_import_plan(report: &ZshImportReport) -> Vec<String> {
+    let mut presets = HashSet::new();
+    for suggestion in &report.native_widgets {
+        if suggestion.widget.starts_with("autosuggest-") {
+            presets.insert("autosuggestions".to_string());
+        }
+        if suggestion.widget.starts_with("history-substring-search-") {
+            presets.insert("history_substring_search".to_string());
+        }
+    }
+    let mut presets: Vec<String> = presets.into_iter().collect();
+    presets.sort();
+    presets
 }
 
 fn dynamic_completion_script_generator_count(report: &ZshImportReport) -> usize {

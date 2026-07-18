@@ -714,6 +714,42 @@ Out of scope for Phase 13a:
 - translating arbitrary widget function bodies.
 - implementing a keybinding DSL in TOML before reedline-native shims are chosen.
 
+## Phase 14 - Native ZLE Widget Bindings
+
+Implementation status: Phase 14a is implemented on
+`codex/zsh-compat-scanner`.
+
+Phase 14a turns recognized ZLE widget suggestions into opt-in reedline
+keybindings. This is the first phase where dynamic widget-shaped plugins become
+user-visible behavior instead of report-only diagnostics.
+
+Planned config:
+
+```toml
+[zsh.native_widgets]
+enabled = true
+presets = ["autosuggestions", "history_substring_search"]
+import_bindkeys = true
+```
+
+Current mapping:
+
+- `autosuggest-accept` -> reedline `HistoryHintComplete`.
+- `autosuggest-execute` -> accept hint then enter.
+- `autosuggest-partial-accept` -> reedline `HistoryHintWordComplete`.
+- `history-substring-search-up` / `history-substring-search-down` -> native
+  reedline history traversal as the closest safe first pass.
+
+Rules:
+
+- disabled by default; import plan may suggest the block but not enable it.
+- only recognized widget names are mapped.
+- only safe key sequences are parsed (`^X`, `^ `, arrow escape forms, and
+  plain one-character keys).
+- no arbitrary ZLE function bodies are executed.
+- custom keybindings are imported only when both `[zsh].auto_apply = true` and
+  `[zsh.native_widgets].enabled = true` are set.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh

@@ -14,13 +14,15 @@ use rubash::{executor::Executor, lexer::tokenize, parser::parse};
 use crate::completion::runtime::RuntimeCompletionPlugin;
 use crate::completion::CompletionState;
 use crate::config::{
-    load as load_config, AutosuggestConfig, EditorMode, HookConfig, SyntaxHighlightConfig,
+    load as load_config, AutosuggestConfig, EditorMode, HookConfig, NativeWidgetConfig,
+    SyntaxHighlightConfig,
 };
 use crate::prompt::WinuxshPrompt;
 use crate::zsh_compat::{
     apply_alias, apply_safe_aliases, apply_safe_env, completion_defs_from_report,
     dynamic_completion_defs_from_report_with_options, git_prompt_format_from_report, scan,
-    runtime_completion_commands_from_report, DynamicCompletionRunOptions, ZshImportOptions,
+    runtime_completion_commands_from_report, DynamicCompletionRunOptions, NativeWidgetSuggestion,
+    ZshImportOptions,
 };
 
 use crate::winuxcmd;
@@ -34,6 +36,8 @@ pub struct Shell {
     pub editor_mode: EditorMode,
     pub autosuggest: AutosuggestConfig,
     pub syntax_highlighting: SyntaxHighlightConfig,
+    pub native_widgets: NativeWidgetConfig,
+    pub native_widget_bindings: Vec<NativeWidgetSuggestion>,
     pub hooks: HookConfig,
     pub line_editor: Option<Reedline>,
 }
@@ -162,6 +166,16 @@ impl Shell {
                     .or_insert_with(|| style.value.clone());
             }
         }
+        let native_widget_bindings = if config.zsh.native_widgets.enabled
+            && config.zsh.native_widgets.import_bindkeys
+        {
+            zsh_report
+                .as_ref()
+                .map(|report| report.native_widgets.clone())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
 
         Ok(Self {
             executor,
@@ -171,6 +185,8 @@ impl Shell {
             editor_mode: config.editor.edit_mode,
             autosuggest: config.zsh.autosuggestions.with_env_overrides(),
             syntax_highlighting: syntax_highlighting.with_env_overrides(),
+            native_widgets: config.zsh.native_widgets,
+            native_widget_bindings,
             hooks: config.hooks,
             line_editor: None,
         })
@@ -401,6 +417,8 @@ mod tests {
             editor_mode: EditorMode::Emacs,
             autosuggest: AutosuggestConfig::default(),
             syntax_highlighting: SyntaxHighlightConfig::default(),
+            native_widgets: NativeWidgetConfig::default(),
+            native_widget_bindings: Vec::new(),
             hooks,
             line_editor: None,
         }

@@ -94,6 +94,7 @@ pub struct ZshConfig {
     pub syntax_highlighting: SyntaxHighlightConfig,
     pub dynamic_completions: DynamicCompletionConfig,
     pub runtime_completions: RuntimeCompletionConfig,
+    pub native_widgets: NativeWidgetConfig,
 }
 
 impl Default for ZshConfig {
@@ -110,6 +111,7 @@ impl Default for ZshConfig {
             syntax_highlighting: SyntaxHighlightConfig::default(),
             dynamic_completions: DynamicCompletionConfig::default(),
             runtime_completions: RuntimeCompletionConfig::default(),
+            native_widgets: NativeWidgetConfig::default(),
         }
     }
 }
@@ -148,6 +150,23 @@ impl Default for RuntimeCompletionConfig {
             enabled: false,
             commands: Vec::new(),
             timeout_millis: 1000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeWidgetConfig {
+    pub enabled: bool,
+    pub presets: Vec<String>,
+    pub import_bindkeys: bool,
+}
+
+impl Default for NativeWidgetConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            presets: Vec::new(),
+            import_bindkeys: true,
         }
     }
 }
@@ -354,6 +373,7 @@ struct ZshToml {
     syntax_highlighting: Option<SyntaxHighlightToml>,
     dynamic_completions: Option<DynamicCompletionToml>,
     runtime_completions: Option<RuntimeCompletionToml>,
+    native_widgets: Option<NativeWidgetToml>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -386,6 +406,13 @@ struct RuntimeCompletionToml {
     enabled: Option<bool>,
     commands: Option<Vec<String>>,
     timeout_millis: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NativeWidgetToml {
+    enabled: Option<bool>,
+    presets: Option<Vec<String>>,
+    import_bindkeys: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -511,6 +538,10 @@ fn build_zsh_config(parsed: ZshToml) -> ZshConfig {
             .runtime_completions
             .map(build_runtime_completion_config)
             .unwrap_or_default(),
+        native_widgets: parsed
+            .native_widgets
+            .map(build_native_widget_config)
+            .unwrap_or_default(),
     }
 }
 
@@ -551,6 +582,15 @@ fn build_runtime_completion_config(parsed: RuntimeCompletionToml) -> RuntimeComp
         enabled: parsed.enabled.unwrap_or(defaults.enabled),
         commands: parsed.commands.unwrap_or(defaults.commands),
         timeout_millis: parsed.timeout_millis.unwrap_or(defaults.timeout_millis),
+    }
+}
+
+fn build_native_widget_config(parsed: NativeWidgetToml) -> NativeWidgetConfig {
+    let defaults = NativeWidgetConfig::default();
+    NativeWidgetConfig {
+        enabled: parsed.enabled.unwrap_or(defaults.enabled),
+        presets: parsed.presets.unwrap_or(defaults.presets),
+        import_bindkeys: parsed.import_bindkeys.unwrap_or(defaults.import_bindkeys),
     }
 }
 
@@ -662,6 +702,11 @@ cache_dir = "C:/Users/me/.winuxsh/cache/zsh-completions"
 enabled = true
 commands = ["npm"]
 timeout_millis = 750
+
+[zsh.native_widgets]
+enabled = true
+presets = ["autosuggestions", "history_substring_search"]
+import_bindkeys = true
 "#,
         );
 
@@ -703,6 +748,12 @@ timeout_millis = 750
         assert!(config.zsh.runtime_completions.enabled);
         assert_eq!(config.zsh.runtime_completions.commands, vec!["npm"]);
         assert_eq!(config.zsh.runtime_completions.timeout_millis, 750);
+        assert!(config.zsh.native_widgets.enabled);
+        assert_eq!(
+            config.zsh.native_widgets.presets,
+            vec!["autosuggestions", "history_substring_search"]
+        );
+        assert!(config.zsh.native_widgets.import_bindkeys);
     }
 
     #[test]
