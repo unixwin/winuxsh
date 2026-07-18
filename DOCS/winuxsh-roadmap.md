@@ -106,6 +106,7 @@ status: active
 - [x] Phase 10b npm preset: `plugins=(npm)` 缺少 OMZ 目录时提供安全 npm alias pack，并标记 F2/ZLE toggle 为 native UX 待实现
 - [x] Phase 10c dynamic plugin shape scan: 区分 `script_generator` 与 `runtime_provider`，并标记 ZLE/hook/autoload 这类动态插件机制
 - [x] Phase 11a runtime completion provider: `[zsh.runtime_completions]` 显式 allowlist + timeout，在 Tab 时接入 npm-style `completion -- "${words[@]}"` 动态候选
+- [x] Phase 12a native lifecycle hooks: `[hooks]` 支持 `precmd` / `preexec` / `chpwd` REPL hook surface，不 source zsh 函数体
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证

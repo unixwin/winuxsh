@@ -13,7 +13,9 @@ use rubash::{executor::Executor, lexer::tokenize, parser::parse};
 
 use crate::completion::runtime::RuntimeCompletionPlugin;
 use crate::completion::CompletionState;
-use crate::config::{load as load_config, AutosuggestConfig, EditorMode, SyntaxHighlightConfig};
+use crate::config::{
+    load as load_config, AutosuggestConfig, EditorMode, HookConfig, SyntaxHighlightConfig,
+};
 use crate::prompt::WinuxshPrompt;
 use crate::zsh_compat::{
     apply_alias, apply_safe_aliases, apply_safe_env, completion_defs_from_report,
@@ -32,6 +34,7 @@ pub struct Shell {
     pub editor_mode: EditorMode,
     pub autosuggest: AutosuggestConfig,
     pub syntax_highlighting: SyntaxHighlightConfig,
+    pub hooks: HookConfig,
     pub line_editor: Option<Reedline>,
 }
 
@@ -168,6 +171,7 @@ impl Shell {
             editor_mode: config.editor.edit_mode,
             autosuggest: config.zsh.autosuggestions.with_env_overrides(),
             syntax_highlighting: syntax_highlighting.with_env_overrides(),
+            hooks: config.hooks,
             line_editor: None,
         })
     }
@@ -206,6 +210,82 @@ impl Shell {
         }
 
         Ok(self.executor.last_exit_code())
+    }
+
+    /// Execute a line as an interactive REPL command, including native hook
+    /// points that mirror common zsh lifecycle concepts.
+    pub fn execute_interactive_line(&mut self, line: &str) -> anyhow::Result<i32> {
+        let old_pwd = self.executor.get_env("PWD").map(str::to_owned);
+        self.run_preexec_hooks(line);
+        let code = self.execute_line(line)?;
+        let new_pwd = self.executor.get_env("PWD").map(str::to_owned);
+        if let (Some(old_pwd), Some(new_pwd)) = (old_pwd, new_pwd) {
+            self.run_chpwd_hooks_if_changed(&old_pwd, &new_pwd);
+        }
+        self.update_completion_state();
+        Ok(code)
+    }
+
+    /// Run native hooks before rendering the next prompt.
+    pub fn run_precmd_hooks(&mut self) {
+        let hooks = self.hooks.precmd.clone();
+        let last_exit_code = self.executor.last_exit_code().to_string();
+        self.run_hook_scripts(&hooks, &[("WINUXSH_LAST_EXIT_CODE", last_exit_code)]);
+    }
+
+    /// Run native hooks immediately before the user's interactive command.
+    pub fn run_preexec_hooks(&mut self, command: &str) {
+        let command = command.trim();
+        if command.is_empty() {
+            return;
+        }
+        let hooks = self.hooks.preexec.clone();
+        self.run_hook_scripts(&hooks, &[("WINUXSH_PREEXEC_COMMAND", command.to_string())]);
+    }
+
+    /// Run native hooks when the interactive command changed directories.
+    pub fn run_chpwd_hooks_if_changed(&mut self, old_pwd: &str, new_pwd: &str) {
+        if same_shell_dir(old_pwd, new_pwd) {
+            return;
+        }
+        let hooks = self.hooks.chpwd.clone();
+        self.run_hook_scripts(
+            &hooks,
+            &[
+                ("WINUXSH_OLDPWD", old_pwd.to_string()),
+                ("WINUXSH_PWD", new_pwd.to_string()),
+            ],
+        );
+    }
+
+    fn run_hook_scripts(&mut self, hooks: &[String], context: &[(&str, String)]) {
+        if hooks.is_empty() {
+            return;
+        }
+
+        for (name, value) in context {
+            self.executor.set_env(name, value);
+        }
+
+        for hook in hooks {
+            match self.execute_script(hook) {
+                Ok(0) => {}
+                Ok(code) => log::warn!("native hook exited with status {}", code),
+                Err(err) => log::warn!("native hook failed: {}", err),
+            }
+        }
+
+        if !context.is_empty() {
+            let unset = format!(
+                "unset {}",
+                context
+                    .iter()
+                    .map(|(name, _)| *name)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+            let _ = self.execute_script(&unset);
+        }
     }
 
     /// Update the shared completion state from the current env + cwd.
@@ -261,5 +341,93 @@ impl Shell {
         }
 
         Ok(self.executor.last_exit_code())
+    }
+}
+
+fn same_shell_dir(left: &str, right: &str) -> bool {
+    let left = left.trim_end_matches(['/', '\\']).replace('/', "\\");
+    let right = right.trim_end_matches(['/', '\\']).replace('/', "\\");
+    if cfg!(windows) {
+        left.eq_ignore_ascii_case(&right)
+    } else {
+        left == right
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn native_lifecycle_hooks_run_for_interactive_commands() {
+        let temp = unique_temp_dir("winuxsh-native-hooks");
+        let next_dir = temp.join("next");
+        std::fs::create_dir_all(&next_dir).unwrap();
+        let next_arg = shell_quote(&shell_display_path(&next_dir));
+
+        let mut shell = test_shell(HookConfig {
+            precmd: vec!["HOOK_PRECMD=\"precmd:$WINUXSH_LAST_EXIT_CODE\"".to_string()],
+            preexec: vec!["HOOK_PREEXEC=\"preexec:$WINUXSH_PREEXEC_COMMAND\"".to_string()],
+            chpwd: vec!["HOOK_CHPWD=\"chpwd:$WINUXSH_OLDPWD->$WINUXSH_PWD\"".to_string()],
+        });
+
+        shell.run_precmd_hooks();
+        shell
+            .execute_interactive_line(&format!("cd {}", next_arg))
+            .unwrap();
+
+        assert_eq!(shell.executor.get_env("HOOK_PRECMD"), Some("precmd:0"));
+        let preexec = shell.executor.get_env("HOOK_PREEXEC").unwrap_or_default();
+        assert!(preexec.starts_with("preexec:cd "), "{preexec}");
+        let chpwd = shell.executor.get_env("HOOK_CHPWD").unwrap_or_default();
+        assert!(chpwd.starts_with("chpwd:"), "{chpwd}");
+        assert!(chpwd.contains("->"), "{chpwd}");
+        assert!(shell.executor.get_env("WINUXSH_LAST_EXIT_CODE").is_none());
+        assert!(shell.executor.get_env("WINUXSH_PREEXEC_COMMAND").is_none());
+        assert!(shell.executor.get_env("WINUXSH_OLDPWD").is_none());
+        assert!(shell.executor.get_env("WINUXSH_PWD").is_none());
+
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
+    fn test_shell(hooks: HookConfig) -> Shell {
+        Shell {
+            executor: Executor::new(),
+            completion_state: Arc::new(Mutex::new(CompletionState::new(PathBuf::from(".")))),
+            prompt: WinuxshPrompt::new(None, None, None, "default"),
+            history_path: PathBuf::from(".winuxsh_history"),
+            editor_mode: EditorMode::Emacs,
+            autosuggest: AutosuggestConfig::default(),
+            syntax_highlighting: SyntaxHighlightConfig::default(),
+            hooks,
+            line_editor: None,
+        }
+    }
+
+    fn unique_temp_dir(prefix: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("{}-{}-{}", prefix, std::process::id(), nanos))
+    }
+
+    fn shell_quote(value: &str) -> String {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+
+    fn shell_display_path(path: &std::path::Path) -> String {
+        let mut value = path.to_string_lossy().replace('\\', "/");
+        if cfg!(windows)
+            && value.len() >= 3
+            && value.as_bytes()[1] == b':'
+            && value.as_bytes()[2] == b'/'
+        {
+            let drive = value.as_bytes()[0] as char;
+            value = format!("/{}{}", drive.to_ascii_lowercase(), &value[2..]);
+        }
+        value
     }
 }

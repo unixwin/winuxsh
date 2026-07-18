@@ -627,6 +627,49 @@ Why this matters:
 - ZLE widgets and lifecycle hooks remain a separate class; they need reedline
   widget shims and shell lifecycle hook points rather than completion providers.
 
+## Phase 12 - Native Lifecycle Hooks
+
+Implementation status: Phase 12a is implemented on
+`codex/zsh-compat-scanner`.
+
+Phase 12a adds native REPL lifecycle hook points that make zsh hook-shaped
+plugins actionable without executing zsh plugin scripts:
+
+```toml
+[hooks]
+precmd = ["echo before prompt"]
+preexec = ["echo before command"]
+chpwd = ["echo directory changed"]
+```
+
+Current behavior:
+
+- `precmd` hooks run before each interactive prompt render.
+- `preexec` hooks run before each non-empty interactive command.
+- `chpwd` hooks run after an interactive command changes the current directory.
+  Directory-change detection uses rubash's shell `PWD`, not the host process
+  cwd, so it follows shell-visible state even when the executor restores the
+  process working directory after command execution.
+- Hook scripts are native winuxsh/rubash scripts from `~/.winshrc.toml`; winuxsh
+  does not source `precmd()`, `preexec()`, `chpwd()`, or `add-zsh-hook` bodies
+  from zsh plugins.
+- Hook context is exposed through temporary shell variables:
+  `WINUXSH_LAST_EXIT_CODE`, `WINUXSH_PREEXEC_COMMAND`, `WINUXSH_OLDPWD`, and
+  `WINUXSH_PWD`.
+- The hook path is REPL-only. `winuxsh -c ...` and script-file execution remain
+  deterministic and do not run interactive lifecycle hooks.
+
+Why this matters:
+
+- Many zsh plugins are not only completions; they rely on lifecycle hooks to
+  refresh prompt state, directory-local config, virtualenv status, or tool
+  context.
+- Winuxsh now has a native target surface for future safe translators and
+  native presets, while preserving the rule that arbitrary zsh function bodies
+  are not executed.
+- The next lifecycle step is a compatibility translator for very small,
+  auditable hook patterns, plus native presets for common hook-based plugins.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh

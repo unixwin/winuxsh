@@ -14,6 +14,13 @@ pub struct ShellConfig {
     pub right_prompt_format: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HookConfig {
+    pub precmd: Vec<String>,
+    pub preexec: Vec<String>,
+    pub chpwd: Vec<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorMode {
     Emacs,
@@ -297,6 +304,7 @@ struct WinshrcToml {
     aliases: Option<HashMap<String, String>>,
     completions: Option<CompletionsToml>,
     winuxcmd: Option<WinuxCmdToml>,
+    hooks: Option<HooksToml>,
     zsh: Option<ZshToml>,
 }
 
@@ -324,6 +332,13 @@ struct CompletionsToml {
 #[derive(Debug, Deserialize)]
 struct WinuxCmdToml {
     path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HooksToml {
+    precmd: Option<Vec<String>>,
+    preexec: Option<Vec<String>>,
+    chpwd: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -381,6 +396,7 @@ pub struct FullConfig {
     pub aliases: HashMap<String, String>,
     pub completion_dirs: Vec<PathBuf>,
     pub winuxcmd_path: Option<PathBuf>,
+    pub hooks: HookConfig,
     pub zsh: ZshConfig,
 }
 
@@ -393,6 +409,7 @@ impl Default for FullConfig {
             aliases: HashMap::new(),
             completion_dirs: Vec::new(),
             winuxcmd_path: None,
+            hooks: HookConfig::default(),
             zsh: ZshConfig::default(),
         }
     }
@@ -453,7 +470,16 @@ fn build_config(parsed: WinshrcToml) -> FullConfig {
             .map(PathBuf::from)
             .collect(),
         winuxcmd_path: parsed.winuxcmd.and_then(|w| w.path).map(PathBuf::from),
+        hooks: parsed.hooks.map(build_hook_config).unwrap_or_default(),
         zsh,
+    }
+}
+
+fn build_hook_config(parsed: HooksToml) -> HookConfig {
+    HookConfig {
+        precmd: parsed.precmd.unwrap_or_default(),
+        preexec: parsed.preexec.unwrap_or_default(),
+        chpwd: parsed.chpwd.unwrap_or_default(),
     }
 }
 
@@ -579,6 +605,22 @@ edit_mode = "unknown"
 "#,
         );
         assert_eq!(config.editor.edit_mode, EditorMode::Emacs);
+    }
+
+    #[test]
+    fn parses_native_lifecycle_hooks() {
+        let config = parse_config(
+            r#"
+[hooks]
+precmd = ["echo before prompt"]
+preexec = ["echo before command"]
+chpwd = ["echo directory changed"]
+"#,
+        );
+
+        assert_eq!(config.hooks.precmd, vec!["echo before prompt"]);
+        assert_eq!(config.hooks.preexec, vec!["echo before command"]);
+        assert_eq!(config.hooks.chpwd, vec!["echo directory changed"]);
     }
 
     #[test]

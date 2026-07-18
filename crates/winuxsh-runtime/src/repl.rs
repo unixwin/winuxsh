@@ -100,6 +100,7 @@ pub fn run_repl(shell: &mut Shell) -> anyhow::Result<()> {
     let mut line_editor = build_line_editor(shell)?;
 
     loop {
+        shell.run_precmd_hooks();
         match line_editor.read_line(&shell.prompt) {
             Ok(Signal::Success(buffer)) => {
                 let line = buffer.trim();
@@ -109,8 +110,7 @@ pub fn run_repl(shell: &mut Shell) -> anyhow::Result<()> {
                 if line == "exit" || line == "logout" {
                     break;
                 }
-                let _ = shell.execute_line(line);
-                shell.update_completion_state();
+                let _ = shell.execute_interactive_line(line);
             }
             Ok(Signal::CtrlD) => {
                 println!();
