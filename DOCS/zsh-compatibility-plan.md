@@ -913,6 +913,35 @@ Rules:
 - use native last-command state plus a command shim instead of zsh `fc`,
   `BUFFER`, `CURSOR`, or `zle -N` function bodies.
 
+Implementation status: Phase 16e is implemented on
+`codex/zsh-compat-command-not-found`.
+
+Phase 16e targets command-miss handlers that zsh plugins normally install by
+sourcing platform-specific `command_not_found_handler` scripts.
+
+Phase 16e adds a native `command-not-found` preset:
+
+- recognize `plugins=(command-not-found)` as a native dynamic plugin candidate
+  even when the Oh My Zsh plugin directory is not installed locally.
+- suggest a disabled `[zsh.native_plugins]` import-plan block with
+  `presets = ["command-not-found"]`.
+- when explicitly enabled, intercept rubash `CommandNotFound` errors in the
+  winuxsh host layer and print Windows-native package-manager search hints.
+- detect available `winget`, `scoop`, and `choco` shims through the same
+  Windows PATH/PATHEXT resolver used by native plugin commands.
+- keep the first implementation read-only: suggest `winget search`,
+  `scoop search`, or `choco search`, but do not automatically run package
+  manager searches during command execution.
+
+Rules:
+
+- disabled by default and never enabled only because `.zshrc` mentions the
+  plugin.
+- no Oh My Zsh `command-not-found.plugin.zsh` sourcing and no Linux/macOS
+  platform handler sourcing.
+- keep command execution deterministic for agents: missing commands still
+  return 127 and package manager hints are advisory only.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh

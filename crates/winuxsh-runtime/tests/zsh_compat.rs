@@ -810,6 +810,58 @@ plugins=(thefuck)
 }
 
 #[test]
+fn imports_native_command_not_found_preset_when_omz_plugin_dir_is_missing() {
+    let temp = unique_temp_dir("winuxsh-zsh-native-command-not-found-preset");
+    std::fs::create_dir_all(&temp).unwrap();
+    std::fs::write(
+        temp.join(".zshrc"),
+        r#"
+plugins=(command-not-found)
+"#,
+    )
+    .unwrap();
+
+    let report = scan(&ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: true,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    });
+
+    let command_not_found = plugin(&report, "command-not-found");
+    assert!(command_not_found.source_dir.is_none());
+    assert_eq!(command_not_found.import_kind, PluginImportKind::NativeUx);
+    assert_eq!(command_not_found.tier, PluginImportTier::Tier3Native);
+    assert!(command_not_found
+        .capabilities
+        .iter()
+        .any(|cap| cap == "native_plugins_required"));
+    assert!(command_not_found
+        .capabilities
+        .iter()
+        .any(|cap| cap == "native_lifecycle_hooks_required"));
+
+    let plan = import_plan_toml(
+        &ZshImportOptions {
+            enabled: true,
+            zdotdir: temp.clone(),
+            import_zshrc: true,
+            import_oh_my_zsh: true,
+            plugins: Vec::new(),
+            compat_level: ZshCompatLevel::Safe,
+        },
+        &report,
+    );
+    assert!(plan.contains("[zsh.native_plugins]"));
+    assert!(plan.contains("enabled = false"));
+    assert!(plan.contains("presets = [\"command-not-found\"]"));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
 fn native_npm_preset_does_not_override_user_aliases() {
     let temp = unique_temp_dir("winuxsh-zsh-native-npm-preset-no-override");
     std::fs::create_dir_all(&temp).unwrap();

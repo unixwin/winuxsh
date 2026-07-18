@@ -258,7 +258,11 @@ impl Shell {
                 return Ok(code);
             }
             Err(rubash::executor::ExecuteError::CommandNotFound(cmd)) => {
-                eprintln!("winuxsh: {}: command not found", cmd);
+                if self.native_plugin_enabled("command-not-found") {
+                    self.print_native_command_not_found(&cmd);
+                } else {
+                    eprintln!("winuxsh: {}: command not found", cmd);
+                }
                 return Ok(127);
             }
             Err(e) => {
@@ -492,6 +496,14 @@ impl Shell {
         self.execute_line(correction)
     }
 
+    fn print_native_command_not_found(&self, command: &str) {
+        for line in native_command_not_found_lines(command, |candidate| {
+            resolve_native_command_path(candidate).is_some()
+        }) {
+            eprintln!("{}", line);
+        }
+    }
+
     fn native_alias_finder_matches(&self, command: &str) -> Vec<String> {
         let command = normalize_alias_finder_command(command);
         if command.is_empty() {
@@ -699,6 +711,42 @@ fn first_command_word(line: &str) -> Option<String> {
     ast.commands[0].words.first().cloned()
 }
 
+fn native_command_not_found_lines<F>(command: &str, mut command_exists: F) -> Vec<String>
+where
+    F: FnMut(&str) -> bool,
+{
+    let mut lines = vec![format!("winuxsh: {}: command not found", command)];
+    if !is_package_search_candidate(command) {
+        return lines;
+    }
+
+    let search = shell_quote(command);
+    let mut hints = Vec::new();
+    if command_exists("winget") {
+        hints.push(format!("  winget search --name {}", search));
+    }
+    if command_exists("scoop") {
+        hints.push(format!("  scoop search {}", search));
+    }
+    if command_exists("choco") {
+        hints.push(format!("  choco search {}", search));
+    }
+
+    if !hints.is_empty() {
+        lines.push("winuxsh: package search hints:".to_string());
+        lines.extend(hints);
+    }
+
+    lines
+}
+
+fn is_package_search_candidate(command: &str) -> bool {
+    !command.is_empty()
+        && !command.contains('/')
+        && !command.contains('\\')
+        && !command.contains(':')
+}
+
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
@@ -837,6 +885,26 @@ mod tests {
             vec!["winuxsh: alias available: gst='git status'"]
         );
         assert!(shell.native_alias_finder_matches("git diff").is_empty());
+    }
+
+    #[test]
+    fn native_command_not_found_lines_include_available_windows_package_managers() {
+        let lines = native_command_not_found_lines("rg", |command| {
+            matches!(command, "winget" | "scoop")
+        });
+
+        assert_eq!(lines[0], "winuxsh: rg: command not found");
+        assert!(lines.contains(&"winuxsh: package search hints:".to_string()));
+        assert!(lines.contains(&"  winget search --name 'rg'".to_string()));
+        assert!(lines.contains(&"  scoop search 'rg'".to_string()));
+        assert!(!lines.iter().any(|line| line.contains("choco search")));
+    }
+
+    #[test]
+    fn native_command_not_found_lines_skip_package_hints_for_paths() {
+        let lines = native_command_not_found_lines("./missing", |_| true);
+
+        assert_eq!(lines, vec!["winuxsh: ./missing: command not found"]);
     }
 
     #[test]

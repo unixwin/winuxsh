@@ -2190,6 +2190,7 @@ fn native_plugin_requires_native_ux(plugin_name: &str) -> bool {
         plugin_name,
         "npm"
             | "alias-finder"
+            | "command-not-found"
             | "direnv"
             | "thefuck"
             | "zoxide"
@@ -2212,6 +2213,7 @@ fn native_plugin_widget_preset(plugin_name: &str) -> Option<&'static str> {
 fn native_dynamic_plugin_preset(plugin_name: &str) -> Option<&'static str> {
     match plugin_name {
         "alias-finder" => Some("alias-finder"),
+        "command-not-found" => Some("command-not-found"),
         "direnv" => Some("direnv"),
         "thefuck" => Some("thefuck"),
         "zoxide" => Some("zoxide"),
@@ -2350,6 +2352,7 @@ fn is_native_ux_plugin(name: &str) -> bool {
     matches!(
         name,
         "alias-finder"
+            | "command-not-found"
             | "thefuck"
             | "zoxide"
             | "zsh-autosuggestions"
