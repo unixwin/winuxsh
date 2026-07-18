@@ -7,9 +7,10 @@ use winuxsh_runtime::config::ZshCompatLevel;
 use winuxsh_runtime::zsh_compat::{
     apply_import_plan_to_config_with_backup_suffix, apply_safe_aliases, apply_safe_env,
     completion_defs_from_report, git_prompt_format_from_report, import_plan_toml,
-    safe_path_value, scan, translate_zsh_prompt, CompletionAsset, DiagnosticSeverity,
-    ImportedAlias, ImportedEnv, PluginImportKind, PluginImportTier, ZshImportOptions,
-    ZshImportReport, ZSH_IMPORT_BLOCK_END, ZSH_IMPORT_BLOCK_START,
+    inspect_import_config_status, safe_path_value, scan, translate_zsh_prompt, CompletionAsset,
+    DiagnosticSeverity, ImportedAlias, ImportedEnv, PluginImportKind, PluginImportTier,
+    ZshImportApplyReadiness, ZshImportBlockState, ZshImportOptions, ZshImportReport,
+    ZSH_IMPORT_BLOCK_END, ZSH_IMPORT_BLOCK_START,
 };
 
 #[test]
@@ -428,6 +429,109 @@ fn refuses_import_apply_when_generated_block_would_duplicate_tables() {
     assert!(!config_path
         .with_file_name(".winshrc.toml.test-duplicate.bak")
         .exists());
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn reports_import_status_for_missing_config() {
+    let temp = unique_temp_dir("winuxsh-zsh-import-status-missing");
+    std::fs::create_dir_all(&temp).unwrap();
+    let config_path = temp.join(".winshrc.toml");
+
+    let status =
+        inspect_import_config_status(&config_path, "[zsh]\nenabled = true\n").unwrap();
+
+    assert!(!status.config_exists);
+    assert_eq!(status.block_state, ZshImportBlockState::Missing);
+    assert!(status.toml_valid);
+    assert_eq!(status.apply_readiness, ZshImportApplyReadiness::AddNewBlock);
+    assert!(status.apply_error.is_none());
+    assert!(status.backup_paths.is_empty());
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn reports_import_status_for_existing_block_and_backups() {
+    let temp = unique_temp_dir("winuxsh-zsh-import-status-existing");
+    std::fs::create_dir_all(&temp).unwrap();
+    let config_path = temp.join(".winshrc.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            "{}\n[zsh]\nenabled = false\n{}\n",
+            ZSH_IMPORT_BLOCK_START, ZSH_IMPORT_BLOCK_END
+        ),
+    )
+    .unwrap();
+    std::fs::write(temp.join(".winshrc.toml.100.bak"), "old").unwrap();
+
+    let status =
+        inspect_import_config_status(&config_path, "[zsh]\nenabled = true\n").unwrap();
+
+    assert!(status.config_exists);
+    assert_eq!(status.block_state, ZshImportBlockState::Present);
+    assert!(status.toml_valid);
+    assert_eq!(
+        status.apply_readiness,
+        ZshImportApplyReadiness::ReplaceExistingBlock
+    );
+    assert!(status.apply_error.is_none());
+    assert_eq!(status.backup_paths.len(), 1);
+    assert_eq!(status.backup_paths[0], temp.join(".winshrc.toml.100.bak"));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn reports_import_status_for_malformed_block() {
+    let temp = unique_temp_dir("winuxsh-zsh-import-status-malformed");
+    std::fs::create_dir_all(&temp).unwrap();
+    let config_path = temp.join(".winshrc.toml");
+    std::fs::write(
+        &config_path,
+        format!("{}\n[zsh]\nenabled = false\n", ZSH_IMPORT_BLOCK_START),
+    )
+    .unwrap();
+
+    let status =
+        inspect_import_config_status(&config_path, "[zsh]\nenabled = true\n").unwrap();
+
+    assert_eq!(status.block_state, ZshImportBlockState::Malformed);
+    assert!(status.toml_valid);
+    assert_eq!(status.apply_readiness, ZshImportApplyReadiness::Blocked);
+    assert!(status
+        .apply_error
+        .as_deref()
+        .unwrap_or("")
+        .contains("malformed"));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn reports_import_status_when_apply_would_duplicate_tables() {
+    let temp = unique_temp_dir("winuxsh-zsh-import-status-duplicate");
+    std::fs::create_dir_all(&temp).unwrap();
+    let config_path = temp.join(".winshrc.toml");
+    std::fs::write(&config_path, "[zsh]\nenabled = false\n").unwrap();
+
+    let status =
+        inspect_import_config_status(&config_path, "[zsh]\nenabled = true\n").unwrap();
+
+    assert_eq!(status.block_state, ZshImportBlockState::Missing);
+    assert!(status.toml_valid);
+    assert_eq!(status.apply_readiness, ZshImportApplyReadiness::Blocked);
+    assert!(status
+        .apply_error
+        .as_deref()
+        .unwrap_or("")
+        .contains("generated zsh import block"));
+    assert_eq!(
+        std::fs::read_to_string(&config_path).unwrap(),
+        "[zsh]\nenabled = false\n"
+    );
 
     let _ = std::fs::remove_dir_all(temp);
 }

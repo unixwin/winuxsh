@@ -318,7 +318,7 @@ Phase 6b adds a native bridge for common Oh My Zsh Git prompt forms:
 
 ## Phase 7 - Oh-My-Winuxsh Compatibility Layer
 
-Implementation status: Phase 7a and Phase 7b are implemented on
+Implementation status: Phase 7a through Phase 7c are implemented on
 `codex/zsh-compat-scanner`.
 
 Phase 7a adds a safe local import-plan command:
@@ -343,6 +343,16 @@ Phase 7b adds an explicit local apply command:
   manually.
 - The command must stay explicit and one-shot. Startup must continue to read
   native TOML only and must not mutate user config.
+
+Phase 7c adds a read-only status command:
+
+- `winuxsh --zsh-compat-import-status` inspects `~/.winshrc.toml` without
+  writing it.
+- The command reports whether the config exists, whether the winuxsh-managed
+  import block is missing/present/malformed, whether current TOML parses, and
+  whether a new apply would add, replace, or fail before writing.
+- The command reports discovered backup files so users and agents can see
+  whether a previous apply created a rollback point.
 
 Once the importer works, build a local package layer:
 

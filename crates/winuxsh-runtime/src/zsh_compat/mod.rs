@@ -423,6 +423,32 @@ pub struct ZshImportApplySummary {
     pub replaced_existing_block: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZshImportBlockState {
+    Missing,
+    Present,
+    Malformed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZshImportApplyReadiness {
+    AddNewBlock,
+    ReplaceExistingBlock,
+    Blocked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ZshImportConfigStatus {
+    pub config_path: PathBuf,
+    pub config_exists: bool,
+    pub block_state: ZshImportBlockState,
+    pub toml_valid: bool,
+    pub toml_error: Option<String>,
+    pub apply_readiness: ZshImportApplyReadiness,
+    pub apply_error: Option<String>,
+    pub backup_paths: Vec<PathBuf>,
+}
+
 pub fn apply_import_plan_to_config(
     config_path: &Path,
     plan: &str,
@@ -433,6 +459,48 @@ pub fn apply_import_plan_to_config(
         .unwrap_or(0)
         .to_string();
     apply_import_plan_to_config_with_backup_suffix(config_path, plan, &suffix)
+}
+
+pub fn inspect_import_config_status(
+    config_path: &Path,
+    plan: &str,
+) -> anyhow::Result<ZshImportConfigStatus> {
+    let (config_exists, original) = match std::fs::read_to_string(config_path) {
+        Ok(content) => (true, content),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => (false, String::new()),
+        Err(err) => {
+            return Err(err)
+                .with_context(|| format!("failed to read {}", config_path.display()))
+        }
+    };
+
+    let block_state = managed_import_block_state(&original);
+    let (toml_valid, toml_error) = match toml::from_str::<toml::Value>(&original) {
+        Ok(_) => (true, None),
+        Err(err) => (false, Some(err.to_string())),
+    };
+
+    let (apply_readiness, apply_error) = match preview_import_plan_update(&original, plan) {
+        Ok(preview) if preview.replaced_existing_block => {
+            (ZshImportApplyReadiness::ReplaceExistingBlock, None)
+        }
+        Ok(_) => (ZshImportApplyReadiness::AddNewBlock, None),
+        Err(err) => (
+            ZshImportApplyReadiness::Blocked,
+            Some(err.to_string()),
+        ),
+    };
+
+    Ok(ZshImportConfigStatus {
+        config_path: config_path.to_path_buf(),
+        config_exists,
+        block_state,
+        toml_valid,
+        toml_error,
+        apply_readiness,
+        apply_error,
+        backup_paths: backup_paths_for(config_path)?,
+    })
 }
 
 #[doc(hidden)]
@@ -450,12 +518,7 @@ pub fn apply_import_plan_to_config_with_backup_suffix(
         }
     };
 
-    let block = managed_import_block(plan);
-    let (next, replaced_existing_block) = replace_managed_import_block(&original, &block)?;
-    toml::from_str::<toml::Value>(&next).with_context(|| {
-        "generated zsh import block would make ~/.winshrc.toml invalid; run \
-         --zsh-compat-import-plan and merge manually"
-    })?;
+    let preview = preview_import_plan_update(&original, plan)?;
 
     if let Some(parent) = config_path.parent() {
         std::fs::create_dir_all(parent)
@@ -475,13 +538,13 @@ pub fn apply_import_plan_to_config_with_backup_suffix(
         None
     };
 
-    std::fs::write(config_path, next)
+    std::fs::write(config_path, preview.next_config)
         .with_context(|| format!("failed to write {}", config_path.display()))?;
 
     Ok(ZshImportApplySummary {
         config_path: config_path.to_path_buf(),
         backup_path,
-        replaced_existing_block,
+        replaced_existing_block: preview.replaced_existing_block,
     })
 }
 
@@ -1743,11 +1806,35 @@ fn managed_import_block(plan: &str) -> String {
     )
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ZshImportApplyPreview {
+    next_config: String,
+    replaced_existing_block: bool,
+}
+
+fn preview_import_plan_update(
+    original: &str,
+    plan: &str,
+) -> anyhow::Result<ZshImportApplyPreview> {
+    let block = managed_import_block(plan);
+    let (next_config, replaced_existing_block) =
+        replace_managed_import_block(original, &block)?;
+    toml::from_str::<toml::Value>(&next_config).with_context(|| {
+        "generated zsh import block would make ~/.winshrc.toml invalid; run \
+         --zsh-compat-import-plan and merge manually"
+    })?;
+
+    Ok(ZshImportApplyPreview {
+        next_config,
+        replaced_existing_block,
+    })
+}
+
 fn replace_managed_import_block(
     original: &str,
     block: &str,
 ) -> anyhow::Result<(String, bool)> {
-    let Some(start) = original.find(ZSH_IMPORT_BLOCK_START) else {
+    let Some((start, end)) = managed_import_block_range(original)? else {
         let mut next = original.to_string();
         if !next.trim().is_empty() {
             if !next.ends_with('\n') {
@@ -1759,6 +1846,38 @@ fn replace_managed_import_block(
         return Ok((next, false));
     };
 
+    let mut next = String::new();
+    next.push_str(&original[..start]);
+    next.push_str(block);
+    next.push_str(&original[end..]);
+    Ok((next, true))
+}
+
+fn managed_import_block_state(original: &str) -> ZshImportBlockState {
+    match managed_import_block_range(original) {
+        Ok(Some(_)) => ZshImportBlockState::Present,
+        Ok(None) => ZshImportBlockState::Missing,
+        Err(_) => ZshImportBlockState::Malformed,
+    }
+}
+
+fn managed_import_block_range(original: &str) -> anyhow::Result<Option<(usize, usize)>> {
+    let start_count = original.matches(ZSH_IMPORT_BLOCK_START).count();
+    let end_count = original.matches(ZSH_IMPORT_BLOCK_END).count();
+
+    if start_count == 0 && end_count == 0 {
+        return Ok(None);
+    }
+
+    if start_count != 1 || end_count != 1 {
+        return Err(anyhow!(
+            "found malformed winuxsh-managed zsh import block markers in ~/.winshrc.toml"
+        ));
+    }
+
+    let start = original
+        .find(ZSH_IMPORT_BLOCK_START)
+        .expect("counted one start marker");
     let after_start = start + ZSH_IMPORT_BLOCK_START.len();
     let Some(end_relative) = original[after_start..].find(ZSH_IMPORT_BLOCK_END) else {
         return Err(anyhow!(
@@ -1767,11 +1886,7 @@ fn replace_managed_import_block(
     };
     let end = after_start + end_relative + ZSH_IMPORT_BLOCK_END.len();
 
-    let mut next = String::new();
-    next.push_str(&original[..start]);
-    next.push_str(block);
-    next.push_str(&original[end..]);
-    Ok((next, true))
+    Ok(Some((start, end)))
 }
 
 fn backup_path_for(config_path: &Path, suffix: &str) -> PathBuf {
@@ -1790,6 +1905,43 @@ fn unique_backup_path_for(config_path: &Path, suffix: &str) -> PathBuf {
         attempt += 1;
     }
     backup_path
+}
+
+fn backup_paths_for(config_path: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    let Some(parent) = config_path.parent() else {
+        return Ok(Vec::new());
+    };
+    let file_name = config_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(".winshrc.toml");
+    let prefix = format!("{}.", file_name);
+
+    let mut paths = Vec::new();
+    match std::fs::read_dir(parent) {
+        Ok(entries) => {
+            for entry in entries {
+                let entry = entry.with_context(|| {
+                    format!("failed to inspect backup files in {}", parent.display())
+                })?;
+                let path = entry.path();
+                let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                    continue;
+                };
+                if name.starts_with(&prefix) && name.ends_with(".bak") {
+                    paths.push(path);
+                }
+            }
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => {
+            return Err(err)
+                .with_context(|| format!("failed to inspect {}", parent.display()))
+        }
+    }
+
+    paths.sort();
+    Ok(paths)
 }
 
 fn record_assignment(
