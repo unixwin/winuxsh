@@ -45,6 +45,8 @@ pub struct Shell {
     pub hooks: HookConfig,
     pub aliases: HashMap<String, String>,
     pub zoxide_last_tracked_dir: Option<String>,
+    pub last_interactive_command: Option<String>,
+    pub last_interactive_exit_code: Option<i32>,
     pub line_editor: Option<Reedline>,
 }
 
@@ -206,6 +208,8 @@ impl Shell {
             hooks: config.hooks,
             aliases,
             zoxide_last_tracked_dir: None,
+            last_interactive_command: None,
+            last_interactive_exit_code: None,
             line_editor: None,
         })
     }
@@ -233,6 +237,16 @@ impl Shell {
                 .is_some_and(|command| command == "z")
         {
             return self.execute_native_zoxide(&ast.commands[0].words[1..]);
+        }
+
+        if self.native_plugin_enabled("thefuck")
+            && ast.commands.len() == 1
+            && ast.commands[0]
+                .words
+                .first()
+                .is_some_and(|command| command == "fuck")
+        {
+            return self.execute_native_thefuck(&ast.commands[0].words[1..]);
         }
 
         match self.executor.execute_ast(&ast) {
@@ -263,6 +277,7 @@ impl Shell {
         self.run_preexec_hooks(line);
         let code = self.execute_line(line)?;
         self.sync_alias_mirror_from_line(line, code);
+        self.remember_interactive_command(line, code);
         let new_pwd = self.executor.get_env("PWD").map(str::to_owned);
         if let (Some(old_pwd), Some(new_pwd)) = (old_pwd, new_pwd) {
             self.run_chpwd_hooks_if_changed(&old_pwd, &new_pwd);
@@ -439,6 +454,44 @@ impl Shell {
         self.execute_line(&format!("cd {}", shell_quote(&target)))
     }
 
+    fn execute_native_thefuck(&mut self, args: &[String]) -> anyhow::Result<i32> {
+        let correction_args = if args.is_empty() {
+            let Some(command) = self.last_interactive_command.as_ref() else {
+                return Ok(1);
+            };
+            vec![command.clone()]
+        } else {
+            args.to_vec()
+        };
+
+        let command_path =
+            resolve_native_command_path("thefuck").unwrap_or_else(|| PathBuf::from("thefuck"));
+        let output = match Command::new(command_path)
+            .args(&correction_args)
+            .env("THEFUCK_REQUIRE_CONFIRMATION", "0")
+            .stderr(Stdio::null())
+            .output()
+        {
+            Ok(output) => output,
+            Err(err) => {
+                log::debug!("native thefuck preset skipped: {}", err);
+                return Ok(127);
+            }
+        };
+
+        if !output.status.success() {
+            return Ok(output.status.code().unwrap_or(1));
+        }
+
+        let correction = String::from_utf8_lossy(&output.stdout);
+        let Some(correction) = correction.lines().map(str::trim).find(|line| !line.is_empty())
+        else {
+            return Ok(1);
+        };
+
+        self.execute_line(correction)
+    }
+
     fn native_alias_finder_matches(&self, command: &str) -> Vec<String> {
         let command = normalize_alias_finder_command(command);
         if command.is_empty() {
@@ -519,6 +572,15 @@ impl Shell {
             }
             self.aliases.remove(arg);
         }
+    }
+
+    fn remember_interactive_command(&mut self, line: &str, code: i32) {
+        let line = line.trim();
+        if line.is_empty() || first_command_word(line).is_some_and(|word| word == "fuck") {
+            return;
+        }
+        self.last_interactive_command = Some(line.to_string());
+        self.last_interactive_exit_code = Some(code);
     }
 
     fn run_hook_scripts(&mut self, hooks: &[String], context: &[(&str, String)]) {
@@ -625,6 +687,18 @@ fn strip_rubash_alias_quote_marker(value: &str) -> &str {
     value.strip_prefix('\x1c').unwrap_or(value)
 }
 
+fn first_command_word(line: &str) -> Option<String> {
+    let tokens = tokenize(line);
+    if tokens.is_empty() {
+        return None;
+    }
+    let ast = parse(&tokens);
+    if ast.commands.len() != 1 {
+        return None;
+    }
+    ast.commands[0].words.first().cloned()
+}
+
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
@@ -703,7 +777,10 @@ fn host_path_to_shell_path(value: &str) -> String {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn native_lifecycle_hooks_run_for_interactive_commands() {
@@ -789,6 +866,7 @@ mod tests {
 
     #[test]
     fn native_zoxide_command_changes_directory_and_tracks_pwd() {
+        let _env_lock = ENV_LOCK.lock().unwrap();
         let temp = unique_temp_dir("winuxsh-native-zoxide");
         let bin = temp.join("bin");
         let target = temp.join("target");
@@ -824,6 +902,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(temp);
     }
 
+    #[test]
+    fn native_thefuck_command_corrects_previous_interactive_command() {
+        let _env_lock = ENV_LOCK.lock().unwrap();
+        let temp = unique_temp_dir("winuxsh-native-thefuck");
+        let bin = temp.join("bin");
+        let target = temp.join("target");
+        let log = temp.join("thefuck-args.txt");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+
+        let target_shell_path = shell_display_path(&target);
+        let correction = format!("cd {}", shell_quote(&target_shell_path));
+        let log_path = host_display_path(&log);
+        write_fake_thefuck(&bin, &correction, &log_path);
+        let old_path = prepend_path_for_test(&bin);
+
+        let mut shell = test_shell(HookConfig::default());
+        shell.native_plugins.enabled = true;
+        shell.native_plugins.presets = vec!["thefuck".to_string()];
+
+        assert_eq!(shell.execute_interactive_line("badcmd").unwrap(), 127);
+        assert_eq!(shell.last_interactive_command.as_deref(), Some("badcmd"));
+        assert_eq!(shell.last_interactive_exit_code, Some(127));
+
+        assert_eq!(shell.execute_interactive_line("fuck").unwrap(), 0);
+        let pwd = shell.executor.get_env("PWD").unwrap_or_default();
+        assert!(
+            same_shell_dir(&pwd, &target_shell_path),
+            "{pwd} != {target_shell_path}"
+        );
+        let invoked_with = std::fs::read_to_string(&log).unwrap();
+        assert!(invoked_with.contains("badcmd"), "{invoked_with}");
+        assert_eq!(shell.last_interactive_command.as_deref(), Some("badcmd"));
+
+        restore_path_for_test(old_path);
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
     fn test_shell(hooks: HookConfig) -> Shell {
         Shell {
             executor: Executor::new(),
@@ -839,6 +955,8 @@ mod tests {
             hooks,
             aliases: HashMap::new(),
             zoxide_last_tracked_dir: None,
+            last_interactive_command: None,
+            last_interactive_exit_code: None,
             line_editor: None,
         }
     }
@@ -899,6 +1017,30 @@ mod tests {
             )
         };
         let exe = bin.join(if cfg!(windows) { "zoxide.cmd" } else { "zoxide" });
+        std::fs::write(&exe, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = std::fs::metadata(&exe).unwrap().permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&exe, permissions).unwrap();
+        }
+    }
+
+    fn write_fake_thefuck(bin: &std::path::Path, correction: &str, log_path: &str) {
+        let script = if cfg!(windows) {
+            format!(
+                "@echo off\r\n>\"{}\" echo %*\r\n<nul set /p ={}\r\nexit /b 0\r\n",
+                log_path, correction
+            )
+        } else {
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" > '{}'\nprintf '%s\\n' {}\n",
+                log_path,
+                shell_quote(correction)
+            )
+        };
+        let exe = bin.join(if cfg!(windows) { "thefuck.cmd" } else { "thefuck" });
         std::fs::write(&exe, script).unwrap();
         #[cfg(unix)]
         {

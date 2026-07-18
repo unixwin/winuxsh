@@ -115,6 +115,7 @@ status: active
 - [x] Phase 16a native dynamic plugin preset: `direnv` 通过显式 `[zsh.native_plugins]` opt-in，在 native precmd/chpwd hook 点运行 `direnv export bash`
 - [x] Phase 16b native dynamic plugin preset: `alias-finder` 通过显式 `[zsh.native_plugins]` opt-in，在 native preexec hook 点提示已知 alias
 - [x] Phase 16c native dynamic plugin preset: `zoxide` 通过显式 `[zsh.native_plugins]` opt-in，提供 native `z` command shim 并用 lifecycle hook 记录目录
+- [x] Phase 16d native dynamic plugin preset: `thefuck` 通过显式 `[zsh.native_plugins]` opt-in，提供 native `fuck` correction shim，基于上一条交互命令调用 `thefuck`
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证

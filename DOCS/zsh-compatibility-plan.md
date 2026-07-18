@@ -884,6 +884,35 @@ Rules:
 - keep interactive selector behavior such as `zi` out of scope until there is a
   tested native UI/provider surface.
 
+Implementation status: Phase 16d is implemented on
+`codex/zsh-compat-thefuck`.
+
+Phase 16d targets command-correction plugins that combine shell history with
+ZLE buffer editing.
+
+Phase 16d adds a native `thefuck` preset:
+
+- recognize `plugins=(thefuck)` as a native dynamic plugin candidate even when
+  the Oh My Zsh plugin directory is not installed locally.
+- suggest a disabled `[zsh.native_plugins]` import-plan block with
+  `presets = ["thefuck"]`.
+- when explicitly enabled, provide a native `fuck` command shim that calls
+  `thefuck` with either explicit arguments or the previous interactive command.
+- execute the correction returned by `thefuck` through rubash so aliases,
+  `cd`, PATH, and Windows-native command execution still follow winuxsh
+  semantics.
+- keep the Oh My Zsh `Esc Esc` ZLE buffer widget report-only until there is a
+  tested reedline-native correction widget.
+
+Rules:
+
+- disabled by default and never enabled only because `.zshrc` mentions the
+  plugin.
+- no Oh My Zsh `thefuck.plugin.zsh` sourcing and no cached `thefuck --alias`
+  source file execution.
+- use native last-command state plus a command shim instead of zsh `fc`,
+  `BUFFER`, `CURSOR`, or `zle -N` function bodies.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh
