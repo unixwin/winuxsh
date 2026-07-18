@@ -108,6 +108,7 @@ status: active
 - [x] Phase 11a runtime completion provider: `[zsh.runtime_completions]` 显式 allowlist + timeout，在 Tab 时接入 npm-style `completion -- "${words[@]}"` 动态候选
 - [x] Phase 12a native lifecycle hooks: `[hooks]` 支持 `precmd` / `preexec` / `chpwd` REPL hook surface，不 source zsh 函数体
 - [x] Phase 12b native hook suggestions: 扫描 `add-zsh-hook` / `*_functions` / hook 函数定义，输出可审阅 `[hooks]` TODO，不自动执行
+- [x] Phase 13a native ZLE widget suggestions: 扫描 `zle -N` / custom `bindkey`，输出可审阅 native reedline widget/keybinding TODO
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证

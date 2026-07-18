@@ -689,6 +689,31 @@ plan deliberately contains disabled TODO scripts so users or future native
 presets can translate reviewed hook behavior into native winuxsh/rubash hook
 commands.
 
+## Phase 13 - Native ZLE Widget Suggestions
+
+Implementation status: Phase 13a is implemented on
+`codex/zsh-compat-scanner`.
+
+Phase 13a makes ZLE widget and keybinding plugins visible as native reedline
+migration targets instead of plain unsupported zsh internals.
+
+Initial scope:
+
+- scan `zle -N <widget> [function]` widget registrations.
+- scan custom `bindkey <key> <widget>` and `bindkey -M <keymap> <key> <widget>`
+  mappings.
+- emit structured `native_widgets` records in report output.
+- classify widget-only plugins as native UX required, not as generic
+  unsupported plugins.
+- emit disabled TODOs in `--zsh-compat-import-plan` for future native reedline
+  widget/keybinding shims.
+
+Out of scope for Phase 13a:
+
+- executing ZLE functions.
+- translating arbitrary widget function bodies.
+- implementing a keybinding DSL in TOML before reedline-native shims are chosen.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh

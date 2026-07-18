@@ -98,14 +98,21 @@ source $ZSH/oh-my-zsh.sh
 
     let git = plugin(&report, "git");
     assert!(git.source_dir.is_some());
-    assert_eq!(git.import_kind, PluginImportKind::Partial);
-    assert_eq!(git.tier, PluginImportTier::Tier2Partial);
+    assert_eq!(git.import_kind, PluginImportKind::NativeUx);
+    assert_eq!(git.tier, PluginImportTier::Tier3Native);
     assert!(git.capabilities.iter().any(|cap| cap == "aliases"));
     assert!(git.capabilities.iter().any(|cap| cap == "static_completions"));
+    assert!(git
+        .capabilities
+        .iter()
+        .any(|cap| cap == "native_widgets_required"));
     assert!(git
         .unsupported_features
         .iter()
         .any(|feature| feature == "zle"));
+    assert!(report.native_widgets.iter().any(|widget| {
+        widget.widget == "git_widget" && widget.function.is_none() && widget.key.is_none()
+    }));
 
     let alias_only = plugin(&report, "alias-only");
     assert_eq!(alias_only.import_kind, PluginImportKind::AliasOnly);
@@ -813,6 +820,85 @@ chpwd() { hooky_chpwd; }
     assert!(plan.contains("# precmd = [\"# TODO translate zsh hook function: hooky_precmd\"]"));
     assert!(plan.contains("# preexec = [\"# TODO translate zsh hook function: hooky_preexec\"]"));
     assert!(plan.contains("# chpwd = [\"# TODO translate zsh hook function: chpwd\"]"));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn reports_native_zle_widget_suggestions() {
+    let temp = unique_temp_dir("winuxsh-zsh-native-widget-suggestions");
+    let widget_plugin_dir = temp.join(".oh-my-zsh").join("plugins").join("widgety");
+    std::fs::create_dir_all(&widget_plugin_dir).unwrap();
+    std::fs::write(
+        temp.join(".zshrc"),
+        r#"
+plugins=(widgety)
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        widget_plugin_dir.join("widgety.plugin.zsh"),
+        r#"
+zle -N widgety-accept widgety_accept
+bindkey -M viins '^F' widgety-accept
+bindkey '^G' widgety-cancel
+"#,
+    )
+    .unwrap();
+
+    let report = scan(&ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: true,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    });
+
+    let widgety = plugin(&report, "widgety");
+    assert_eq!(widgety.import_kind, PluginImportKind::NativeUx);
+    assert_eq!(widgety.tier, PluginImportTier::Tier3Native);
+    assert!(widgety
+        .capabilities
+        .iter()
+        .any(|cap| cap == "native_widgets_required"));
+
+    assert!(report.native_widgets.iter().any(|widget| {
+        widget.widget == "widgety-accept"
+            && widget.function.as_deref() == Some("widgety_accept")
+    }));
+    assert!(report.native_widgets.iter().any(|widget| {
+        widget.widget == "widgety-accept"
+            && widget.key.as_deref() == Some("^F")
+            && widget.keymap.as_deref() == Some("viins")
+    }));
+    assert!(report.native_widgets.iter().any(|widget| {
+        widget.widget == "widgety-cancel"
+            && widget.key.as_deref() == Some("^G")
+            && widget.keymap.is_none()
+    }));
+    assert!(report.diagnostics.iter().any(|diag| {
+        diag.severity == DiagnosticSeverity::Unsupported && diag.feature == "zle"
+    }));
+    assert!(report.diagnostics.iter().any(|diag| {
+        diag.severity == DiagnosticSeverity::Unsupported && diag.feature == "bindkey"
+    }));
+
+    let plan = import_plan_toml(
+        &ZshImportOptions {
+            enabled: true,
+            zdotdir: temp.clone(),
+            import_zshrc: true,
+            import_oh_my_zsh: true,
+            plugins: Vec::new(),
+            compat_level: ZshCompatLevel::Safe,
+        },
+        &report,
+    );
+    assert!(plan.contains("zsh ZLE widgets/keybindings detected: 3"));
+    assert!(plan.contains("# TODO native widget: widgety-accept -> widgety_accept"));
+    assert!(plan.contains("# TODO native keybinding: viins ^F -> widgety-accept"));
+    assert!(plan.contains("# TODO native keybinding: ^G -> widgety-cancel"));
 
     let _ = std::fs::remove_dir_all(temp);
 }

@@ -302,6 +302,7 @@ pub struct ZshImportReport {
     pub completion_assets: Vec<CompletionAsset>,
     pub dynamic_completion_sources: Vec<DynamicCompletionSource>,
     pub native_hooks: Vec<NativeHookSuggestion>,
+    pub native_widgets: Vec<NativeWidgetSuggestion>,
     pub oh_my_zsh_detected: bool,
     pub diagnostics: Vec<ZshCompatDiagnostic>,
 }
@@ -329,6 +330,10 @@ impl ZshImportReport {
             self.dynamic_completion_sources.len()
         ));
         out.push(format!("native hook suggestions: {}", self.native_hooks.len()));
+        out.push(format!(
+            "native widget suggestions: {}",
+            self.native_widgets.len()
+        ));
         out.push(format!("zstyles: {}", self.zstyles.len()));
         out.push(format!("highlight styles: {}", self.highlight_styles.len()));
         out.push(format!(
@@ -398,6 +403,26 @@ impl ZshImportReport {
                 out.push(format!(
                     "  - {} {} origin={}",
                     hook.hook, hook.function, hook.origin
+                ));
+            }
+        }
+
+        if !self.native_widgets.is_empty() {
+            out.push("native widget suggestions:".to_string());
+            for widget in &self.native_widgets {
+                let function = widget
+                    .function
+                    .as_ref()
+                    .map(|function| format!(" function={}", function))
+                    .unwrap_or_default();
+                let binding = match (&widget.keymap, &widget.key) {
+                    (Some(keymap), Some(key)) => format!(" keymap={} key={}", keymap, key),
+                    (None, Some(key)) => format!(" key={}", key),
+                    _ => String::new(),
+                };
+                out.push(format!(
+                    "  - {}{}{} origin={}",
+                    widget.widget, function, binding, widget.origin
                 ));
             }
         }
@@ -556,6 +581,17 @@ pub struct DynamicCompletionSource {
 pub struct NativeHookSuggestion {
     pub hook: String,
     pub function: String,
+    pub source_file: Option<PathBuf>,
+    pub line: Option<usize>,
+    pub origin: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct NativeWidgetSuggestion {
+    pub widget: String,
+    pub function: Option<String>,
+    pub key: Option<String>,
+    pub keymap: Option<String>,
     pub source_file: Option<PathBuf>,
     pub line: Option<usize>,
     pub origin: String,
@@ -830,6 +866,19 @@ pub fn import_plan_toml(options: &ZshImportOptions, report: &ZshImportReport) ->
             if !scripts.is_empty() {
                 out.push(format!("# {} = {}", hook, toml_array(&scripts)));
             }
+        }
+    }
+
+    if !report.native_widgets.is_empty() {
+        out.push(String::new());
+        out.push(format!(
+            "# zsh ZLE widgets/keybindings detected: {}",
+            report.native_widgets.len()
+        ));
+        out.push("# Review and translate these into native reedline widgets/keybindings.".to_string());
+        out.push("# winuxsh never sources ZLE widget function bodies directly.".to_string());
+        for todo in native_widget_todos_for_import_plan(report) {
+            out.push(format!("# {}", todo));
         }
     }
 
@@ -1618,6 +1667,9 @@ fn scan_content(
         for hook in parse_native_hook_suggestions(line, source_file, line_no, mode) {
             push_native_hook_suggestion(report, hook);
         }
+        for widget in parse_native_widget_suggestions(line, source_file, line_no, mode) {
+            push_native_widget_suggestion(report, widget);
+        }
         if let Some((command, args, target_shell, kind)) = parse_dynamic_completion_source(line) {
             push_dynamic_completion_source(
                 report,
@@ -2063,9 +2115,12 @@ fn classify_plugin(
     let has_safe_assets = has_aliases || has_completion;
     let has_unsupported = !unsupported_features.is_empty();
     let native_ux = is_native_ux_plugin(name)
-        || unsupported_features
-            .iter()
-            .any(|feature| matches!(feature.as_str(), "zle-buffer" | "zle-highlighting" | "zsh-hook"));
+        || unsupported_features.iter().any(|feature| {
+            matches!(
+                feature.as_str(),
+                "zle" | "bindkey" | "zle-buffer" | "zle-highlighting" | "zsh-hook"
+            )
+        });
 
     let mut capabilities = Vec::new();
     if has_aliases {
@@ -2100,6 +2155,14 @@ fn classify_plugin(
         .any(|feature| feature == "zsh-hook")
     {
         capabilities.push("native_lifecycle_hooks_required".to_string());
+    }
+    if unsupported_features.iter().any(|feature| {
+        matches!(
+            feature.as_str(),
+            "zle" | "bindkey" | "zle-buffer" | "zle-highlighting"
+        )
+    }) {
+        capabilities.push("native_widgets_required".to_string());
     }
     if unsupported_features
         .iter()
@@ -2884,6 +2947,32 @@ fn native_hook_todos_for_import_plan(report: &ZshImportReport, hook: &str) -> Ve
     scripts
 }
 
+fn native_widget_todos_for_import_plan(report: &ZshImportReport) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut todos = Vec::new();
+    for suggestion in &report.native_widgets {
+        let todo = match (&suggestion.function, &suggestion.keymap, &suggestion.key) {
+            (Some(function), _, None) => format!(
+                "TODO native widget: {} -> {}",
+                suggestion.widget, function
+            ),
+            (_, Some(keymap), Some(key)) => format!(
+                "TODO native keybinding: {} {} -> {}",
+                keymap, key, suggestion.widget
+            ),
+            (_, None, Some(key)) => {
+                format!("TODO native keybinding: {} -> {}", key, suggestion.widget)
+            }
+            _ => format!("TODO native widget: {}", suggestion.widget),
+        };
+        if seen.insert(todo.clone()) {
+            todos.push(todo);
+        }
+    }
+    todos.sort();
+    todos
+}
+
 fn dynamic_completion_script_generator_count(report: &ZshImportReport) -> usize {
     report
         .dynamic_completion_sources
@@ -3443,6 +3532,158 @@ fn push_native_hook_suggestion(report: &mut ZshImportReport, suggestion: NativeH
         return;
     }
     report.native_hooks.push(suggestion);
+}
+
+fn parse_native_widget_suggestions(
+    line: &str,
+    source_file: Option<&Path>,
+    line_no: usize,
+    mode: ScanMode,
+) -> Vec<NativeWidgetSuggestion> {
+    let mut suggestions = Vec::new();
+
+    if let Some((widget, function)) = parse_zle_widget_registration(line) {
+        suggestions.push(native_widget_suggestion(
+            widget,
+            function,
+            None,
+            None,
+            source_file,
+            line_no,
+            mode,
+        ));
+    }
+
+    if let Some((keymap, key, widget)) = parse_bindkey_widget_binding(line) {
+        suggestions.push(native_widget_suggestion(
+            widget,
+            None,
+            Some(key),
+            keymap,
+            source_file,
+            line_no,
+            mode,
+        ));
+    }
+
+    suggestions
+}
+
+fn native_widget_suggestion(
+    widget: String,
+    function: Option<String>,
+    key: Option<String>,
+    keymap: Option<String>,
+    source_file: Option<&Path>,
+    line_no: usize,
+    mode: ScanMode,
+) -> NativeWidgetSuggestion {
+    NativeWidgetSuggestion {
+        widget,
+        function,
+        key,
+        keymap,
+        source_file: source_file.map(Path::to_path_buf),
+        line: Some(line_no),
+        origin: scan_mode_origin(mode).to_string(),
+    }
+}
+
+fn parse_zle_widget_registration(line: &str) -> Option<(String, Option<String>)> {
+    let words = split_shell_words(line);
+    if words.first().map_or(true, |word| word != "zle") {
+        return None;
+    }
+
+    let marker_idx = words.iter().position(|word| word == "-N" || word == "-C")?;
+    match words.get(marker_idx).map(String::as_str) {
+        Some("-N") => {
+            let widget = words.get(marker_idx + 1)?;
+            if !is_safe_zle_name(widget) {
+                return None;
+            }
+            let function = words
+                .get(marker_idx + 2)
+                .filter(|function| is_safe_zle_name(function))
+                .cloned();
+            Some((widget.clone(), function))
+        }
+        Some("-C") => {
+            let widget = words.get(marker_idx + 1)?;
+            let function = words.get(marker_idx + 3)?;
+            if is_safe_zle_name(widget) && is_safe_zle_name(function) {
+                Some((widget.clone(), Some(function.clone())))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn parse_bindkey_widget_binding(line: &str) -> Option<(Option<String>, String, String)> {
+    let words = split_shell_words(line);
+    if words.first().map_or(true, |word| word != "bindkey") {
+        return None;
+    }
+    if words
+        .iter()
+        .any(|word| matches!(word.as_str(), "-e" | "-v" | "-r" | "-s"))
+    {
+        return None;
+    }
+
+    let mut idx = 1usize;
+    let mut keymap = None;
+    while idx < words.len() {
+        match words[idx].as_str() {
+            "-M" => {
+                let map = words.get(idx + 1)?;
+                if !is_safe_zle_name(map) {
+                    return None;
+                }
+                keymap = Some(map.clone());
+                idx += 2;
+            }
+            option if option.starts_with('-') => return None,
+            _ => break,
+        }
+    }
+
+    let key = words.get(idx)?;
+    let widget = words.get(idx + 1)?;
+    if words.get(idx + 2).is_some() {
+        return None;
+    }
+    if is_safe_key_sequence(key) && is_safe_zle_name(widget) {
+        Some((keymap, key.clone(), widget.clone()))
+    } else {
+        None
+    }
+}
+
+fn is_safe_zle_name(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|ch| ch == '_' || ch == '-' || ch == '.' || ch == ':' || ch.is_ascii_alphanumeric())
+}
+
+fn is_safe_key_sequence(value: &str) -> bool {
+    !value.is_empty() && !value.chars().any(|ch| matches!(ch, '\0' | '\n' | '\r'))
+}
+
+fn push_native_widget_suggestion(report: &mut ZshImportReport, suggestion: NativeWidgetSuggestion) {
+    if report.native_widgets.iter().any(|existing| {
+        existing.widget == suggestion.widget
+            && existing.function == suggestion.function
+            && existing.key == suggestion.key
+            && existing.keymap == suggestion.keymap
+            && existing.origin == suggestion.origin
+    }) {
+        return;
+    }
+    report.native_widgets.push(suggestion);
 }
 
 fn push_dynamic_completion_source(report: &mut ZshImportReport, source: DynamicCompletionSource) {
