@@ -2191,6 +2191,7 @@ fn native_plugin_requires_native_ux(plugin_name: &str) -> bool {
         "npm"
             | "alias-finder"
             | "direnv"
+            | "zoxide"
             | "zsh-autosuggestions"
             | "zsh-syntax-highlighting"
             | "fast-syntax-highlighting"
@@ -2211,6 +2212,7 @@ fn native_dynamic_plugin_preset(plugin_name: &str) -> Option<&'static str> {
     match plugin_name {
         "alias-finder" => Some("alias-finder"),
         "direnv" => Some("direnv"),
+        "zoxide" => Some("zoxide"),
         _ => None,
     }
 }
@@ -2346,6 +2348,7 @@ fn is_native_ux_plugin(name: &str) -> bool {
     matches!(
         name,
         "alias-finder"
+            | "zoxide"
             | "zsh-autosuggestions"
             | "zsh-syntax-highlighting"
             | "fast-syntax-highlighting"

@@ -114,6 +114,7 @@ status: active
 - [x] Phase 15a autoload/function suggestions: 扫描 `autoload` 与函数定义，按 completion/hook/widget/prompt/helper 形态输出报告和 import-plan TODO
 - [x] Phase 16a native dynamic plugin preset: `direnv` 通过显式 `[zsh.native_plugins]` opt-in，在 native precmd/chpwd hook 点运行 `direnv export bash`
 - [x] Phase 16b native dynamic plugin preset: `alias-finder` 通过显式 `[zsh.native_plugins]` opt-in，在 native preexec hook 点提示已知 alias
+- [x] Phase 16c native dynamic plugin preset: `zoxide` 通过显式 `[zsh.native_plugins]` opt-in，提供 native `z` command shim 并用 lifecycle hook 记录目录
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证

@@ -852,6 +852,38 @@ Rules:
 - use winuxsh's native alias mirror from imported `.zshrc` aliases and native
   TOML aliases; rubash remains the authority for command execution.
 
+Implementation status: Phase 16c is implemented on
+`codex/zsh-compat-scanner`.
+
+Phase 16c targets external state providers that ship zsh init snippets but can
+be expressed safely as native winuxsh/rubash behavior.
+
+Phase 16c adds a native `zoxide` preset:
+
+- recognize `plugins=(zoxide)` as a native dynamic plugin candidate even when
+  the Oh My Zsh plugin directory is not installed locally.
+- suggest a disabled `[zsh.native_plugins]` import-plan block with
+  `presets = ["zoxide"]`.
+- when explicitly enabled, provide a native `z` command shim that runs
+  `zoxide query`, converts native Windows drive paths back to rubash shell
+  paths, and then `cd`s through rubash.
+- track shell-visible directory changes through native prompt/chpwd hook points
+  by running `zoxide add <PWD>` best-effort and silently when `zoxide` is not
+  installed.
+- translate simple `/c/...` shell paths to `C:/...` for native Windows
+  `zoxide.exe add`, and translate `C:/...` query results back to `/c/...` for
+  rubash `cd`.
+
+Rules:
+
+- disabled by default and never enabled only because `.zshrc` mentions the
+  plugin.
+- no Oh My Zsh `zoxide.plugin.zsh` sourcing and no `eval "$(zoxide init zsh)"`.
+- use a winuxsh-native command shim and native lifecycle hooks instead of zsh
+  function bodies.
+- keep interactive selector behavior such as `zi` out of scope until there is a
+  tested native UI/provider surface.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh

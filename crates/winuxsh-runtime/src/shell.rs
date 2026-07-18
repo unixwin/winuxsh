@@ -6,6 +6,7 @@
 
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -43,6 +44,7 @@ pub struct Shell {
     pub native_plugins: NativePluginConfig,
     pub hooks: HookConfig,
     pub aliases: HashMap<String, String>,
+    pub zoxide_last_tracked_dir: Option<String>,
     pub line_editor: Option<Reedline>,
 }
 
@@ -203,6 +205,7 @@ impl Shell {
             native_plugins: config.zsh.native_plugins,
             hooks: config.hooks,
             aliases,
+            zoxide_last_tracked_dir: None,
             line_editor: None,
         })
     }
@@ -221,6 +224,16 @@ impl Shell {
 
         // parse() returns Ast directly (not Result) in rubash.
         let ast = parse(&tokens);
+
+        if self.native_plugin_enabled("zoxide")
+            && ast.commands.len() == 1
+            && ast.commands[0]
+                .words
+                .first()
+                .is_some_and(|command| command == "z")
+        {
+            return self.execute_native_zoxide(&ast.commands[0].words[1..]);
+        }
 
         match self.executor.execute_ast(&ast) {
             Ok(()) => {}
@@ -297,6 +310,9 @@ impl Shell {
         if self.native_plugin_enabled("direnv") {
             self.apply_direnv_export();
         }
+        if self.native_plugin_enabled("zoxide") {
+            self.track_zoxide_current_dir();
+        }
     }
 
     fn run_native_preexec_plugins(&mut self, command: &str) {
@@ -311,6 +327,9 @@ impl Shell {
         if self.native_plugin_enabled("direnv") {
             self.apply_direnv_export();
         }
+        if self.native_plugin_enabled("zoxide") {
+            self.track_zoxide_current_dir();
+        }
     }
 
     fn native_plugin_enabled(&self, preset: &str) -> bool {
@@ -323,7 +342,9 @@ impl Shell {
     }
 
     fn apply_direnv_export(&mut self) {
-        let output = match Command::new("direnv")
+        let command_path =
+            resolve_native_command_path("direnv").unwrap_or_else(|| PathBuf::from("direnv"));
+        let output = match Command::new(command_path)
             .args(["export", "bash"])
             .stderr(Stdio::null())
             .output()
@@ -351,6 +372,71 @@ impl Shell {
         if let Err(err) = self.execute_script(script) {
             log::warn!("native direnv preset failed to apply export: {}", err);
         }
+    }
+
+    fn track_zoxide_current_dir(&mut self) {
+        let Some(pwd) = self.executor.get_env("PWD").map(str::to_owned) else {
+            return;
+        };
+        if self
+            .zoxide_last_tracked_dir
+            .as_deref()
+            .is_some_and(|last| same_shell_dir(last, &pwd))
+        {
+            return;
+        }
+
+        let host_pwd = shell_path_to_host_path(&pwd);
+        let command_path =
+            resolve_native_command_path("zoxide").unwrap_or_else(|| PathBuf::from("zoxide"));
+        let status = Command::new(command_path)
+            .arg("add")
+            .arg(&host_pwd)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+
+        match status {
+            Ok(status) if status.success() => {
+                self.zoxide_last_tracked_dir = Some(pwd);
+            }
+            Ok(status) => {
+                log::debug!("native zoxide preset returned {}", status);
+            }
+            Err(err) => {
+                log::debug!("native zoxide preset skipped: {}", err);
+            }
+        }
+    }
+
+    fn execute_native_zoxide(&mut self, args: &[String]) -> anyhow::Result<i32> {
+        let command_path =
+            resolve_native_command_path("zoxide").unwrap_or_else(|| PathBuf::from("zoxide"));
+        let output = match Command::new(command_path)
+            .arg("query")
+            .args(args)
+            .stderr(Stdio::null())
+            .output()
+        {
+            Ok(output) => output,
+            Err(err) => {
+                log::debug!("native zoxide query skipped: {}", err);
+                return Ok(127);
+            }
+        };
+
+        if !output.status.success() {
+            return Ok(output.status.code().unwrap_or(1));
+        }
+
+        let target = String::from_utf8_lossy(&output.stdout);
+        let target = target.trim_matches(['\r', '\n']);
+        if target.is_empty() {
+            return Ok(1);
+        }
+
+        let target = host_path_to_shell_path(target);
+        self.execute_line(&format!("cd {}", shell_quote(&target)))
     }
 
     fn native_alias_finder_matches(&self, command: &str) -> Vec<String> {
@@ -543,6 +629,76 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+fn resolve_native_command_path(command: &str) -> Option<PathBuf> {
+    let command_path = PathBuf::from(command);
+    if command_path.is_file() {
+        return Some(command_path);
+    }
+
+    let path = std::env::var_os("PATH")?;
+    let has_extension = PathBuf::from(command)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some();
+    let extensions: &[&str] = if has_extension {
+        &[""]
+    } else if cfg!(windows) {
+        &[".exe", ".cmd", ".bat", ""]
+    } else {
+        &[""]
+    };
+
+    for dir in std::env::split_paths(&path) {
+        for ext in extensions {
+            let candidate = dir.join(format!("{}{}", command, ext));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    None
+}
+
+fn shell_path_to_host_path(value: &str) -> String {
+    let normalized = value.replace('\\', "/");
+    if cfg!(windows) {
+        let bytes = normalized.as_bytes();
+        if bytes.len() == 2
+            && bytes[0] == b'/'
+            && (bytes[1] as char).is_ascii_alphabetic()
+        {
+            let drive = (bytes[1] as char).to_ascii_uppercase();
+            return format!("{}:/", drive);
+        }
+        if bytes.len() >= 3
+            && bytes[0] == b'/'
+            && (bytes[1] as char).is_ascii_alphabetic()
+            && bytes[2] == b'/'
+        {
+            let drive = (bytes[1] as char).to_ascii_uppercase();
+            return format!("{}:{}", drive, &normalized[2..]);
+        }
+    }
+    value.to_string()
+}
+
+fn host_path_to_shell_path(value: &str) -> String {
+    if cfg!(windows) {
+        let normalized = value.replace('\\', "/");
+        let bytes = normalized.as_bytes();
+        if bytes.len() >= 3
+            && bytes[1] == b':'
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[2] == b'/'
+        {
+            let drive = (bytes[0] as char).to_ascii_lowercase();
+            return format!("/{drive}/{}", &normalized[3..]);
+        }
+    }
+    value.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -621,6 +777,53 @@ mod tests {
         assert!(shell.native_alias_finder_matches("git status").is_empty());
     }
 
+    #[test]
+    fn shell_path_to_host_path_converts_drive_style_paths() {
+        if cfg!(windows) {
+            assert_eq!(shell_path_to_host_path("/c/Users/me/project"), "C:/Users/me/project");
+            assert_eq!(shell_path_to_host_path("/d"), "D:/");
+        } else {
+            assert_eq!(shell_path_to_host_path("/c/Users/me/project"), "/c/Users/me/project");
+        }
+    }
+
+    #[test]
+    fn native_zoxide_command_changes_directory_and_tracks_pwd() {
+        let temp = unique_temp_dir("winuxsh-native-zoxide");
+        let bin = temp.join("bin");
+        let target = temp.join("target");
+        let log = temp.join("zoxide-add.txt");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+
+        let target_path = host_display_path(&target);
+        let target_shell_path = shell_display_path(&target);
+        let log_path = host_display_path(&log);
+        write_fake_zoxide(&bin, &target_path, &log_path);
+        let old_path = prepend_path_for_test(&bin);
+
+        let mut shell = test_shell(HookConfig::default());
+        shell.native_plugins.enabled = true;
+        shell.native_plugins.presets = vec!["zoxide".to_string()];
+
+        shell.execute_line("z project").unwrap();
+        let pwd = shell.executor.get_env("PWD").unwrap_or_default();
+        assert!(
+            same_shell_dir(&pwd, &target_shell_path),
+            "{pwd} != {target_shell_path}"
+        );
+
+        shell.run_precmd_hooks();
+        let tracked = std::fs::read_to_string(&log).unwrap();
+        assert_eq!(
+            tracked.trim(),
+            shell_path_to_host_path(shell.executor.get_env("PWD").unwrap_or_default())
+        );
+
+        restore_path_for_test(old_path);
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
     fn test_shell(hooks: HookConfig) -> Shell {
         Shell {
             executor: Executor::new(),
@@ -635,6 +838,7 @@ mod tests {
             native_plugins: NativePluginConfig::default(),
             hooks,
             aliases: HashMap::new(),
+            zoxide_last_tracked_dir: None,
             line_editor: None,
         }
     }
@@ -658,5 +862,50 @@ mod tests {
             value = format!("/{}{}", drive.to_ascii_lowercase(), &value[2..]);
         }
         value
+    }
+
+    fn host_display_path(path: &std::path::Path) -> String {
+        path.to_string_lossy().replace('\\', "/")
+    }
+
+    fn prepend_path_for_test(dir: &std::path::Path) -> Option<std::ffi::OsString> {
+        let old_path = std::env::var_os("PATH");
+        let mut paths = vec![dir.to_path_buf()];
+        if let Some(old_path) = &old_path {
+            paths.extend(std::env::split_paths(old_path));
+        }
+        let new_path = std::env::join_paths(paths).unwrap();
+        std::env::set_var("PATH", new_path);
+        old_path
+    }
+
+    fn restore_path_for_test(old_path: Option<std::ffi::OsString>) {
+        match old_path {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
+    }
+
+    fn write_fake_zoxide(bin: &std::path::Path, target_path: &str, log_path: &str) {
+        let script = if cfg!(windows) {
+            format!(
+                "@echo off\r\nif \"%1\"==\"query\" (\r\n  <nul set /p ={}\r\n  exit /b 0\r\n)\r\nif \"%1\"==\"add\" (\r\n  >\"{}\" echo %~2\r\n  exit /b 0\r\n)\r\nexit /b 1\r\n",
+                target_path, log_path
+            )
+        } else {
+            format!(
+                "#!/bin/sh\nif [ \"$1\" = \"query\" ]; then\n  printf '%s\\n' '{}'\n  exit 0\nfi\nif [ \"$1\" = \"add\" ]; then\n  printf '%s\\n' \"$2\" > '{}'\n  exit 0\nfi\nexit 1\n",
+                target_path, log_path
+            )
+        };
+        let exe = bin.join(if cfg!(windows) { "zoxide.cmd" } else { "zoxide" });
+        std::fs::write(&exe, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = std::fs::metadata(&exe).unwrap().permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&exe, permissions).unwrap();
+        }
     }
 }
