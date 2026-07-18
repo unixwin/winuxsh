@@ -869,19 +869,23 @@ pub fn import_plan_toml(options: &ZshImportOptions, report: &ZshImportReport) ->
         }
     }
 
-    if !report.native_widgets.is_empty() {
+    let native_widget_presets = native_widget_presets_for_import_plan(report);
+    if !report.native_widgets.is_empty() || !native_widget_presets.is_empty() {
         out.push(String::new());
-        out.push(format!(
-            "# zsh ZLE widgets/keybindings detected: {}",
-            report.native_widgets.len()
-        ));
+        if !report.native_widgets.is_empty() {
+            out.push(format!(
+                "# zsh ZLE widgets/keybindings detected: {}",
+                report.native_widgets.len()
+            ));
+        } else {
+            out.push("# zsh native widget presets detected from plugin names".to_string());
+        }
         out.push("# Review and translate these into native reedline widgets/keybindings.".to_string());
         out.push("# winuxsh never sources ZLE widget function bodies directly.".to_string());
-        let presets = native_widget_presets_for_import_plan(report);
-        if !presets.is_empty() {
+        if !native_widget_presets.is_empty() {
             out.push("[zsh.native_widgets]".to_string());
             out.push("enabled = false".to_string());
-            out.push(format!("presets = {}", toml_array(&presets)));
+            out.push(format!("presets = {}", toml_array(&native_widget_presets)));
             out.push("import_bindkeys = true".to_string());
         }
         for todo in native_widget_todos_for_import_plan(report) {
@@ -2005,6 +2009,7 @@ fn native_plugin_preset(
     requires_native_ux: bool,
 ) -> ImportedPlugin {
     let mut capabilities = Vec::new();
+    let has_native_widget_preset = native_plugin_widget_preset(&name).is_some();
     if alias_count > 0 {
         capabilities.push("native_aliases".to_string());
         capabilities.push("aliases".to_string());
@@ -2014,6 +2019,9 @@ fn native_plugin_preset(
     }
     if requires_native_ux {
         capabilities.push("native_ux_required".to_string());
+    }
+    if has_native_widget_preset {
+        capabilities.push("native_widgets_required".to_string());
     }
 
     ImportedPlugin {
@@ -2108,7 +2116,23 @@ fn native_dynamic_completion_source(plugin_name: &str) -> Option<(&'static str, 
 }
 
 fn native_plugin_requires_native_ux(plugin_name: &str) -> bool {
-    matches!(plugin_name, "npm")
+    matches!(
+        plugin_name,
+        "npm"
+            | "zsh-autosuggestions"
+            | "zsh-syntax-highlighting"
+            | "fast-syntax-highlighting"
+            | "zsh-history-substring-search"
+            | "fzf-tab"
+    )
+}
+
+fn native_plugin_widget_preset(plugin_name: &str) -> Option<&'static str> {
+    match plugin_name {
+        "zsh-autosuggestions" => Some("autosuggestions"),
+        "zsh-history-substring-search" => Some("history_substring_search"),
+        _ => None,
+    }
 }
 
 fn classify_plugin(
@@ -2982,6 +3006,11 @@ fn native_widget_todos_for_import_plan(report: &ZshImportReport) -> Vec<String> 
 
 fn native_widget_presets_for_import_plan(report: &ZshImportReport) -> Vec<String> {
     let mut presets = HashSet::new();
+    for plugin in &report.plugins {
+        if let Some(preset) = native_plugin_widget_preset(&plugin.name) {
+            presets.insert(preset.to_string());
+        }
+    }
     for suggestion in &report.native_widgets {
         if suggestion.widget.starts_with("autosuggest-") {
             presets.insert("autosuggestions".to_string());

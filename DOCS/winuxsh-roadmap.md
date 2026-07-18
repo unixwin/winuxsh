@@ -110,6 +110,7 @@ status: active
 - [x] Phase 12b native hook suggestions: 扫描 `add-zsh-hook` / `*_functions` / hook 函数定义，输出可审阅 `[hooks]` TODO，不自动执行
 - [x] Phase 13a native ZLE widget suggestions: 扫描 `zle -N` / custom `bindkey`，输出可审阅 native reedline widget/keybinding TODO
 - [x] Phase 14a native ZLE widget bindings: `[zsh.native_widgets]` 显式启用后，将 recognized autosuggest/history widget bindkey 映射到 reedline event
+- [x] Phase 14b native UX plugin presets: 缺少插件目录时也将 `zsh-autosuggestions` / `zsh-history-substring-search` / syntax-highlighting 类插件归为 native UX
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证

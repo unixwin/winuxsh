@@ -750,6 +750,23 @@ Rules:
 - custom keybindings are imported only when both `[zsh].auto_apply = true` and
   `[zsh.native_widgets].enabled = true` are set.
 
+Implementation status: Phase 14b is implemented on
+`codex/zsh-compat-scanner`.
+
+Phase 14b recognizes common native UX plugin declarations even when the
+corresponding Oh My Zsh plugin directory is not available locally:
+
+- `zsh-autosuggestions`
+- `zsh-history-substring-search`
+- `zsh-syntax-highlighting`
+- `fast-syntax-highlighting`
+- `fzf-tab`
+
+These plugins are reported as `NativeUx` / `Tier3Native` instead of `Missing`.
+For widget-backed plugins, the import plan suggests disabled
+`[zsh.native_widgets]` presets so users can opt into the reedline-native
+behavior without sourcing any zsh plugin code.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh

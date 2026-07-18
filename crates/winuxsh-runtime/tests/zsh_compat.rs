@@ -541,6 +541,67 @@ plugins=(npm)
 }
 
 #[test]
+fn imports_common_native_ux_plugins_when_dirs_are_missing() {
+    let temp = unique_temp_dir("winuxsh-zsh-native-ux-presets");
+    std::fs::create_dir_all(&temp).unwrap();
+    std::fs::write(
+        temp.join(".zshrc"),
+        r#"
+plugins=(zsh-autosuggestions zsh-history-substring-search zsh-syntax-highlighting)
+"#,
+    )
+    .unwrap();
+
+    let report = scan(&ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: true,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    });
+
+    for name in [
+        "zsh-autosuggestions",
+        "zsh-history-substring-search",
+        "zsh-syntax-highlighting",
+    ] {
+        let imported = plugin(&report, name);
+        assert!(imported.source_dir.is_none());
+        assert_eq!(imported.import_kind, PluginImportKind::NativeUx);
+        assert_eq!(imported.tier, PluginImportTier::Tier3Native);
+        assert!(imported
+            .capabilities
+            .iter()
+            .any(|cap| cap == "native_ux_required"));
+    }
+    assert!(plugin(&report, "zsh-autosuggestions")
+        .capabilities
+        .iter()
+        .any(|cap| cap == "native_widgets_required"));
+    assert!(plugin(&report, "zsh-history-substring-search")
+        .capabilities
+        .iter()
+        .any(|cap| cap == "native_widgets_required"));
+
+    let plan = import_plan_toml(
+        &ZshImportOptions {
+            enabled: true,
+            zdotdir: temp.clone(),
+            import_zshrc: true,
+            import_oh_my_zsh: true,
+            plugins: Vec::new(),
+            compat_level: ZshCompatLevel::Safe,
+        },
+        &report,
+    );
+    assert!(plan.contains("[zsh.native_widgets]"));
+    assert!(plan.contains("presets = [\"autosuggestions\", \"history_substring_search\"]"));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
 fn native_npm_preset_does_not_override_user_aliases() {
     let temp = unique_temp_dir("winuxsh-zsh-native-npm-preset-no-override");
     std::fs::create_dir_all(&temp).unwrap();
