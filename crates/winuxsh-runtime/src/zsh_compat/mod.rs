@@ -375,6 +375,20 @@ impl ZshImportReport {
             }
         }
 
+        if !self.dynamic_completion_sources.is_empty() {
+            out.push("dynamic completion detail:".to_string());
+            for source in &self.dynamic_completion_sources {
+                out.push(format!(
+                    "  - {} {} kind={:?} target={} origin={}",
+                    source.command,
+                    source.args.join(" "),
+                    source.kind,
+                    source.target_shell,
+                    source.origin
+                ));
+            }
+        }
+
         if !self.diagnostics.is_empty() {
             out.push("diagnostics:".to_string());
             for diag in &self.diagnostics {
@@ -516,12 +530,20 @@ pub struct CompletionAsset {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct DynamicCompletionSource {
+    pub kind: DynamicCompletionKind,
     pub command: String,
     pub args: Vec<String>,
     pub target_shell: String,
     pub source_file: Option<PathBuf>,
     pub line: Option<usize>,
     pub origin: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DynamicCompletionKind {
+    ScriptGenerator,
+    RuntimeProvider,
 }
 
 #[derive(Debug, Clone)]
@@ -733,11 +755,12 @@ pub fn import_plan_toml(options: &ZshImportOptions, report: &ZshImportReport) ->
         out.push("# They are translated at startup by [zsh].auto_apply.".to_string());
     }
 
-    if !report.dynamic_completion_sources.is_empty() {
+    let script_dynamic_count = dynamic_completion_script_generator_count(report);
+    if script_dynamic_count > 0 {
         out.push(String::new());
         out.push(format!(
             "# dynamic zsh completion generators detected: {}",
-            report.dynamic_completion_sources.len()
+            script_dynamic_count
         ));
         out.push("# They remain disabled until you explicitly set enabled = true.".to_string());
         out.push("[zsh.dynamic_completions]".to_string());
@@ -748,6 +771,23 @@ pub fn import_plan_toml(options: &ZshImportOptions, report: &ZshImportReport) ->
         ));
         out.push("timeout_millis = 1500".to_string());
         out.push("cache_ttl_secs = 86400".to_string());
+    }
+
+    let runtime_dynamic_count = dynamic_completion_runtime_provider_count(report);
+    if runtime_dynamic_count > 0 {
+        out.push(String::new());
+        out.push(format!(
+            "# runtime zsh completion providers detected: {}",
+            runtime_dynamic_count
+        ));
+        out.push(
+            "# They depend on the current input buffer and need native winuxsh providers."
+                .to_string(),
+        );
+        out.push(format!(
+            "# runtime provider commands: {}",
+            toml_array(&runtime_completion_commands_for_import_plan(report))
+        ));
     }
 
     out.join("\n")
@@ -1143,7 +1183,10 @@ where
     let mut definitions: HashMap<String, CommandDef> = HashMap::new();
 
     for source in &report.dynamic_completion_sources {
-        if source.target_shell != "zsh" || !is_safe_name(&source.command) {
+        if source.kind != DynamicCompletionKind::ScriptGenerator
+            || source.target_shell != "zsh"
+            || !is_safe_name(&source.command)
+        {
             continue;
         }
         let Ok(output) = runner(source) else {
@@ -1215,6 +1258,12 @@ fn run_dynamic_completion_source(
     source: &DynamicCompletionSource,
     options: &DynamicCompletionRunOptions,
 ) -> Result<String, String> {
+    if source.kind != DynamicCompletionKind::ScriptGenerator {
+        return Err(format!(
+            "unsupported dynamic completion source kind: {:?}",
+            source.kind
+        ));
+    }
     if source.target_shell != "zsh" {
         return Err(format!(
             "unsupported dynamic completion target shell: {}",
@@ -1494,10 +1543,11 @@ fn scan_content(
         }
 
         scan_unsupported(line, source_file, line_no, report);
-        if let Some((command, args, target_shell)) = parse_dynamic_completion_source(line) {
+        if let Some((command, args, target_shell, kind)) = parse_dynamic_completion_source(line) {
             push_dynamic_completion_source(
                 report,
                 DynamicCompletionSource {
+                    kind,
                     command: command.clone(),
                     args: args.clone(),
                     target_shell,
@@ -1508,12 +1558,8 @@ fn scan_content(
             );
             report.diagnostics.push(ZshCompatDiagnostic {
                 severity: DiagnosticSeverity::Unsupported,
-                feature: "dynamic-completion".to_string(),
-                message: format!(
-                    "dynamic completion generator detected: {} {}",
-                    command,
-                    args.join(" ")
-                ),
+                feature: dynamic_completion_feature(kind).to_string(),
+                message: dynamic_completion_message(kind, &command, &args),
                 source_file: source_file.map(Path::to_path_buf),
                 line: Some(line_no),
             });
@@ -1908,6 +1954,7 @@ fn apply_native_dynamic_completion_preset(report: &mut ZshImportReport, plugin_n
     push_dynamic_completion_source(
         report,
         DynamicCompletionSource {
+            kind: DynamicCompletionKind::ScriptGenerator,
             command: command.to_string(),
             args: args.iter().map(|arg| (*arg).to_string()).collect(),
             target_shell: "zsh".to_string(),
@@ -1963,9 +2010,27 @@ fn classify_plugin(
     }
     if unsupported_features
         .iter()
+        .any(|feature| feature == "runtime-completion-provider")
+    {
+        capabilities.push("runtime_completions_required".to_string());
+    }
+    if unsupported_features
+        .iter()
         .any(|feature| feature == "zsh-completion-function")
     {
         capabilities.push("zsh_completion_function_required".to_string());
+    }
+    if unsupported_features
+        .iter()
+        .any(|feature| feature == "zsh-hook")
+    {
+        capabilities.push("native_lifecycle_hooks_required".to_string());
+    }
+    if unsupported_features
+        .iter()
+        .any(|feature| feature == "autoload")
+    {
+        capabilities.push("zsh_function_loader_required".to_string());
     }
     if has_unsupported {
         capabilities.push("unsupported_zsh_internals".to_string());
@@ -2702,7 +2767,8 @@ fn dynamic_completion_commands_for_import_plan(report: &ZshImportReport) -> Vec<
     let mut seen = HashSet::new();
     let mut commands = Vec::new();
     for source in &report.dynamic_completion_sources {
-        if source.target_shell == "zsh"
+        if source.kind == DynamicCompletionKind::ScriptGenerator
+            && source.target_shell == "zsh"
             && is_safe_name(&source.command)
             && seen.insert(source.command.clone())
         {
@@ -2711,6 +2777,37 @@ fn dynamic_completion_commands_for_import_plan(report: &ZshImportReport) -> Vec<
     }
     commands.sort();
     commands
+}
+
+fn runtime_completion_commands_for_import_plan(report: &ZshImportReport) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut commands = Vec::new();
+    for source in &report.dynamic_completion_sources {
+        if source.kind == DynamicCompletionKind::RuntimeProvider
+            && is_safe_name(&source.command)
+            && seen.insert(source.command.clone())
+        {
+            commands.push(source.command.clone());
+        }
+    }
+    commands.sort();
+    commands
+}
+
+fn dynamic_completion_script_generator_count(report: &ZshImportReport) -> usize {
+    report
+        .dynamic_completion_sources
+        .iter()
+        .filter(|source| source.kind == DynamicCompletionKind::ScriptGenerator)
+        .count()
+}
+
+fn dynamic_completion_runtime_provider_count(report: &ZshImportReport) -> usize {
+    report
+        .dynamic_completion_sources
+        .iter()
+        .filter(|source| source.kind == DynamicCompletionKind::RuntimeProvider)
+        .count()
 }
 
 fn compat_level_name(level: ZshCompatLevel) -> &'static str {
@@ -3029,6 +3126,36 @@ fn scan_unsupported(
         ("zle\t", "zle", "ZLE widgets require native reedline implementation"),
         ("zmodload", "zmodload", "zsh modules are not available in winuxsh"),
         ("zpty", "zpty", "zpty-backed plugins require a real zsh interpreter"),
+        (
+            "add-zsh-hook",
+            "zsh-hook",
+            "zsh hook plugins require native lifecycle hooks",
+        ),
+        (
+            "precmd_functions",
+            "zsh-hook",
+            "precmd hooks require native lifecycle hooks",
+        ),
+        (
+            "preexec_functions",
+            "zsh-hook",
+            "preexec hooks require native lifecycle hooks",
+        ),
+        (
+            "chpwd_functions",
+            "zsh-hook",
+            "chpwd hooks require native lifecycle hooks",
+        ),
+        (
+            "autoload ",
+            "autoload",
+            "autoloaded zsh functions are not executed",
+        ),
+        (
+            "autoload\t",
+            "autoload",
+            "autoloaded zsh functions are not executed",
+        ),
         ("BUFFER", "zle-buffer", "BUFFER/CURSOR style plugins are not executed"),
         ("CURSOR", "zle-buffer", "BUFFER/CURSOR style plugins are not executed"),
         (
@@ -3073,6 +3200,16 @@ fn scan_unsupported(
         }
     }
 
+    if is_zsh_hook_function(line) {
+        report.diagnostics.push(ZshCompatDiagnostic {
+            severity: DiagnosticSeverity::Unsupported,
+            feature: "zsh-hook".to_string(),
+            message: "zsh lifecycle hooks require native lifecycle hooks".to_string(),
+            source_file: source_file.map(Path::to_path_buf),
+            line: Some(line_no),
+        });
+    }
+
     if line == "bindkey -e" {
         report.edit_mode = Some("emacs".to_string());
     } else if line == "bindkey -v" {
@@ -3088,9 +3225,22 @@ fn scan_unsupported(
     }
 }
 
+fn is_zsh_hook_function(line: &str) -> bool {
+    line.starts_with("precmd()")
+        || line.starts_with("preexec()")
+        || line.starts_with("chpwd()")
+        || line.starts_with("precmd ()")
+        || line.starts_with("preexec ()")
+        || line.starts_with("chpwd ()")
+        || line.starts_with("function precmd")
+        || line.starts_with("function preexec")
+        || line.starts_with("function chpwd")
+}
+
 fn push_dynamic_completion_source(report: &mut ZshImportReport, source: DynamicCompletionSource) {
     if report.dynamic_completion_sources.iter().any(|existing| {
-        existing.command == source.command
+        existing.kind == source.kind
+            && existing.command == source.command
             && existing.args == source.args
             && existing.target_shell == source.target_shell
             && existing.source_file == source.source_file
@@ -3101,7 +3251,9 @@ fn push_dynamic_completion_source(report: &mut ZshImportReport, source: DynamicC
     report.dynamic_completion_sources.push(source);
 }
 
-fn parse_dynamic_completion_source(line: &str) -> Option<(String, Vec<String>, String)> {
+fn parse_dynamic_completion_source(
+    line: &str,
+) -> Option<(String, Vec<String>, String, DynamicCompletionKind)> {
     let candidate = process_substitution_command(line).unwrap_or_else(|| line.to_string());
     let prefix = command_prefix_before_control(&candidate);
     let words = split_shell_words(&prefix);
@@ -3126,11 +3278,63 @@ fn parse_dynamic_completion_source(line: &str) -> Option<(String, Vec<String>, S
                 return None;
             }
             let args = words[command_idx + 1..=idx + 1].to_vec();
-            return Some((command, args, "zsh".to_string()));
+            return Some((
+                command,
+                args,
+                "zsh".to_string(),
+                DynamicCompletionKind::ScriptGenerator,
+            ));
+        }
+    }
+
+    for idx in 0..words.len().saturating_sub(1) {
+        if words[idx] == "completion" && words[idx + 1] == "--" {
+            for command_idx in (0..idx).rev() {
+                let command = words[command_idx].trim_start_matches("$(");
+                if command == "command" || is_inline_env_assignment(command) {
+                    continue;
+                }
+                if !is_safe_name(command) {
+                    continue;
+                }
+                let args = words[command_idx + 1..=idx + 1].to_vec();
+                return Some((
+                    command.to_string(),
+                    args,
+                    "words".to_string(),
+                    DynamicCompletionKind::RuntimeProvider,
+                ));
+            }
         }
     }
 
     None
+}
+
+fn dynamic_completion_feature(kind: DynamicCompletionKind) -> &'static str {
+    match kind {
+        DynamicCompletionKind::ScriptGenerator => "dynamic-completion",
+        DynamicCompletionKind::RuntimeProvider => "runtime-completion-provider",
+    }
+}
+
+fn dynamic_completion_message(
+    kind: DynamicCompletionKind,
+    command: &str,
+    args: &[String],
+) -> String {
+    match kind {
+        DynamicCompletionKind::ScriptGenerator => format!(
+            "dynamic completion generator detected: {} {}",
+            command,
+            args.join(" ")
+        ),
+        DynamicCompletionKind::RuntimeProvider => format!(
+            "runtime completion provider detected: {} {}",
+            command,
+            args.join(" ")
+        ),
+    }
 }
 
 fn process_substitution_command(line: &str) -> Option<String> {

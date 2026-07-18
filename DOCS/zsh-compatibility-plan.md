@@ -551,6 +551,41 @@ Phase 10b adds the Oh My Zsh `npm` plugin as a conservative native preset:
   become a future reedline-native shim rather than sourced zsh code.
 - User aliases discovered from `.zshrc` still win over native preset aliases.
 
+Implementation status: Phase 10c is implemented on
+`codex/zsh-compat-scanner`.
+
+Phase 10c separates static plugin import from multiple dynamic plugin shapes:
+
+- Static import remains useful for aliases, simple `_arguments` completion
+  assets, prompt hints, and safe config translation. This is the compatibility
+  floor, not the whole plugin story.
+- `script_generator` dynamic completions, such as `kubectl completion zsh`, can
+  run through the existing allowlisted/cache-backed `[zsh.dynamic_completions]`
+  path because they generate zsh completion script text that winuxsh can
+  translate at startup.
+- `runtime_provider` dynamic completions, such as the Oh My Zsh npm plugin's
+  `npm completion -- "${words[@]}"`, depend on the current input buffer and
+  must become native winuxsh/reedline completion providers. They are reported in
+  import plans but are not enabled through `[zsh.dynamic_completions]`.
+- ZLE widget plugins that read or write `BUFFER`, `CURSOR`, `zle -N`, or
+  `bindkey` require native reedline widgets rather than zsh script execution.
+- Lifecycle plugins that use `add-zsh-hook`, `precmd`, `preexec`, or `chpwd`
+  require native winuxsh hook points before they can be meaningfully imported.
+- Autoloaded zsh functions are marked separately so future plugin work can
+  decide whether to translate a known pattern, replace it with a native preset,
+  or leave it unsupported.
+
+This gives the project a concrete plugin compatibility map:
+
+| Shape | Example | Current behavior | Needed native surface |
+| --- | --- | --- | --- |
+| Static alias/config | `git`, `docker`, `npm` aliases | import/apply safely | existing TOML/import layer |
+| Static `_arguments` completion | simple `_cmd` assets | translate to `CommandDef` | existing completion translator |
+| Script generator completion | `kubectl completion zsh` | allowlisted run + cache + translate | existing dynamic provider |
+| Runtime completion provider | `npm completion -- "${words[@]}"` | report only | reedline runtime provider API |
+| ZLE widget/keybinding | npm F2 toggle, history widgets | report/native UX required | reedline widget/keybinding shims |
+| Lifecycle hooks | `precmd`, `preexec`, `chpwd` | report only | native shell lifecycle hooks |
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh

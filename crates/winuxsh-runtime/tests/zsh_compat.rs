@@ -10,8 +10,8 @@ use winuxsh_runtime::zsh_compat::{
     dynamic_completion_defs_from_report_with_options, git_prompt_format_from_report,
     import_plan_toml, inspect_import_config_status, inspect_import_rollback_plan, safe_path_value,
     scan, translate_zsh_prompt, CompletionAsset, DiagnosticSeverity, DynamicCompletionRunOptions,
-    DynamicCompletionSource, ImportedAlias, ImportedEnv, ImportedPlugin, PluginImportKind,
-    PluginImportTier, ZshCompatDiagnostic,
+    DynamicCompletionKind, DynamicCompletionSource, ImportedAlias, ImportedEnv, ImportedPlugin,
+    PluginImportKind, PluginImportTier, ZshCompatDiagnostic,
     ZshImportApplyReadiness, ZshImportBlockState, ZshImportConfigStatus, ZshImportOptions,
     ZshImportReport, ZshImportRollbackPlan, ZSH_IMPORT_BLOCK_END, ZSH_IMPORT_BLOCK_START,
     zsh_compat_doctor_text,
@@ -627,6 +627,7 @@ alias k=kubectl
         .iter()
         .find(|source| source.command == "kubectl")
         .expect("expected kubectl dynamic completion source");
+    assert_eq!(source.kind, DynamicCompletionKind::ScriptGenerator);
     assert_eq!(source.args, vec!["completion", "zsh"]);
     assert_eq!(source.target_shell, "zsh");
     assert_eq!(source.origin, "plugin");
@@ -648,6 +649,92 @@ alias k=kubectl
     assert!(plan.contains("dynamic zsh completion generators detected: 1"));
     assert!(plan.contains("[zsh.dynamic_completions]"));
     assert!(plan.contains("commands = [\"kubectl\"]"));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn reports_runtime_completion_providers_separately_from_generators() {
+    let temp = unique_temp_dir("winuxsh-zsh-runtime-completion-provider");
+    let npm_plugin_dir = temp.join(".oh-my-zsh").join("plugins").join("npm");
+    std::fs::create_dir_all(&npm_plugin_dir).unwrap();
+    std::fs::write(
+        temp.join(".zshrc"),
+        r#"
+plugins=(npm)
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        npm_plugin_dir.join("npm.plugin.zsh"),
+        r#"
+_npm_completion() {
+  compadd -- $(COMP_LINE=$BUFFER npm completion -- "${words[@]}" 2>/dev/null)
+}
+compdef _npm_completion npm
+alias npmR="npm run"
+"#,
+    )
+    .unwrap();
+
+    let report = scan(&ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: true,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    });
+
+    let npm = plugin(&report, "npm");
+    assert_eq!(npm.import_kind, PluginImportKind::NativeUx);
+    assert_eq!(npm.tier, PluginImportTier::Tier3Native);
+    assert!(npm
+        .capabilities
+        .iter()
+        .any(|cap| cap == "runtime_completions_required"));
+    assert!(npm
+        .capabilities
+        .iter()
+        .any(|cap| cap == "zsh_completion_function_required"));
+    assert!(npm
+        .capabilities
+        .iter()
+        .any(|cap| cap == "native_ux_required"));
+
+    let source = report
+        .dynamic_completion_sources
+        .iter()
+        .find(|source| source.command == "npm")
+        .expect("expected npm runtime completion provider");
+    assert_eq!(source.kind, DynamicCompletionKind::RuntimeProvider);
+    assert_eq!(source.args, vec!["completion", "--"]);
+    assert_eq!(source.target_shell, "words");
+    assert!(report.diagnostics.iter().any(|diag| {
+        diag.severity == DiagnosticSeverity::Unsupported
+            && diag.feature == "runtime-completion-provider"
+    }));
+
+    let defs = dynamic_completion_defs_from_report_with_runner(&report, |_| {
+        panic!("runtime completion providers must not run through script generator path")
+    });
+    assert!(defs.is_empty());
+
+    let plan = import_plan_toml(
+        &ZshImportOptions {
+            enabled: true,
+            zdotdir: temp.clone(),
+            import_zshrc: true,
+            import_oh_my_zsh: true,
+            plugins: Vec::new(),
+            compat_level: ZshCompatLevel::Safe,
+        },
+        &report,
+    );
+    assert!(plan.contains("runtime zsh completion providers detected: 1"));
+    assert!(plan.contains("# runtime provider commands: [\"npm\"]"));
+    assert!(!plan.contains("[zsh.dynamic_completions]"));
+    assert!(!plan.contains("commands = [\"npm\"]"));
 
     let _ = std::fs::remove_dir_all(temp);
 }
@@ -1320,6 +1407,7 @@ _arguments -s -S \
 fn translates_dynamic_zsh_completion_generator_output_with_runner() {
     let report = ZshImportReport {
         dynamic_completion_sources: vec![DynamicCompletionSource {
+            kind: DynamicCompletionKind::ScriptGenerator,
             command: "kubectl".to_string(),
             args: vec!["completion".to_string(), "zsh".to_string()],
             target_shell: "zsh".to_string(),
@@ -1388,6 +1476,7 @@ echo   "--verbose[verbose output]"
 
     let report = ZshImportReport {
         dynamic_completion_sources: vec![DynamicCompletionSource {
+            kind: DynamicCompletionKind::ScriptGenerator,
             command: "dyncli.cmd".to_string(),
             args: vec!["completion".to_string(), "zsh".to_string()],
             target_shell: "zsh".to_string(),
@@ -1449,6 +1538,7 @@ echo   "--cached[generated before failure]"
 
     let report = ZshImportReport {
         dynamic_completion_sources: vec![DynamicCompletionSource {
+            kind: DynamicCompletionKind::ScriptGenerator,
             command: "cachedcli.cmd".to_string(),
             args: vec!["completion".to_string(), "zsh".to_string()],
             target_shell: "zsh".to_string(),
