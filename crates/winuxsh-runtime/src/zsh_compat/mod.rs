@@ -4,14 +4,16 @@
 //! zsh scripts. It produces a report that can be shown to users or later
 //! applied through explicit, safe winuxsh hooks.
 
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::completion::external::{CommandDef, FlagDef, PathLiteral, ValuesSource};
 use crate::config::{EditorMode, ZshCompatLevel, ZshConfig};
@@ -387,6 +389,8 @@ pub struct DynamicCompletionSource {
 pub struct DynamicCompletionRunOptions {
     pub allowed_commands: Vec<String>,
     pub timeout: Duration,
+    pub cache_dir: Option<PathBuf>,
+    pub cache_ttl: Option<Duration>,
 }
 
 impl Default for DynamicCompletionRunOptions {
@@ -394,7 +398,59 @@ impl Default for DynamicCompletionRunOptions {
         Self {
             allowed_commands: Vec::new(),
             timeout: Duration::from_millis(1500),
+            cache_dir: None,
+            cache_ttl: None,
         }
+    }
+}
+
+impl DynamicCompletionRunOptions {
+    pub fn from_zsh_config(config: &ZshConfig) -> Option<Self> {
+        let dynamic = &config.dynamic_completions;
+        if !dynamic.enabled || dynamic.commands.is_empty() {
+            return None;
+        }
+
+        Some(Self {
+            allowed_commands: dynamic.commands.clone(),
+            timeout: Duration::from_millis(dynamic.timeout_millis.max(1)),
+            cache_dir: Some(
+                dynamic
+                    .cache_dir
+                    .clone()
+                    .unwrap_or_else(default_dynamic_completion_cache_dir),
+            ),
+            cache_ttl: dynamic.cache_ttl_secs.map(Duration::from_secs),
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DynamicCompletionDiskCache {
+    command: String,
+    args: Vec<String>,
+    target_shell: String,
+    written_secs: u64,
+    ttl_secs: u64,
+    output: String,
+}
+
+impl DynamicCompletionDiskCache {
+    fn is_for_source(&self, source: &DynamicCompletionSource) -> bool {
+        self.command == source.command
+            && self.args == source.args
+            && self.target_shell == source.target_shell
+    }
+
+    fn is_fresh(&self) -> bool {
+        if self.ttl_secs == 0 {
+            return true;
+        }
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        now.saturating_sub(self.written_secs) <= self.ttl_secs
     }
 }
 
@@ -975,8 +1031,37 @@ pub fn dynamic_completion_defs_from_report_with_options(
     options: &DynamicCompletionRunOptions,
 ) -> Vec<CommandDef> {
     dynamic_completion_defs_from_report_with_runner(report, |source| {
-        run_dynamic_completion_source(source, options)
+        cached_or_run_dynamic_completion_source(source, options)
     })
+}
+
+fn cached_or_run_dynamic_completion_source(
+    source: &DynamicCompletionSource,
+    options: &DynamicCompletionRunOptions,
+) -> Result<String, String> {
+    let cached = read_dynamic_completion_cache(source, options);
+    if let Some(cache) = cached.as_ref().filter(|cache| cache.is_fresh()) {
+        return Ok(cache.output.clone());
+    }
+
+    match run_dynamic_completion_source(source, options) {
+        Ok(output) => {
+            write_dynamic_completion_cache(source, options, &output);
+            Ok(output)
+        }
+        Err(err) => {
+            if let Some(cache) = cached {
+                log::warn!(
+                    "dynamic zsh completion generator failed; using stale cache for {}: {}",
+                    source.command,
+                    err
+                );
+                Ok(cache.output)
+            } else {
+                Err(err)
+            }
+        }
+    }
 }
 
 fn run_dynamic_completion_source(
@@ -1070,6 +1155,97 @@ fn run_dynamic_completion_source(
     Ok(stdout)
 }
 
+fn read_dynamic_completion_cache(
+    source: &DynamicCompletionSource,
+    options: &DynamicCompletionRunOptions,
+) -> Option<DynamicCompletionDiskCache> {
+    let path = dynamic_completion_cache_path(source, options)?;
+    let content = std::fs::read_to_string(path).ok()?;
+    let cache: DynamicCompletionDiskCache = toml::from_str(&content).ok()?;
+    cache.is_for_source(source).then_some(cache)
+}
+
+fn write_dynamic_completion_cache(
+    source: &DynamicCompletionSource,
+    options: &DynamicCompletionRunOptions,
+    output: &str,
+) {
+    let Some(path) = dynamic_completion_cache_path(source, options) else {
+        return;
+    };
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    if let Err(err) = std::fs::create_dir_all(parent) {
+        log::warn!(
+            "failed to create dynamic zsh completion cache dir {}: {}",
+            parent.display(),
+            err
+        );
+        return;
+    }
+
+    let cache = DynamicCompletionDiskCache {
+        command: source.command.clone(),
+        args: source.args.clone(),
+        target_shell: source.target_shell.clone(),
+        written_secs: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0),
+        ttl_secs: options.cache_ttl.map(|ttl| ttl.as_secs()).unwrap_or(0),
+        output: output.to_string(),
+    };
+
+    match toml::to_string_pretty(&cache) {
+        Ok(content) => {
+            if let Err(err) = std::fs::write(&path, content) {
+                log::warn!(
+                    "failed to write dynamic zsh completion cache {}: {}",
+                    path.display(),
+                    err
+                );
+            }
+        }
+        Err(err) => {
+            log::warn!("failed to serialize dynamic zsh completion cache: {}", err);
+        }
+    }
+}
+
+fn dynamic_completion_cache_path(
+    source: &DynamicCompletionSource,
+    options: &DynamicCompletionRunOptions,
+) -> Option<PathBuf> {
+    let cache_dir = options.cache_dir.as_ref()?;
+    Some(cache_dir.join(format!(
+        "{}-{}.toml",
+        sanitize_cache_component(&source.command),
+        dynamic_completion_cache_hash(source)
+    )))
+}
+
+fn dynamic_completion_cache_hash(source: &DynamicCompletionSource) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    source.command.hash(&mut hasher);
+    source.args.hash(&mut hasher);
+    source.target_shell.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn sanitize_cache_component(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 fn is_dynamic_completion_command_allowed(
     source: &DynamicCompletionSource,
     options: &DynamicCompletionRunOptions,
@@ -1085,16 +1261,7 @@ fn is_safe_dynamic_completion_arg(arg: &str) -> bool {
 }
 
 fn dynamic_completion_temp_path(command: &str, stream: &str) -> PathBuf {
-    let safe_command: String = command
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect();
+    let safe_command = sanitize_cache_component(command);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
@@ -1320,6 +1487,14 @@ fn scan_content(
             record_assignment(key, value, source_file, line_no, report, env_map);
         }
     }
+}
+
+fn default_dynamic_completion_cache_dir() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".winuxsh")
+        .join("cache")
+        .join("zsh-completions")
 }
 
 fn scan_mode_origin(mode: ScanMode) -> &'static str {

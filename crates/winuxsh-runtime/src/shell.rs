@@ -15,7 +15,8 @@ use crate::config::{load as load_config, AutosuggestConfig, EditorMode, SyntaxHi
 use crate::prompt::WinuxshPrompt;
 use crate::zsh_compat::{
     apply_alias, apply_safe_aliases, apply_safe_env, completion_defs_from_report,
-    git_prompt_format_from_report, scan, ZshImportOptions,
+    dynamic_completion_defs_from_report_with_options, git_prompt_format_from_report, scan,
+    DynamicCompletionRunOptions, ZshImportOptions,
 };
 
 use crate::winuxcmd;
@@ -111,10 +112,19 @@ impl Shell {
         let completion_state = Arc::new(Mutex::new(CompletionState::new(
             std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
         )));
-        let zsh_completion_defs = zsh_report
+        let mut zsh_completion_defs = zsh_report
             .as_ref()
             .map(completion_defs_from_report)
             .unwrap_or_default();
+        if let (Some(report), Some(options)) = (
+            zsh_report.as_ref(),
+            DynamicCompletionRunOptions::from_zsh_config(&config.zsh),
+        ) {
+            zsh_completion_defs.extend(dynamic_completion_defs_from_report_with_options(
+                report,
+                &options,
+            ));
+        }
 
         // 9. Load completion dirs from config (inline, not in thread).
         {

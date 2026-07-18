@@ -101,6 +101,7 @@ status: active
 - [x] Phase 8c dynamic completion scan: 识别 `tool completion zsh` 这类动态 completion generator，报告为 native provider 待接入
 - [x] Phase 8d dynamic completion translation: 用注入 runner 将 `tool completion zsh` 输出翻译为 winuxsh `CommandDef`，尚不在启动时执行外部命令
 - [x] Phase 8e dynamic completion runner: 显式 allowlist + timeout 执行动态 generator，默认不运行外部命令
+- [x] Phase 9 dynamic completion provider: `[zsh.dynamic_completions]` 配置、磁盘缓存、启动接入，默认关闭
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证

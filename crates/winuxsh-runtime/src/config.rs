@@ -85,6 +85,7 @@ pub struct ZshConfig {
     pub auto_apply: bool,
     pub autosuggestions: AutosuggestConfig,
     pub syntax_highlighting: SyntaxHighlightConfig,
+    pub dynamic_completions: DynamicCompletionConfig,
 }
 
 impl Default for ZshConfig {
@@ -99,6 +100,28 @@ impl Default for ZshConfig {
             auto_apply: false,
             autosuggestions: AutosuggestConfig::default(),
             syntax_highlighting: SyntaxHighlightConfig::default(),
+            dynamic_completions: DynamicCompletionConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DynamicCompletionConfig {
+    pub enabled: bool,
+    pub commands: Vec<String>,
+    pub timeout_millis: u64,
+    pub cache_ttl_secs: Option<u64>,
+    pub cache_dir: Option<PathBuf>,
+}
+
+impl Default for DynamicCompletionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            commands: Vec::new(),
+            timeout_millis: 1500,
+            cache_ttl_secs: Some(86400),
+            cache_dir: None,
         }
     }
 }
@@ -295,6 +318,7 @@ struct ZshToml {
     auto_apply: Option<bool>,
     autosuggestions: Option<AutosuggestToml>,
     syntax_highlighting: Option<SyntaxHighlightToml>,
+    dynamic_completions: Option<DynamicCompletionToml>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -311,6 +335,15 @@ struct SyntaxHighlightToml {
     highlighters: Option<Vec<String>>,
     max_length: Option<usize>,
     styles: Option<HashMap<String, String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DynamicCompletionToml {
+    enabled: Option<bool>,
+    commands: Option<Vec<String>>,
+    timeout_millis: Option<u64>,
+    cache_ttl_secs: Option<u64>,
+    cache_dir: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -417,6 +450,10 @@ fn build_zsh_config(parsed: ZshToml) -> ZshConfig {
             .syntax_highlighting
             .map(build_syntax_highlight_config)
             .unwrap_or_default(),
+        dynamic_completions: parsed
+            .dynamic_completions
+            .map(build_dynamic_completion_config)
+            .unwrap_or_default(),
     }
 }
 
@@ -437,6 +474,17 @@ fn build_syntax_highlight_config(parsed: SyntaxHighlightToml) -> SyntaxHighlight
         highlighters: parsed.highlighters.unwrap_or(defaults.highlighters),
         max_length: parsed.max_length,
         styles: parsed.styles.unwrap_or_default(),
+    }
+}
+
+fn build_dynamic_completion_config(parsed: DynamicCompletionToml) -> DynamicCompletionConfig {
+    let defaults = DynamicCompletionConfig::default();
+    DynamicCompletionConfig {
+        enabled: parsed.enabled.unwrap_or(defaults.enabled),
+        commands: parsed.commands.unwrap_or(defaults.commands),
+        timeout_millis: parsed.timeout_millis.unwrap_or(defaults.timeout_millis),
+        cache_ttl_secs: parsed.cache_ttl_secs.or(defaults.cache_ttl_secs),
+        cache_dir: parsed.cache_dir.map(PathBuf::from),
     }
 }
 
@@ -520,6 +568,13 @@ max_length = 512
 [zsh.syntax_highlighting.styles]
 command = "fg=green,bold"
 unknown-token = "fg=red,bold"
+
+[zsh.dynamic_completions]
+enabled = true
+commands = ["docker", "kubectl"]
+timeout_millis = 2000
+cache_ttl_secs = 120
+cache_dir = "C:/Users/me/.winuxsh/cache/zsh-completions"
 "#,
         );
 
@@ -546,6 +601,17 @@ unknown-token = "fg=red,bold"
         assert_eq!(
             config.zsh.syntax_highlighting.styles.get("command").unwrap(),
             "fg=green,bold"
+        );
+        assert!(config.zsh.dynamic_completions.enabled);
+        assert_eq!(
+            config.zsh.dynamic_completions.commands,
+            vec!["docker", "kubectl"]
+        );
+        assert_eq!(config.zsh.dynamic_completions.timeout_millis, 2000);
+        assert_eq!(config.zsh.dynamic_completions.cache_ttl_secs, Some(120));
+        assert_eq!(
+            config.zsh.dynamic_completions.cache_dir,
+            Some(PathBuf::from("C:/Users/me/.winuxsh/cache/zsh-completions"))
         );
     }
 

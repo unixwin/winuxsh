@@ -479,6 +479,46 @@ Phase 8e adds the first safe dynamic completion runner:
 - The next phase should persist generated zsh completion output in a cache and
   wire selected providers into startup behind config.
 
+## Phase 9 - Configurable Dynamic Completion Provider
+
+Implementation status: Phase 9a is implemented on
+`codex/zsh-compat-scanner`.
+
+Phase 9 turns the dynamic completion bridge into an opt-in native provider:
+
+```toml
+[zsh.dynamic_completions]
+enabled = true
+commands = ["docker", "kubectl"]
+timeout_millis = 1500
+cache_ttl_secs = 86400
+```
+
+Rules:
+
+- Dynamic generators remain disabled by default.
+- `commands` is an allowlist; scanner-discovered generators outside it are not
+  executed.
+- Generated zsh completion output is cached before translation, so startup can
+  reuse recent output without re-running slow CLIs.
+- Cache misses may run only the structured command/args discovered by the
+  scanner, such as `docker completion zsh` or `kubectl completion zsh`.
+- Timeout, stderr capture, and stale-cache fallback must protect interactive
+  startup from hanging or noisy tools.
+- User TOML completion definitions keep highest priority over static and dynamic
+  zsh-derived definitions.
+
+Current implementation:
+
+- `[zsh.dynamic_completions]` parses `enabled`, `commands`, `timeout_millis`,
+  `cache_ttl_secs`, and `cache_dir`.
+- `Shell::new()` loads dynamic zsh-derived completion definitions only when zsh
+  safe import has a scan report and dynamic completions are explicitly enabled.
+- Generator output is cached under `~/.winuxsh/cache/zsh-completions` by default,
+  with fresh-cache reuse and stale-cache fallback when the generator fails.
+- Tests cover config parsing, allowlist rejection, successful `.cmd` generator
+  execution, and cache reuse after the generator disappears.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh

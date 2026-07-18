@@ -1180,6 +1180,7 @@ echo   "--verbose[verbose output]"
     let options = DynamicCompletionRunOptions {
         allowed_commands: vec!["dyncli.cmd".to_string()],
         timeout: Duration::from_secs(2),
+        ..Default::default()
     };
     let defs = dynamic_completion_defs_from_report_with_options(&report, &options);
 
@@ -1192,6 +1193,65 @@ echo   "--verbose[verbose output]"
     assert!(dyncli.flags.iter().any(|flag| {
         flag.long.as_deref() == Some("--verbose") && !flag.takes_value
     }));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn reuses_cached_dynamic_completion_output_when_generator_fails() {
+    let _lock = env_lock().lock().unwrap();
+    let _env = EnvGuard::capture(&["PATH"]);
+    let temp = unique_temp_dir("winuxsh-zsh-dynamic-completion-cache");
+    let cache_dir = temp.join("cache");
+    std::fs::create_dir_all(&temp).unwrap();
+    let command_path = temp.join("cachedcli.cmd");
+    std::fs::write(
+        &command_path,
+        r#"@echo off
+echo #compdef cachedcli.cmd
+echo _arguments \
+echo   "--cached[generated before failure]"
+"#,
+    )
+    .unwrap();
+
+    let old_path = std::env::var_os("PATH").unwrap_or_default();
+    let mut path_entries = vec![temp.clone()];
+    path_entries.extend(std::env::split_paths(&old_path));
+    std::env::set_var("PATH", std::env::join_paths(path_entries).unwrap());
+
+    let report = ZshImportReport {
+        dynamic_completion_sources: vec![DynamicCompletionSource {
+            command: "cachedcli.cmd".to_string(),
+            args: vec!["completion".to_string(), "zsh".to_string()],
+            target_shell: "zsh".to_string(),
+            source_file: None,
+            line: None,
+            origin: "plugin".to_string(),
+        }],
+        ..Default::default()
+    };
+    let options = DynamicCompletionRunOptions {
+        allowed_commands: vec!["cachedcli.cmd".to_string()],
+        timeout: Duration::from_secs(2),
+        cache_dir: Some(cache_dir),
+        cache_ttl: Some(Duration::from_secs(86400)),
+    };
+
+    let first = dynamic_completion_defs_from_report_with_options(&report, &options);
+    assert_eq!(first.len(), 1);
+    assert!(first[0]
+        .flags
+        .iter()
+        .any(|flag| flag.long.as_deref() == Some("--cached")));
+
+    std::fs::remove_file(command_path).unwrap();
+    let second = dynamic_completion_defs_from_report_with_options(&report, &options);
+    assert_eq!(second.len(), 1);
+    assert!(second[0]
+        .flags
+        .iter()
+        .any(|flag| flag.long.as_deref() == Some("--cached")));
 
     let _ = std::fs::remove_dir_all(temp);
 }
