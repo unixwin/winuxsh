@@ -585,6 +585,7 @@ This gives the project a concrete plugin compatibility map:
 | Runtime completion provider | `npm completion -- "${words[@]}"` | opt-in `[zsh.runtime_completions]` provider | completion runtime provider API |
 | ZLE widget/keybinding | npm F2 toggle, history widgets | report/native UX required | reedline widget/keybinding shims |
 | Lifecycle hooks | `precmd`, `preexec`, `chpwd` | report only | native shell lifecycle hooks |
+| Autoload/function helpers | `_foo`, `prompt_info`, `alias-finder()` | report only | reviewed native helper/function translators |
 
 ## Phase 11 - Runtime Completion Providers
 
@@ -766,6 +767,30 @@ These plugins are reported as `NativeUx` / `Tier3Native` instead of `Missing`.
 For widget-backed plugins, the import plan suggests disabled
 `[zsh.native_widgets]` presets so users can opt into the reedline-native
 behavior without sourcing any zsh plugin code.
+
+## Phase 15 - Autoloaded Function Suggestions
+
+Implementation status: Phase 15a is implemented on
+`codex/zsh-compat-scanner`.
+
+Phase 15a makes autoload/function-shaped plugins visible as native migration
+targets instead of opaque unsupported zsh scripts:
+
+- scan `autoload -Uz ...` and `autoload -U +X ...` declarations.
+- scan direct zsh function definitions such as `function name() { ... }` and
+  `name() { ... }`.
+- classify discovered functions as completion helpers, lifecycle helpers,
+  widget helpers, prompt helpers, or generic helpers.
+- emit structured report/JSON records and commented import-plan TODOs.
+
+Rules:
+
+- winuxsh still never sources zsh function bodies directly.
+- function suggestions are an index for future native translators, presets, or
+  runtime providers; they are not enabled behavior by themselves.
+- `.zshrc` remains the familiar compatibility input, while TOML remains the
+  safe native control plane for explicit apply/rollback and agent-readable
+  diagnostics.
 
 ## Non-Goals
 

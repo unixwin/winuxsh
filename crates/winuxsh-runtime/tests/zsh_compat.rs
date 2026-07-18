@@ -15,7 +15,7 @@ use winuxsh_runtime::zsh_compat::{
     ZshCompatDiagnostic,
     ZshImportApplyReadiness, ZshImportBlockState, ZshImportConfigStatus, ZshImportOptions,
     ZshImportReport, ZshImportRollbackPlan, ZSH_IMPORT_BLOCK_END, ZSH_IMPORT_BLOCK_START,
-    zsh_compat_doctor_text,
+    ZshFunctionKind, zsh_compat_doctor_text,
 };
 
 #[test]
@@ -881,6 +881,103 @@ chpwd() { hooky_chpwd; }
     assert!(plan.contains("# precmd = [\"# TODO translate zsh hook function: hooky_precmd\"]"));
     assert!(plan.contains("# preexec = [\"# TODO translate zsh hook function: hooky_preexec\"]"));
     assert!(plan.contains("# chpwd = [\"# TODO translate zsh hook function: chpwd\"]"));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn reports_zsh_function_helper_suggestions() {
+    let temp = unique_temp_dir("winuxsh-zsh-function-suggestions");
+    let function_plugin_dir = temp.join(".oh-my-zsh").join("plugins").join("functiony");
+    std::fs::create_dir_all(&function_plugin_dir).unwrap();
+    std::fs::write(
+        temp.join(".zshrc"),
+        r#"
+plugins=(functiony)
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        function_plugin_dir.join("functiony.plugin.zsh"),
+        r#"
+autoload -Uz _foo helper_func add-zsh-hook
+function prompt_foo_info() { echo foo; }
+preexec_helper() { :; }
+_foo() { compadd one two; }
+"#,
+    )
+    .unwrap();
+
+    let report = scan(&ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: true,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    });
+
+    let functiony = plugin(&report, "functiony");
+    assert!(functiony
+        .capabilities
+        .iter()
+        .any(|cap| cap == "zsh_function_loader_required"));
+    assert!(functiony
+        .capabilities
+        .iter()
+        .any(|cap| cap == "zsh_completion_function_required"));
+
+    assert!(report.zsh_functions.iter().any(|function| {
+        function.function == "_foo"
+            && function.kind == ZshFunctionKind::CompletionHelper
+            && function.autoloaded
+    }));
+    assert!(report.zsh_functions.iter().any(|function| {
+        function.function == "helper_func"
+            && function.kind == ZshFunctionKind::GenericHelper
+            && function.autoloaded
+    }));
+    assert!(report.zsh_functions.iter().any(|function| {
+        function.function == "add-zsh-hook"
+            && function.kind == ZshFunctionKind::LifecycleHelper
+            && function.autoloaded
+    }));
+    assert!(report.zsh_functions.iter().any(|function| {
+        function.function == "prompt_foo_info"
+            && function.kind == ZshFunctionKind::PromptHelper
+            && !function.autoloaded
+    }));
+    assert!(report.zsh_functions.iter().any(|function| {
+        function.function == "preexec_helper"
+            && function.kind == ZshFunctionKind::LifecycleHelper
+            && !function.autoloaded
+    }));
+    assert!(report.diagnostics.iter().any(|diag| {
+        diag.severity == DiagnosticSeverity::Unsupported && diag.feature == "autoload"
+    }));
+    assert!(report.diagnostics.iter().any(|diag| {
+        diag.severity == DiagnosticSeverity::Unsupported
+            && diag.feature == "zsh-completion-function"
+    }));
+
+    let plan = import_plan_toml(
+        &ZshImportOptions {
+            enabled: true,
+            zdotdir: temp.clone(),
+            import_zshrc: true,
+            import_oh_my_zsh: true,
+            plugins: Vec::new(),
+            compat_level: ZshCompatLevel::Safe,
+        },
+        &report,
+    );
+    assert!(plan.contains("zsh autoload/function helpers detected"));
+    assert!(plan.contains(
+        "# TODO native function/helper: _foo kind=completion_helper autoloaded=true"
+    ));
+    assert!(plan.contains(
+        "# TODO native function/helper: prompt_foo_info kind=prompt_helper autoloaded=false"
+    ));
 
     let _ = std::fs::remove_dir_all(temp);
 }

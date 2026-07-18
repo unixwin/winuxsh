@@ -303,6 +303,7 @@ pub struct ZshImportReport {
     pub dynamic_completion_sources: Vec<DynamicCompletionSource>,
     pub native_hooks: Vec<NativeHookSuggestion>,
     pub native_widgets: Vec<NativeWidgetSuggestion>,
+    pub zsh_functions: Vec<ZshFunctionSuggestion>,
     pub oh_my_zsh_detected: bool,
     pub diagnostics: Vec<ZshCompatDiagnostic>,
 }
@@ -333,6 +334,10 @@ impl ZshImportReport {
         out.push(format!(
             "native widget suggestions: {}",
             self.native_widgets.len()
+        ));
+        out.push(format!(
+            "zsh function suggestions: {}",
+            self.zsh_functions.len()
         ));
         out.push(format!("zstyles: {}", self.zstyles.len()));
         out.push(format!("highlight styles: {}", self.highlight_styles.len()));
@@ -423,6 +428,19 @@ impl ZshImportReport {
                 out.push(format!(
                     "  - {}{}{} origin={}",
                     widget.widget, function, binding, widget.origin
+                ));
+            }
+        }
+
+        if !self.zsh_functions.is_empty() {
+            out.push("zsh function suggestions:".to_string());
+            for function in &self.zsh_functions {
+                out.push(format!(
+                    "  - {} kind={} autoloaded={} origin={}",
+                    function.function,
+                    zsh_function_kind_name(function.kind),
+                    function.autoloaded,
+                    function.origin
                 ));
             }
         }
@@ -595,6 +613,26 @@ pub struct NativeWidgetSuggestion {
     pub source_file: Option<PathBuf>,
     pub line: Option<usize>,
     pub origin: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ZshFunctionSuggestion {
+    pub function: String,
+    pub kind: ZshFunctionKind,
+    pub autoloaded: bool,
+    pub source_file: Option<PathBuf>,
+    pub line: Option<usize>,
+    pub origin: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ZshFunctionKind {
+    CompletionHelper,
+    LifecycleHelper,
+    WidgetHelper,
+    PromptHelper,
+    GenericHelper,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -866,6 +904,19 @@ pub fn import_plan_toml(options: &ZshImportOptions, report: &ZshImportReport) ->
             if !scripts.is_empty() {
                 out.push(format!("# {} = {}", hook, toml_array(&scripts)));
             }
+        }
+    }
+
+    if !report.zsh_functions.is_empty() {
+        out.push(String::new());
+        out.push(format!(
+            "# zsh autoload/function helpers detected: {}",
+            report.zsh_functions.len()
+        ));
+        out.push("# Review before translating; winuxsh never sources zsh function bodies directly.".to_string());
+        out.push("# Function suggestions are future native helpers, providers, or presets.".to_string());
+        for todo in zsh_function_todos_for_import_plan(report) {
+            out.push(format!("# {}", todo));
         }
     }
 
@@ -1680,6 +1731,9 @@ fn scan_content(
         }
         for widget in parse_native_widget_suggestions(line, source_file, line_no, mode) {
             push_native_widget_suggestion(report, widget);
+        }
+        for function in parse_zsh_function_suggestions(line, source_file, line_no, mode) {
+            push_zsh_function_suggestion(report, function);
         }
         if let Some((command, args, target_shell, kind)) = parse_dynamic_completion_source(line) {
             push_dynamic_completion_source(
@@ -3004,6 +3058,24 @@ fn native_widget_todos_for_import_plan(report: &ZshImportReport) -> Vec<String> 
     todos
 }
 
+fn zsh_function_todos_for_import_plan(report: &ZshImportReport) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut todos = Vec::new();
+    for suggestion in &report.zsh_functions {
+        let todo = format!(
+            "TODO native function/helper: {} kind={} autoloaded={}",
+            suggestion.function,
+            zsh_function_kind_name(suggestion.kind),
+            suggestion.autoloaded
+        );
+        if seen.insert(todo.clone()) {
+            todos.push(todo);
+        }
+    }
+    todos.sort();
+    todos
+}
+
 fn native_widget_presets_for_import_plan(report: &ZshImportReport) -> Vec<String> {
     let mut presets = HashSet::new();
     for plugin in &report.plugins {
@@ -3735,6 +3807,163 @@ fn push_native_widget_suggestion(report: &mut ZshImportReport, suggestion: Nativ
         return;
     }
     report.native_widgets.push(suggestion);
+}
+
+fn parse_zsh_function_suggestions(
+    line: &str,
+    source_file: Option<&Path>,
+    line_no: usize,
+    mode: ScanMode,
+) -> Vec<ZshFunctionSuggestion> {
+    let mut suggestions = Vec::new();
+
+    for function in parse_autoload_functions(line) {
+        suggestions.push(zsh_function_suggestion(
+            function,
+            true,
+            source_file,
+            line_no,
+            mode,
+        ));
+    }
+
+    if let Some(function) = parse_zsh_function_definition(line) {
+        suggestions.push(zsh_function_suggestion(
+            function,
+            false,
+            source_file,
+            line_no,
+            mode,
+        ));
+    }
+
+    suggestions
+}
+
+fn zsh_function_suggestion(
+    function: String,
+    autoloaded: bool,
+    source_file: Option<&Path>,
+    line_no: usize,
+    mode: ScanMode,
+) -> ZshFunctionSuggestion {
+    ZshFunctionSuggestion {
+        kind: classify_zsh_function(&function),
+        function,
+        autoloaded,
+        source_file: source_file.map(Path::to_path_buf),
+        line: Some(line_no),
+        origin: scan_mode_origin(mode).to_string(),
+    }
+}
+
+fn parse_autoload_functions(line: &str) -> Vec<String> {
+    let words = split_shell_words(line);
+    if words.first().map_or(true, |word| word != "autoload") {
+        return Vec::new();
+    }
+
+    let mut functions = Vec::new();
+    for raw in words.into_iter().skip(1) {
+        if matches!(raw.as_str(), "&&" | "||" | "&" | "|") {
+            break;
+        }
+        let stop_after = raw.ends_with(';');
+        let word = raw.trim_end_matches(';');
+        if word.starts_with('-') || word.starts_with('+') || word.is_empty() {
+            if stop_after {
+                break;
+            }
+            continue;
+        }
+        if is_safe_zsh_function_name(word) {
+            functions.push(word.to_string());
+        }
+        if stop_after {
+            break;
+        }
+    }
+    functions
+}
+
+fn parse_zsh_function_definition(line: &str) -> Option<String> {
+    let line = line.trim_start();
+    let name = if let Some(rest) = line.strip_prefix("function ") {
+        rest.trim_start()
+            .chars()
+            .take_while(|ch| !ch.is_whitespace() && *ch != '(' && *ch != '{')
+            .collect::<String>()
+    } else {
+        let (name, rest) = line.split_once('(')?;
+        let name = name.trim();
+        if name.is_empty() || name.chars().any(char::is_whitespace) {
+            return None;
+        }
+        let rest = rest.trim_start();
+        let rest = rest.strip_prefix(')')?.trim_start();
+        if !(rest.is_empty() || rest.starts_with('{')) {
+            return None;
+        }
+        name.to_string()
+    };
+
+    if is_safe_zsh_function_name(&name) {
+        Some(name)
+    } else {
+        None
+    }
+}
+
+fn classify_zsh_function(function: &str) -> ZshFunctionKind {
+    let lower = function.to_ascii_lowercase();
+    if lower.contains("autosuggest")
+        || lower.contains("history-substring")
+        || lower.contains("widget")
+        || lower.starts_with("_zsh_highlight_widget_")
+    {
+        return ZshFunctionKind::WidgetHelper;
+    }
+    if function.starts_with('_') {
+        return ZshFunctionKind::CompletionHelper;
+    }
+    if function == "add-zsh-hook"
+        || is_zsh_hook_name(function)
+        || lower.starts_with("precmd")
+        || lower.starts_with("preexec")
+        || lower.starts_with("chpwd")
+    {
+        return ZshFunctionKind::LifecycleHelper;
+    }
+    if lower.contains("prompt") {
+        return ZshFunctionKind::PromptHelper;
+    }
+    ZshFunctionKind::GenericHelper
+}
+
+fn zsh_function_kind_name(kind: ZshFunctionKind) -> &'static str {
+    match kind {
+        ZshFunctionKind::CompletionHelper => "completion_helper",
+        ZshFunctionKind::LifecycleHelper => "lifecycle_helper",
+        ZshFunctionKind::WidgetHelper => "widget_helper",
+        ZshFunctionKind::PromptHelper => "prompt_helper",
+        ZshFunctionKind::GenericHelper => "generic_helper",
+    }
+}
+
+fn is_safe_zsh_function_name(value: &str) -> bool {
+    is_safe_name(value) && !value.starts_with('-') && !value.contains('/')
+}
+
+fn push_zsh_function_suggestion(report: &mut ZshImportReport, suggestion: ZshFunctionSuggestion) {
+    if report.zsh_functions.iter().any(|existing| {
+        existing.function == suggestion.function
+            && existing.kind == suggestion.kind
+            && existing.autoloaded == suggestion.autoloaded
+            && existing.origin == suggestion.origin
+    }) {
+        return;
+    }
+    report.zsh_functions.push(suggestion);
 }
 
 fn push_dynamic_completion_source(report: &mut ZshImportReport, source: DynamicCompletionSource) {
