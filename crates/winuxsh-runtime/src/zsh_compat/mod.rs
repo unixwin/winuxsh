@@ -890,6 +890,17 @@ pub fn import_plan_toml(options: &ZshImportOptions, report: &ZshImportReport) ->
         out.push("timeout_millis = 1000".to_string());
     }
 
+    let native_plugin_presets = native_plugin_presets_for_import_plan(report);
+    if !native_plugin_presets.is_empty() {
+        out.push(String::new());
+        out.push("# native dynamic zsh plugin presets detected".to_string());
+        out.push("# They remain disabled until you explicitly set enabled = true.".to_string());
+        out.push("# winuxsh implements these through native hooks/providers, not zsh sourcing.".to_string());
+        out.push("[zsh.native_plugins]".to_string());
+        out.push("enabled = false".to_string());
+        out.push(format!("presets = {}", toml_array(&native_plugin_presets)));
+    }
+
     if !report.native_hooks.is_empty() {
         out.push(String::new());
         out.push(format!(
@@ -2064,6 +2075,7 @@ fn native_plugin_preset(
 ) -> ImportedPlugin {
     let mut capabilities = Vec::new();
     let has_native_widget_preset = native_plugin_widget_preset(&name).is_some();
+    let has_native_plugin_preset = native_dynamic_plugin_preset(&name).is_some();
     if alias_count > 0 {
         capabilities.push("native_aliases".to_string());
         capabilities.push("aliases".to_string());
@@ -2076,6 +2088,10 @@ fn native_plugin_preset(
     }
     if has_native_widget_preset {
         capabilities.push("native_widgets_required".to_string());
+    }
+    if has_native_plugin_preset {
+        capabilities.push("native_plugins_required".to_string());
+        capabilities.push("native_lifecycle_hooks_required".to_string());
     }
 
     ImportedPlugin {
@@ -2173,6 +2189,7 @@ fn native_plugin_requires_native_ux(plugin_name: &str) -> bool {
     matches!(
         plugin_name,
         "npm"
+            | "direnv"
             | "zsh-autosuggestions"
             | "zsh-syntax-highlighting"
             | "fast-syntax-highlighting"
@@ -2185,6 +2202,13 @@ fn native_plugin_widget_preset(plugin_name: &str) -> Option<&'static str> {
     match plugin_name {
         "zsh-autosuggestions" => Some("autosuggestions"),
         "zsh-history-substring-search" => Some("history_substring_search"),
+        _ => None,
+    }
+}
+
+fn native_dynamic_plugin_preset(plugin_name: &str) -> Option<&'static str> {
+    match plugin_name {
+        "direnv" => Some("direnv"),
         _ => None,
     }
 }
@@ -3089,6 +3113,28 @@ fn native_widget_presets_for_import_plan(report: &ZshImportReport) -> Vec<String
         }
         if suggestion.widget.starts_with("history-substring-search-") {
             presets.insert("history_substring_search".to_string());
+        }
+    }
+    let mut presets: Vec<String> = presets.into_iter().collect();
+    presets.sort();
+    presets
+}
+
+fn native_plugin_presets_for_import_plan(report: &ZshImportReport) -> Vec<String> {
+    let mut presets = HashSet::new();
+    for plugin in &report.plugins {
+        if let Some(preset) = native_dynamic_plugin_preset(&plugin.name) {
+            presets.insert(preset.to_string());
+        }
+    }
+    for hook in &report.native_hooks {
+        if hook.function == "_direnv_hook" {
+            presets.insert("direnv".to_string());
+        }
+    }
+    for function in &report.zsh_functions {
+        if function.function == "_direnv_hook" {
+            presets.insert("direnv".to_string());
         }
     }
     let mut presets: Vec<String> = presets.into_iter().collect();

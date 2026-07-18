@@ -602,6 +602,58 @@ plugins=(zsh-autosuggestions zsh-history-substring-search zsh-syntax-highlightin
 }
 
 #[test]
+fn imports_native_direnv_preset_when_omz_plugin_dir_is_missing() {
+    let temp = unique_temp_dir("winuxsh-zsh-native-direnv-preset");
+    std::fs::create_dir_all(&temp).unwrap();
+    std::fs::write(
+        temp.join(".zshrc"),
+        r#"
+plugins=(direnv)
+"#,
+    )
+    .unwrap();
+
+    let report = scan(&ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: true,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    });
+
+    let direnv = plugin(&report, "direnv");
+    assert!(direnv.source_dir.is_none());
+    assert_eq!(direnv.import_kind, PluginImportKind::NativeUx);
+    assert_eq!(direnv.tier, PluginImportTier::Tier3Native);
+    assert!(direnv
+        .capabilities
+        .iter()
+        .any(|cap| cap == "native_plugins_required"));
+    assert!(direnv
+        .capabilities
+        .iter()
+        .any(|cap| cap == "native_lifecycle_hooks_required"));
+
+    let plan = import_plan_toml(
+        &ZshImportOptions {
+            enabled: true,
+            zdotdir: temp.clone(),
+            import_zshrc: true,
+            import_oh_my_zsh: true,
+            plugins: Vec::new(),
+            compat_level: ZshCompatLevel::Safe,
+        },
+        &report,
+    );
+    assert!(plan.contains("[zsh.native_plugins]"));
+    assert!(plan.contains("enabled = false"));
+    assert!(plan.contains("presets = [\"direnv\"]"));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
 fn native_npm_preset_does_not_override_user_aliases() {
     let temp = unique_temp_dir("winuxsh-zsh-native-npm-preset-no-override");
     std::fs::create_dir_all(&temp).unwrap();

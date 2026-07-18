@@ -5,6 +5,7 @@
 //! to rubash; this layer only adds the Windows-facing UX.
 
 
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -14,8 +15,8 @@ use rubash::{executor::Executor, lexer::tokenize, parser::parse};
 use crate::completion::runtime::RuntimeCompletionPlugin;
 use crate::completion::CompletionState;
 use crate::config::{
-    load as load_config, AutosuggestConfig, EditorMode, HookConfig, NativeWidgetConfig,
-    SyntaxHighlightConfig,
+    load as load_config, AutosuggestConfig, EditorMode, HookConfig, NativePluginConfig,
+    NativeWidgetConfig, SyntaxHighlightConfig,
 };
 use crate::prompt::WinuxshPrompt;
 use crate::zsh_compat::{
@@ -38,6 +39,7 @@ pub struct Shell {
     pub syntax_highlighting: SyntaxHighlightConfig,
     pub native_widgets: NativeWidgetConfig,
     pub native_widget_bindings: Vec<NativeWidgetSuggestion>,
+    pub native_plugins: NativePluginConfig,
     pub hooks: HookConfig,
     pub line_editor: Option<Reedline>,
 }
@@ -187,6 +189,7 @@ impl Shell {
             syntax_highlighting: syntax_highlighting.with_env_overrides(),
             native_widgets: config.zsh.native_widgets,
             native_widget_bindings,
+            native_plugins: config.zsh.native_plugins,
             hooks: config.hooks,
             line_editor: None,
         })
@@ -244,6 +247,7 @@ impl Shell {
 
     /// Run native hooks before rendering the next prompt.
     pub fn run_precmd_hooks(&mut self) {
+        self.run_native_precmd_plugins();
         let hooks = self.hooks.precmd.clone();
         let last_exit_code = self.executor.last_exit_code().to_string();
         self.run_hook_scripts(&hooks, &[("WINUXSH_LAST_EXIT_CODE", last_exit_code)]);
@@ -264,6 +268,7 @@ impl Shell {
         if same_shell_dir(old_pwd, new_pwd) {
             return;
         }
+        self.run_native_chpwd_plugins();
         let hooks = self.hooks.chpwd.clone();
         self.run_hook_scripts(
             &hooks,
@@ -272,6 +277,58 @@ impl Shell {
                 ("WINUXSH_PWD", new_pwd.to_string()),
             ],
         );
+    }
+
+    fn run_native_precmd_plugins(&mut self) {
+        if self.native_plugin_enabled("direnv") {
+            self.apply_direnv_export();
+        }
+    }
+
+    fn run_native_chpwd_plugins(&mut self) {
+        if self.native_plugin_enabled("direnv") {
+            self.apply_direnv_export();
+        }
+    }
+
+    fn native_plugin_enabled(&self, preset: &str) -> bool {
+        self.native_plugins.enabled
+            && self
+                .native_plugins
+                .presets
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(preset))
+    }
+
+    fn apply_direnv_export(&mut self) {
+        let output = match Command::new("direnv")
+            .args(["export", "bash"])
+            .stderr(Stdio::null())
+            .output()
+        {
+            Ok(output) => output,
+            Err(err) => {
+                log::debug!("native direnv preset skipped: {}", err);
+                return;
+            }
+        };
+
+        if !output.status.success() {
+            log::debug!("native direnv preset returned {}", output.status);
+            return;
+        }
+
+        let script = String::from_utf8_lossy(&output.stdout);
+        self.apply_direnv_export_script(&script);
+    }
+
+    fn apply_direnv_export_script(&mut self, script: &str) {
+        if script.trim().is_empty() {
+            return;
+        }
+        if let Err(err) = self.execute_script(script) {
+            log::warn!("native direnv preset failed to apply export: {}", err);
+        }
     }
 
     fn run_hook_scripts(&mut self, hooks: &[String], context: &[(&str, String)]) {
@@ -408,6 +465,15 @@ mod tests {
         let _ = std::fs::remove_dir_all(temp);
     }
 
+    #[test]
+    fn native_direnv_export_script_applies_to_executor_env() {
+        let mut shell = test_shell(HookConfig::default());
+
+        shell.apply_direnv_export_script("export DIRENV_TEST_VALUE=active\n");
+
+        assert_eq!(shell.executor.get_env("DIRENV_TEST_VALUE"), Some("active"));
+    }
+
     fn test_shell(hooks: HookConfig) -> Shell {
         Shell {
             executor: Executor::new(),
@@ -419,6 +485,7 @@ mod tests {
             syntax_highlighting: SyntaxHighlightConfig::default(),
             native_widgets: NativeWidgetConfig::default(),
             native_widget_bindings: Vec::new(),
+            native_plugins: NativePluginConfig::default(),
             hooks,
             line_editor: None,
         }

@@ -792,6 +792,35 @@ Rules:
   safe native control plane for explicit apply/rollback and agent-readable
   diagnostics.
 
+## Phase 16 - Native Dynamic Plugin Presets
+
+Implementation status: Phase 16a is implemented on
+`codex/zsh-compat-scanner`.
+
+Planned direction: turn the safest dynamic plugin shapes from report-only into
+explicit native presets. These presets should be opt-in, Windows-native, and
+implemented through winuxsh/rubash/reedline surfaces rather than by sourcing zsh
+plugin scripts.
+
+Phase 16a adds a native `direnv` preset:
+
+- recognize `plugins=(direnv)` as a native dynamic plugin candidate even when
+  the Oh My Zsh plugin directory is not installed locally.
+- suggest a disabled `[zsh.native_plugins]` import-plan block with
+  `presets = ["direnv"]`.
+- when explicitly enabled, run `direnv export bash` at native prompt/chpwd hook
+  points and apply the generated bash-compatible environment script through
+  rubash.
+- keep missing `direnv` silent/best-effort so interactive startup is not noisy.
+
+Rules:
+
+- disabled by default and never enabled only because `.zshrc` mentions the
+  plugin.
+- no Oh My Zsh `direnv.plugin.zsh` sourcing.
+- use `direnv export bash`, not `direnv export zsh`, because rubash owns shell
+  semantics.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh

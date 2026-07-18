@@ -95,6 +95,7 @@ pub struct ZshConfig {
     pub dynamic_completions: DynamicCompletionConfig,
     pub runtime_completions: RuntimeCompletionConfig,
     pub native_widgets: NativeWidgetConfig,
+    pub native_plugins: NativePluginConfig,
 }
 
 impl Default for ZshConfig {
@@ -112,6 +113,7 @@ impl Default for ZshConfig {
             dynamic_completions: DynamicCompletionConfig::default(),
             runtime_completions: RuntimeCompletionConfig::default(),
             native_widgets: NativeWidgetConfig::default(),
+            native_plugins: NativePluginConfig::default(),
         }
     }
 }
@@ -167,6 +169,21 @@ impl Default for NativeWidgetConfig {
             enabled: false,
             presets: Vec::new(),
             import_bindkeys: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativePluginConfig {
+    pub enabled: bool,
+    pub presets: Vec<String>,
+}
+
+impl Default for NativePluginConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            presets: Vec::new(),
         }
     }
 }
@@ -374,6 +391,7 @@ struct ZshToml {
     dynamic_completions: Option<DynamicCompletionToml>,
     runtime_completions: Option<RuntimeCompletionToml>,
     native_widgets: Option<NativeWidgetToml>,
+    native_plugins: Option<NativePluginToml>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -413,6 +431,12 @@ struct NativeWidgetToml {
     enabled: Option<bool>,
     presets: Option<Vec<String>>,
     import_bindkeys: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NativePluginToml {
+    enabled: Option<bool>,
+    presets: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -542,6 +566,10 @@ fn build_zsh_config(parsed: ZshToml) -> ZshConfig {
             .native_widgets
             .map(build_native_widget_config)
             .unwrap_or_default(),
+        native_plugins: parsed
+            .native_plugins
+            .map(build_native_plugin_config)
+            .unwrap_or_default(),
     }
 }
 
@@ -591,6 +619,14 @@ fn build_native_widget_config(parsed: NativeWidgetToml) -> NativeWidgetConfig {
         enabled: parsed.enabled.unwrap_or(defaults.enabled),
         presets: parsed.presets.unwrap_or(defaults.presets),
         import_bindkeys: parsed.import_bindkeys.unwrap_or(defaults.import_bindkeys),
+    }
+}
+
+fn build_native_plugin_config(parsed: NativePluginToml) -> NativePluginConfig {
+    let defaults = NativePluginConfig::default();
+    NativePluginConfig {
+        enabled: parsed.enabled.unwrap_or(defaults.enabled),
+        presets: parsed.presets.unwrap_or(defaults.presets),
     }
 }
 
@@ -707,6 +743,10 @@ timeout_millis = 750
 enabled = true
 presets = ["autosuggestions", "history_substring_search"]
 import_bindkeys = true
+
+[zsh.native_plugins]
+enabled = true
+presets = ["direnv"]
 "#,
         );
 
@@ -754,6 +794,8 @@ import_bindkeys = true
             vec!["autosuggestions", "history_substring_search"]
         );
         assert!(config.zsh.native_widgets.import_bindkeys);
+        assert!(config.zsh.native_plugins.enabled);
+        assert_eq!(config.zsh.native_plugins.presets, vec!["direnv"]);
     }
 
     #[test]
