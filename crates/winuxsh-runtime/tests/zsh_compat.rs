@@ -862,6 +862,57 @@ plugins=(command-not-found)
 }
 
 #[test]
+fn imports_native_selector_presets_when_omz_plugin_dirs_are_missing() {
+    let temp = unique_temp_dir("winuxsh-zsh-native-selector-presets");
+    std::fs::create_dir_all(&temp).unwrap();
+    std::fs::write(
+        temp.join(".zshrc"),
+        r#"
+plugins=(fzf zsh-interactive-cd)
+"#,
+    )
+    .unwrap();
+
+    let report = scan(&ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: true,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    });
+
+    for plugin_name in ["fzf", "zsh-interactive-cd"] {
+        let plugin = plugin(&report, plugin_name);
+        assert!(plugin.source_dir.is_none());
+        assert_eq!(plugin.import_kind, PluginImportKind::NativeUx);
+        assert_eq!(plugin.tier, PluginImportTier::Tier3Native);
+        assert!(plugin
+            .capabilities
+            .iter()
+            .any(|cap| cap == "native_plugins_required"));
+    }
+
+    let plan = import_plan_toml(
+        &ZshImportOptions {
+            enabled: true,
+            zdotdir: temp.clone(),
+            import_zshrc: true,
+            import_oh_my_zsh: true,
+            plugins: Vec::new(),
+            compat_level: ZshCompatLevel::Safe,
+        },
+        &report,
+    );
+    assert!(plan.contains("[zsh.native_plugins]"));
+    assert!(plan.contains("enabled = false"));
+    assert!(plan.contains("\"fzf\""));
+    assert!(plan.contains("\"zsh-interactive-cd\""));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
 fn native_npm_preset_does_not_override_user_aliases() {
     let temp = unique_temp_dir("winuxsh-zsh-native-npm-preset-no-override");
     std::fs::create_dir_all(&temp).unwrap();

@@ -6,6 +6,7 @@
 
 
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -249,6 +250,16 @@ impl Shell {
             return self.execute_native_thefuck(&ast.commands[0].words[1..]);
         }
 
+        if self.native_selector_enabled()
+            && ast.commands.len() == 1
+            && ast.commands[0]
+                .words
+                .first()
+                .is_some_and(|command| command == "cdf" || command == "fzf-cd")
+        {
+            return self.execute_native_fzf_cd(&ast.commands[0].words[1..]);
+        }
+
         match self.executor.execute_ast(&ast) {
             Ok(()) => {}
             Err(rubash::executor::ExecuteError::ExitCode(code)) => {
@@ -358,6 +369,10 @@ impl Shell {
                 .presets
                 .iter()
                 .any(|candidate| candidate.eq_ignore_ascii_case(preset))
+    }
+
+    fn native_selector_enabled(&self) -> bool {
+        self.native_plugin_enabled("fzf") || self.native_plugin_enabled("zsh-interactive-cd")
     }
 
     fn apply_direnv_export(&mut self) {
@@ -494,6 +509,24 @@ impl Shell {
         };
 
         self.execute_line(correction)
+    }
+
+    fn execute_native_fzf_cd(&mut self, args: &[String]) -> anyhow::Result<i32> {
+        let Some(pwd) = self.executor.get_env("PWD").map(str::to_owned) else {
+            return Ok(1);
+        };
+        let base = args.first().map(String::as_str).unwrap_or(".");
+        let host_base = resolve_shell_path_argument(&pwd, base);
+        let candidates = directory_selector_candidates(&host_base);
+        if candidates.is_empty() {
+            return Ok(1);
+        }
+
+        let Some(selected) = run_native_fzf_selector(&candidates) else {
+            return Ok(1);
+        };
+        let selected = host_path_to_shell_path(&selected);
+        self.execute_line(&format!("cd {}", shell_quote(&selected)))
     }
 
     fn print_native_command_not_found(&self, command: &str) {
@@ -745,6 +778,78 @@ fn is_package_search_candidate(command: &str) -> bool {
         && !command.contains('/')
         && !command.contains('\\')
         && !command.contains(':')
+}
+
+fn resolve_shell_path_argument(pwd: &str, arg: &str) -> PathBuf {
+    let normalized = shell_path_to_host_path(arg);
+    let candidate = PathBuf::from(&normalized);
+    if candidate.is_absolute() || is_windows_drive_path(&normalized) {
+        return candidate;
+    }
+
+    PathBuf::from(shell_path_to_host_path(pwd)).join(candidate)
+}
+
+fn directory_selector_candidates(host_base: &std::path::Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(host_base) else {
+        return Vec::new();
+    };
+
+    let mut candidates = Vec::new();
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        if entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.starts_with('.'))
+        {
+            continue;
+        }
+        let path = entry.path();
+        candidates.push(host_path_to_shell_path(&path.to_string_lossy()));
+    }
+    candidates.sort();
+    candidates
+}
+
+fn run_native_fzf_selector(candidates: &[String]) -> Option<String> {
+    let command_path = resolve_native_command_path("fzf").unwrap_or_else(|| PathBuf::from("fzf"));
+    let mut child = Command::new(command_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .ok()?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        for candidate in candidates {
+            if writeln!(stdin, "{}", candidate).is_err() {
+                break;
+            }
+        }
+    }
+
+    let output = child.wait_with_output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let selected = String::from_utf8_lossy(&output.stdout);
+    selected
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
+}
+
+fn is_windows_drive_path(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() >= 3 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic()
 }
 
 fn shell_quote(value: &str) -> String {
@@ -1008,6 +1113,42 @@ mod tests {
         let _ = std::fs::remove_dir_all(temp);
     }
 
+    #[test]
+    fn native_fzf_cd_command_changes_directory_to_selected_path() {
+        let _env_lock = ENV_LOCK.lock().unwrap();
+        let temp = unique_temp_dir("winuxsh-native-fzf-cd");
+        let bin = temp.join("bin");
+        let parent = temp.join("parent");
+        let target = parent.join("target");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::create_dir_all(parent.join("sibling")).unwrap();
+
+        let target_shell_path = shell_display_path(&target);
+        write_fake_fzf(&bin, &target_shell_path);
+        let old_path = prepend_path_for_test(&bin);
+
+        let mut shell = test_shell(HookConfig::default());
+        shell.native_plugins.enabled = true;
+        shell.native_plugins.presets = vec!["zsh-interactive-cd".to_string()];
+
+        let parent_shell_path = shell_display_path(&parent);
+        assert_eq!(
+            shell
+                .execute_line(&format!("cdf {}", shell_quote(&parent_shell_path)))
+                .unwrap(),
+            0
+        );
+        let pwd = shell.executor.get_env("PWD").unwrap_or_default();
+        assert!(
+            same_shell_dir(&pwd, &target_shell_path),
+            "{pwd} != {target_shell_path}"
+        );
+
+        restore_path_for_test(old_path);
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
     fn test_shell(hooks: HookConfig) -> Shell {
         Shell {
             executor: Executor::new(),
@@ -1109,6 +1250,23 @@ mod tests {
             )
         };
         let exe = bin.join(if cfg!(windows) { "thefuck.cmd" } else { "thefuck" });
+        std::fs::write(&exe, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = std::fs::metadata(&exe).unwrap().permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&exe, permissions).unwrap();
+        }
+    }
+
+    fn write_fake_fzf(bin: &std::path::Path, selected_path: &str) {
+        let script = if cfg!(windows) {
+            format!("@echo off\r\n<nul set /p ={}\r\nexit /b 0\r\n", selected_path)
+        } else {
+            format!("#!/bin/sh\nprintf '%s\\n' {}\n", shell_quote(selected_path))
+        };
+        let exe = bin.join(if cfg!(windows) { "fzf.cmd" } else { "fzf" });
         std::fs::write(&exe, script).unwrap();
         #[cfg(unix)]
         {

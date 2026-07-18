@@ -2192,8 +2192,10 @@ fn native_plugin_requires_native_ux(plugin_name: &str) -> bool {
             | "alias-finder"
             | "command-not-found"
             | "direnv"
+            | "fzf"
             | "thefuck"
             | "zoxide"
+            | "zsh-interactive-cd"
             | "zsh-autosuggestions"
             | "zsh-syntax-highlighting"
             | "fast-syntax-highlighting"
@@ -2215,8 +2217,10 @@ fn native_dynamic_plugin_preset(plugin_name: &str) -> Option<&'static str> {
         "alias-finder" => Some("alias-finder"),
         "command-not-found" => Some("command-not-found"),
         "direnv" => Some("direnv"),
+        "fzf" => Some("fzf"),
         "thefuck" => Some("thefuck"),
         "zoxide" => Some("zoxide"),
+        "zsh-interactive-cd" => Some("zsh-interactive-cd"),
         _ => None,
     }
 }
@@ -2353,8 +2357,10 @@ fn is_native_ux_plugin(name: &str) -> bool {
         name,
         "alias-finder"
             | "command-not-found"
+            | "fzf"
             | "thefuck"
             | "zoxide"
+            | "zsh-interactive-cd"
             | "zsh-autosuggestions"
             | "zsh-syntax-highlighting"
             | "fast-syntax-highlighting"

@@ -942,6 +942,35 @@ Rules:
 - keep command execution deterministic for agents: missing commands still
   return 127 and package manager hints are advisory only.
 
+Implementation status: Phase 16f is implemented on
+`codex/zsh-compat-fzf-selector`.
+
+Phase 16f targets interactive selector plugins that usually install ZLE
+widgets and keybindings around `fzf`.
+
+Phase 16f adds native `fzf` / `zsh-interactive-cd` selector presets:
+
+- recognize `plugins=(fzf)` and `plugins=(zsh-interactive-cd)` as native
+  dynamic plugin candidates even when the Oh My Zsh plugin directories are not
+  installed locally.
+- suggest a disabled `[zsh.native_plugins]` import-plan block with
+  `presets = ["fzf"]` and/or `presets = ["zsh-interactive-cd"]`.
+- when explicitly enabled, provide native `cdf` and `fzf-cd` command shims
+  that list shell-visible subdirectories, pipe them to native `fzf`, and then
+  `cd` through rubash to the selected path.
+- keep `cd <Tab>`, Ctrl-T, Ctrl-R, Alt-C, and fzf's generated zsh keybinding
+  scripts report-only until there is a tested reedline-native selector widget
+  surface.
+
+Rules:
+
+- disabled by default and never enabled only because `.zshrc` mentions the
+  plugin.
+- no Oh My Zsh `fzf.plugin.zsh` / `zsh-interactive-cd.plugin.zsh` sourcing and
+  no `eval "$(fzf --zsh)"`.
+- selector commands may launch native `fzf` only after explicit
+  `[zsh.native_plugins]` opt-in; non-interactive scripts remain unaffected.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh
