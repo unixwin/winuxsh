@@ -914,6 +914,46 @@ pub fn completion_defs_from_report(report: &ZshImportReport) -> Vec<CommandDef> 
     values
 }
 
+pub fn dynamic_completion_defs_from_report_with_runner<F>(
+    report: &ZshImportReport,
+    mut runner: F,
+) -> Vec<CommandDef>
+where
+    F: FnMut(&DynamicCompletionSource) -> Result<String, String>,
+{
+    let mut definitions: HashMap<String, CommandDef> = HashMap::new();
+
+    for source in &report.dynamic_completion_sources {
+        if source.target_shell != "zsh" || !is_safe_name(&source.command) {
+            continue;
+        }
+        let Ok(output) = runner(source) else {
+            continue;
+        };
+        let flags = parse_zsh_argument_flags(&output);
+        if flags.is_empty() {
+            continue;
+        }
+        let def = definitions
+            .entry(source.command.clone())
+            .or_insert_with(|| CommandDef {
+                command: source.command.clone(),
+                description: Some(format!(
+                    "Generated from dynamic zsh completion source: {} {}",
+                    source.command,
+                    source.args.join(" ")
+                )),
+                flags: Vec::new(),
+                subcommands: Vec::new(),
+            });
+        merge_flags(&mut def.flags, flags);
+    }
+
+    let mut values: Vec<CommandDef> = definitions.into_values().collect();
+    values.sort_by(|left, right| left.command.cmp(&right.command));
+    values
+}
+
 fn default_zdotdir() -> PathBuf {
     std::env::var_os("ZDOTDIR")
         .map(PathBuf::from)
@@ -2787,17 +2827,14 @@ fn braced_candidates(value: &str) -> Option<(&str, &str)> {
 }
 
 fn push_flag_candidate(candidates: &mut Vec<String>, raw: &str) {
-    let candidate = raw
-        .trim()
-        .trim_matches('"')
-        .trim_matches('\'')
-        .split_once('=')
-        .map(|(left, _)| left)
-        .unwrap_or(raw)
-        .split_once(':')
-        .map(|(left, _)| left)
-        .unwrap_or(raw)
-        .trim();
+    let mut candidate = raw.trim().trim_matches('"').trim_matches('\'');
+    if let Some((left, _)) = candidate.split_once('=') {
+        candidate = left;
+    }
+    if let Some((left, _)) = candidate.split_once(':') {
+        candidate = left;
+    }
+    let candidate = candidate.trim();
 
     if (is_short_flag(candidate) || is_long_flag(candidate))
         && !candidates.iter().any(|existing| existing == candidate)

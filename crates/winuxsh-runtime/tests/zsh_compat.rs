@@ -6,10 +6,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use winuxsh_runtime::config::ZshCompatLevel;
 use winuxsh_runtime::zsh_compat::{
     apply_import_plan_to_config_with_backup_suffix, apply_safe_aliases, apply_safe_env,
-    completion_defs_from_report, git_prompt_format_from_report, import_plan_toml,
-    inspect_import_config_status, inspect_import_rollback_plan, safe_path_value, scan,
-    translate_zsh_prompt, CompletionAsset, DiagnosticSeverity, ImportedAlias, ImportedEnv,
-    ImportedPlugin, PluginImportKind, PluginImportTier, ZshCompatDiagnostic,
+    completion_defs_from_report, dynamic_completion_defs_from_report_with_runner,
+    git_prompt_format_from_report, import_plan_toml, inspect_import_config_status,
+    inspect_import_rollback_plan, safe_path_value, scan, translate_zsh_prompt, CompletionAsset,
+    DiagnosticSeverity, DynamicCompletionSource, ImportedAlias, ImportedEnv, ImportedPlugin,
+    PluginImportKind, PluginImportTier, ZshCompatDiagnostic,
     ZshImportApplyReadiness, ZshImportBlockState, ZshImportConfigStatus, ZshImportOptions,
     ZshImportReport, ZshImportRollbackPlan, ZSH_IMPORT_BLOCK_END, ZSH_IMPORT_BLOCK_START,
     zsh_compat_doctor_text,
@@ -1085,6 +1086,50 @@ _arguments -s -S \
     assert!(defs.iter().any(|def| def.command == "ap8"));
 
     let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn translates_dynamic_zsh_completion_generator_output_with_runner() {
+    let report = ZshImportReport {
+        dynamic_completion_sources: vec![DynamicCompletionSource {
+            command: "kubectl".to_string(),
+            args: vec!["completion".to_string(), "zsh".to_string()],
+            target_shell: "zsh".to_string(),
+            source_file: None,
+            line: None,
+            origin: "plugin".to_string(),
+        }],
+        ..Default::default()
+    };
+
+    let defs = dynamic_completion_defs_from_report_with_runner(&report, |source| {
+        assert_eq!(source.command, "kubectl");
+        assert_eq!(source.args, vec!["completion", "zsh"]);
+        Ok(
+            r#"
+#compdef kubectl
+_arguments \
+  "--namespace=[namespace scope]::namespace:_files" \
+  "--all-namespaces[all namespaces]" \
+  "-o[output format]:format:(json yaml wide)"
+"#
+            .to_string(),
+        )
+    });
+
+    assert_eq!(defs.len(), 1);
+    let kubectl = &defs[0];
+    assert_eq!(kubectl.command, "kubectl");
+    assert!(kubectl.flags.iter().any(|flag| {
+        flag.long.as_deref() == Some("--namespace") && flag.takes_value
+    }));
+    assert!(kubectl.flags.iter().any(|flag| {
+        flag.long.as_deref() == Some("--all-namespaces") && !flag.takes_value
+    }));
+    assert!(kubectl
+        .flags
+        .iter()
+        .any(|flag| flag.short.as_deref() == Some("-o") && flag.takes_value));
 }
 
 fn unique_temp_dir(prefix: &str) -> PathBuf {

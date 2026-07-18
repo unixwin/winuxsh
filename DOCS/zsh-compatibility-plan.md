@@ -449,6 +449,21 @@ Why static packs still matter:
 - Dynamic support should layer on top as explicit native providers for common
   CLIs, not as zsh script execution.
 
+Implementation status: Phase 8d is implemented on
+`codex/zsh-compat-scanner`.
+
+Phase 8d adds the first dynamic completion translation seam:
+
+- `dynamic_completion_defs_from_report_with_runner` accepts structured dynamic
+  sources from the scanner and an injected runner.
+- The runner output is treated as zsh completion text and translated through the
+  same `_arguments` parser used for static completion assets.
+- Tests cover a `kubectl completion zsh`-style generator without running the
+  real `kubectl` binary.
+- This deliberately stops short of startup execution; the next phase should add
+  a native cache/provider with command allowlisting, timeout, stderr capture, and
+  stale-cache fallback.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh
