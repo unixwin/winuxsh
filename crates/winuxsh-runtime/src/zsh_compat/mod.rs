@@ -69,6 +69,49 @@ const NATIVE_GIT_ALIASES: &[(&str, &str)] = &[
     ("gswc", "git switch --create"),
 ];
 
+const NATIVE_DOCKER_ALIASES: &[(&str, &str)] = &[
+    ("dbl", "docker build"),
+    ("dcin", "docker container inspect"),
+    ("dcls", "docker container ls"),
+    ("dclsa", "docker container ls -a"),
+    ("dcprune", "docker container prune"),
+    ("dib", "docker image build"),
+    ("dii", "docker image inspect"),
+    ("dils", "docker image ls"),
+    ("dipu", "docker image push"),
+    ("dipru", "docker image prune -a"),
+    ("dirm", "docker image rm"),
+    ("dit", "docker image tag"),
+    ("dlo", "docker container logs"),
+    ("dnc", "docker network create"),
+    ("dncn", "docker network connect"),
+    ("dndcn", "docker network disconnect"),
+    ("dni", "docker network inspect"),
+    ("dnls", "docker network ls"),
+    ("dnprune", "docker network prune"),
+    ("dnrm", "docker network rm"),
+    ("dpo", "docker container port"),
+    ("dps", "docker ps"),
+    ("dpsa", "docker ps -a"),
+    ("dpu", "docker pull"),
+    ("dr", "docker container run"),
+    ("drit", "docker container run -it"),
+    ("drm", "docker container rm"),
+    ("drm!", "docker container rm -f"),
+    ("dsprune", "docker system prune"),
+    ("dst", "docker container start"),
+    ("drs", "docker container restart"),
+    ("dsta", "docker stop $(docker ps -q)"),
+    ("dstp", "docker container stop"),
+    ("dsts", "docker stats"),
+    ("dtop", "docker top"),
+    ("dvi", "docker volume inspect"),
+    ("dvls", "docker volume ls"),
+    ("dvprune", "docker volume prune"),
+    ("dxc", "docker container exec"),
+    ("dxcit", "docker container exec -it"),
+];
+
 #[derive(Debug, Clone)]
 pub struct ZshImportOptions {
     pub enabled: bool,
@@ -1241,6 +1284,7 @@ fn apply_native_plugin_pack(report: &mut ZshImportReport, plugin_name: &str) -> 
 fn native_plugin_aliases(plugin_name: &str) -> Option<&'static [(&'static str, &'static str)]> {
     match plugin_name {
         "git" => Some(NATIVE_GIT_ALIASES),
+        "docker" => Some(NATIVE_DOCKER_ALIASES),
         _ => None,
     }
 }

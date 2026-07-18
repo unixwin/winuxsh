@@ -46,6 +46,13 @@ MSYS2/Git Bash/WSL isolation.
 
 ## Proposed Config Surface
 
+Decision: `.zshrc` should become the familiar user-facing compatibility entry
+point, while `~/.winshrc.toml` remains the native winuxsh control plane. TOML is
+not redundant: it is the deterministic place for safe import/apply state,
+Windows-native overrides, agent-readable diagnostics, and rollback-safe managed
+blocks. Winuxsh can read and translate `.zshrc`, but it should not execute zsh
+startup files as the runtime authority.
+
 Keep `~/.winshrc.toml` as the native authoritative config, then add a zsh
 compatibility section:
 
@@ -401,12 +408,27 @@ Phase 8a starts the local-only native plugin pack layer with the Oh My Zsh
 Later Phase 8 work can add native packs for `docker`, `npm`, `node`, `python`,
 `pip`, `kubectl`, and related completion metadata after each pack has tests.
 
+Implementation status: Phase 8b is implemented on
+`codex/zsh-compat-scanner`.
+
+Phase 8b adds the Oh My Zsh `docker` plugin as a conservative native alias pack:
+
+- If `.zshrc` declares `plugins=(docker)` but no readable Oh My Zsh `docker`
+  plugin directory is available, winuxsh provides static Docker aliases derived
+  from the upstream Oh My Zsh plugin.
+- Native aliases are marked with `origin = "native-plugin:docker"` in the report
+  and import plan.
+- Native Docker aliases do not override aliases already discovered from the
+  user's zsh files.
+- The dynamic Docker completion/cache logic in the Oh My Zsh plugin remains
+  report-only future work; winuxsh does not execute that zsh code.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh
   repository.
-- Do not make `.zshrc` the authoritative runtime config before the native TOML
-  config is stable.
+- Do not make `.zshrc` the only runtime config or execute it directly; TOML
+  remains the native control plane and rollback-safe import target.
 - Do not execute zsh plugin scripts during normal startup.
 - Do not add a zsh parser/executor in winuxsh.
 - Do not change `~` away from the normal Windows user home.

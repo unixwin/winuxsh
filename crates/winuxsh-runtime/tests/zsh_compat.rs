@@ -245,6 +245,106 @@ alias gst='git status --short'
 }
 
 #[test]
+fn imports_native_docker_alias_pack_when_omz_plugin_dir_is_missing() {
+    let temp = unique_temp_dir("winuxsh-zsh-native-docker-pack");
+    std::fs::create_dir_all(&temp).unwrap();
+    std::fs::write(
+        temp.join(".zshrc"),
+        r#"
+plugins=(docker)
+"#,
+    )
+    .unwrap();
+
+    let report = scan(&ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: true,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    });
+
+    let docker = plugin(&report, "docker");
+    assert!(docker.source_dir.is_none());
+    assert_eq!(docker.import_kind, PluginImportKind::AliasOnly);
+    assert_eq!(docker.tier, PluginImportTier::Tier1Safe);
+    assert!(docker.alias_count >= 35);
+    assert!(docker
+        .capabilities
+        .iter()
+        .any(|cap| cap == "native_aliases"));
+    assert!(report.aliases.iter().any(|alias| {
+        alias.name == "dps" && alias.value == "docker ps" && alias.origin == "native-plugin:docker"
+    }));
+    assert!(report.aliases.iter().any(|alias| {
+        alias.name == "drit"
+            && alias.value == "docker container run -it"
+            && alias.origin == "native-plugin:docker"
+    }));
+    assert!(report.aliases.iter().any(|alias| {
+        alias.name == "drm!"
+            && alias.value == "docker container rm -f"
+            && alias.origin == "native-plugin:docker"
+    }));
+
+    let plan = import_plan_toml(
+        &ZshImportOptions {
+            enabled: true,
+            zdotdir: temp.clone(),
+            import_zshrc: true,
+            import_oh_my_zsh: true,
+            plugins: Vec::new(),
+            compat_level: ZshCompatLevel::Safe,
+        },
+        &report,
+    );
+    assert!(plan.contains("\"dps\" = \"docker ps\""));
+    assert!(plan.contains("\"drm!\" = \"docker container rm -f\""));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn native_docker_alias_pack_does_not_override_user_aliases() {
+    let temp = unique_temp_dir("winuxsh-zsh-native-docker-pack-no-override");
+    std::fs::create_dir_all(&temp).unwrap();
+    std::fs::write(
+        temp.join(".zshrc"),
+        r#"
+plugins=(docker)
+alias dps='docker ps --format table'
+"#,
+    )
+    .unwrap();
+
+    let report = scan(&ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: true,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    });
+
+    let dps_aliases: Vec<_> = report
+        .aliases
+        .iter()
+        .filter(|alias| alias.name == "dps")
+        .collect();
+    assert_eq!(dps_aliases.len(), 1);
+    assert_eq!(dps_aliases[0].value, "docker ps --format table");
+    assert_eq!(dps_aliases[0].origin, "profile");
+    assert!(report.aliases.iter().any(|alias| {
+        alias.name == "drit"
+            && alias.value == "docker container run -it"
+            && alias.origin == "native-plugin:docker"
+    }));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
 fn reports_unsupported_global_aliases_and_zmodload() {
     let temp = unique_temp_dir("winuxsh-zsh-unsupported");
     std::fs::create_dir_all(&temp).unwrap();
