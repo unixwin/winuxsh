@@ -7,10 +7,10 @@ use winuxsh_runtime::config::ZshCompatLevel;
 use winuxsh_runtime::zsh_compat::{
     apply_import_plan_to_config_with_backup_suffix, apply_safe_aliases, apply_safe_env,
     completion_defs_from_report, git_prompt_format_from_report, import_plan_toml,
-    inspect_import_config_status, safe_path_value, scan, translate_zsh_prompt, CompletionAsset,
-    DiagnosticSeverity, ImportedAlias, ImportedEnv, PluginImportKind, PluginImportTier,
-    ZshImportApplyReadiness, ZshImportBlockState, ZshImportOptions, ZshImportReport,
-    ZSH_IMPORT_BLOCK_END, ZSH_IMPORT_BLOCK_START,
+    inspect_import_config_status, inspect_import_rollback_plan, safe_path_value, scan,
+    translate_zsh_prompt, CompletionAsset, DiagnosticSeverity, ImportedAlias, ImportedEnv,
+    PluginImportKind, PluginImportTier, ZshImportApplyReadiness, ZshImportBlockState,
+    ZshImportOptions, ZshImportReport, ZSH_IMPORT_BLOCK_END, ZSH_IMPORT_BLOCK_START,
 };
 
 #[test]
@@ -532,6 +532,46 @@ fn reports_import_status_when_apply_would_duplicate_tables() {
         std::fs::read_to_string(&config_path).unwrap(),
         "[zsh]\nenabled = false\n"
     );
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn reports_empty_rollback_plan_without_backups() {
+    let temp = unique_temp_dir("winuxsh-zsh-import-rollback-empty");
+    std::fs::create_dir_all(&temp).unwrap();
+    let config_path = temp.join(".winshrc.toml");
+
+    let plan = inspect_import_rollback_plan(&config_path).unwrap();
+
+    assert_eq!(plan.config_path, config_path);
+    assert!(plan.backup_paths.is_empty());
+    assert!(plan.latest_backup_path.is_none());
+    assert!(plan.restore_command.is_none());
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn reports_latest_rollback_backup_and_restore_command() {
+    let temp = unique_temp_dir("winuxsh-zsh-import-rollback-latest");
+    let quoted_dir = temp.join("quote's home");
+    std::fs::create_dir_all(&quoted_dir).unwrap();
+    let config_path = quoted_dir.join(".winshrc.toml");
+    let older_backup = quoted_dir.join(".winshrc.toml.100.bak");
+    let latest_backup = quoted_dir.join(".winshrc.toml.200.bak");
+    std::fs::write(&older_backup, "older").unwrap();
+    std::fs::write(&latest_backup, "latest").unwrap();
+
+    let plan = inspect_import_rollback_plan(&config_path).unwrap();
+
+    assert_eq!(plan.backup_paths, vec![older_backup, latest_backup.clone()]);
+    assert_eq!(plan.latest_backup_path, Some(latest_backup.clone()));
+    let command = plan.restore_command.unwrap();
+    assert!(command.starts_with("Copy-Item -LiteralPath "));
+    assert!(command.contains("quote''s home"));
+    assert!(command.contains(".winshrc.toml.200.bak"));
+    assert!(command.ends_with(" -Force"));
 
     let _ = std::fs::remove_dir_all(temp);
 }

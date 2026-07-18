@@ -11,6 +11,7 @@
 //!   winuxsh --zsh-compat-import-plan → print a reviewable .winshrc.toml patch
 //!   winuxsh --zsh-compat-import-apply → write the import patch with a backup
 //!   winuxsh --zsh-compat-import-status → inspect import block and backups
+//!   winuxsh --zsh-compat-import-rollback-plan → print restore command
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -69,6 +70,10 @@ fn run(args: &[String]) -> anyhow::Result<()> {
             print_zsh_compat_import_status()?;
             Ok(())
         }
+        "--zsh-compat-import-rollback-plan" => {
+            print_zsh_compat_import_rollback_plan()?;
+            Ok(())
+        }
         "-c" => {
             if args.len() < 3 {
                 anyhow::bail!("-c requires an argument");
@@ -113,6 +118,7 @@ fn print_usage() {
     println!("  winuxsh --zsh-compat-import-plan Print a reviewable .winshrc.toml import patch");
     println!("  winuxsh --zsh-compat-import-apply Write that import patch with a backup");
     println!("  winuxsh --zsh-compat-import-status Inspect import block and backup status");
+    println!("  winuxsh --zsh-compat-import-rollback-plan Print latest backup restore command");
 }
 
 fn print_zsh_compat_import_plan() -> anyhow::Result<()> {
@@ -181,6 +187,26 @@ fn print_zsh_compat_import_status() -> anyhow::Result<()> {
     println!("Backups: {}", status.backup_paths.len());
     if let Some(path) = status.backup_paths.last() {
         println!("Latest backup: {}", path.display());
+    }
+    Ok(())
+}
+
+fn print_zsh_compat_import_rollback_plan() -> anyhow::Result<()> {
+    let config_path = winuxsh_runtime::config::default_config_path();
+    let plan = winuxsh_runtime::zsh_compat::inspect_import_rollback_plan(&config_path)?;
+
+    println!("Config: {}", plan.config_path.display());
+    println!("Backups: {}", plan.backup_paths.len());
+    if let Some(path) = plan.latest_backup_path {
+        println!("Latest backup: {}", path.display());
+    } else {
+        println!("Latest backup: none");
+    }
+    if let Some(command) = plan.restore_command {
+        println!("Restore command:");
+        println!("{}", command);
+    } else {
+        println!("Restore command: unavailable (no backups found)");
     }
     Ok(())
 }

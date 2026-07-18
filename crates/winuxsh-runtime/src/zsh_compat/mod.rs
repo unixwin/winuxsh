@@ -449,6 +449,14 @@ pub struct ZshImportConfigStatus {
     pub backup_paths: Vec<PathBuf>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ZshImportRollbackPlan {
+    pub config_path: PathBuf,
+    pub backup_paths: Vec<PathBuf>,
+    pub latest_backup_path: Option<PathBuf>,
+    pub restore_command: Option<String>,
+}
+
 pub fn apply_import_plan_to_config(
     config_path: &Path,
     plan: &str,
@@ -500,6 +508,25 @@ pub fn inspect_import_config_status(
         apply_readiness,
         apply_error,
         backup_paths: backup_paths_for(config_path)?,
+    })
+}
+
+pub fn inspect_import_rollback_plan(config_path: &Path) -> anyhow::Result<ZshImportRollbackPlan> {
+    let backup_paths = backup_paths_for(config_path)?;
+    let latest_backup_path = backup_paths.last().cloned();
+    let restore_command = latest_backup_path.as_ref().map(|backup_path| {
+        format!(
+            "Copy-Item -LiteralPath {} -Destination {} -Force",
+            powershell_single_quote_path(backup_path),
+            powershell_single_quote_path(config_path)
+        )
+    });
+
+    Ok(ZshImportRollbackPlan {
+        config_path: config_path.to_path_buf(),
+        backup_paths,
+        latest_backup_path,
+        restore_command,
     })
 }
 
@@ -1942,6 +1969,11 @@ fn backup_paths_for(config_path: &Path) -> anyhow::Result<Vec<PathBuf>> {
 
     paths.sort();
     Ok(paths)
+}
+
+fn powershell_single_quote_path(path: &Path) -> String {
+    let value = path.to_string_lossy().replace('\'', "''");
+    format!("'{}'", value)
 }
 
 fn record_assignment(
