@@ -103,6 +103,7 @@ status: active
 - [x] Phase 8e dynamic completion runner: 显式 allowlist + timeout 执行动态 generator，默认不运行外部命令
 - [x] Phase 9 dynamic completion provider: `[zsh.dynamic_completions]` 配置、磁盘缓存、启动接入，默认关闭
 - [x] Phase 10a kubectl preset: `plugins=(kubectl)` 缺少 OMZ 目录时提供 native alias pack + disabled dynamic completion preset
+- [x] Phase 10b npm preset: `plugins=(npm)` 缺少 OMZ 目录时提供安全 npm alias pack，并标记 F2/ZLE toggle 为 native UX 待实现
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证

@@ -461,6 +461,117 @@ alias kgp='kubectl get pods -A'
 }
 
 #[test]
+fn imports_native_npm_preset_when_omz_plugin_dir_is_missing() {
+    let temp = unique_temp_dir("winuxsh-zsh-native-npm-preset");
+    std::fs::create_dir_all(&temp).unwrap();
+    std::fs::write(
+        temp.join(".zshrc"),
+        r#"
+plugins=(npm)
+"#,
+    )
+    .unwrap();
+
+    let report = scan(&ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: true,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    });
+
+    let npm = plugin(&report, "npm");
+    assert!(npm.source_dir.is_none());
+    assert_eq!(npm.import_kind, PluginImportKind::NativeUx);
+    assert_eq!(npm.tier, PluginImportTier::Tier3Native);
+    assert!(npm.alias_count >= 15);
+    assert!(npm
+        .capabilities
+        .iter()
+        .any(|cap| cap == "native_aliases"));
+    assert!(npm
+        .capabilities
+        .iter()
+        .any(|cap| cap == "native_ux_required"));
+    assert!(npm
+        .unsupported_features
+        .iter()
+        .any(|feature| feature == "native-ux-shim"));
+    assert!(report.aliases.iter().any(|alias| {
+        alias.name == "npmg"
+            && alias.value == "npm i -g"
+            && alias.origin == "native-plugin:npm"
+    }));
+    assert!(report.aliases.iter().any(|alias| {
+        alias.name == "npmR"
+            && alias.value == "npm run"
+            && alias.origin == "native-plugin:npm"
+    }));
+    assert!(report.aliases.iter().any(|alias| {
+        alias.name == "npmrb"
+            && alias.value == "npm run build"
+            && alias.origin == "native-plugin:npm"
+    }));
+    assert!(!report.aliases.iter().any(|alias| alias.name == "npmE"));
+
+    let plan = import_plan_toml(
+        &ZshImportOptions {
+            enabled: true,
+            zdotdir: temp.clone(),
+            import_zshrc: true,
+            import_oh_my_zsh: true,
+            plugins: Vec::new(),
+            compat_level: ZshCompatLevel::Safe,
+        },
+        &report,
+    );
+    assert!(plan.contains("\"npmg\" = \"npm i -g\""));
+    assert!(plan.contains("plugins = [\"npm\"]"));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn native_npm_preset_does_not_override_user_aliases() {
+    let temp = unique_temp_dir("winuxsh-zsh-native-npm-preset-no-override");
+    std::fs::create_dir_all(&temp).unwrap();
+    std::fs::write(
+        temp.join(".zshrc"),
+        r#"
+plugins=(npm)
+alias npmR='npm run --if-present'
+"#,
+    )
+    .unwrap();
+
+    let report = scan(&ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: true,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    });
+
+    let npm_r_aliases: Vec<_> = report
+        .aliases
+        .iter()
+        .filter(|alias| alias.name == "npmR")
+        .collect();
+    assert_eq!(npm_r_aliases.len(), 1);
+    assert_eq!(npm_r_aliases[0].value, "npm run --if-present");
+    assert_eq!(npm_r_aliases[0].origin, "profile");
+    assert!(report.aliases.iter().any(|alias| {
+        alias.name == "npmrb"
+            && alias.value == "npm run build"
+            && alias.origin == "native-plugin:npm"
+    }));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
 fn reports_dynamic_completion_generators_in_plugin_scripts() {
     let temp = unique_temp_dir("winuxsh-zsh-dynamic-completion");
     let kubectl_plugin_dir = temp.join(".oh-my-zsh").join("plugins").join("kubectl");

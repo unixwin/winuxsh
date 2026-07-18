@@ -233,6 +233,27 @@ const NATIVE_KUBECTL_ALIASES: &[(&str, &str)] = &[
     ("kdelj", "kubectl delete job"),
 ];
 
+const NATIVE_NPM_ALIASES: &[(&str, &str)] = &[
+    ("npmg", "npm i -g"),
+    ("npmS", "npm i -S"),
+    ("npmD", "npm i -D"),
+    ("npmF", "npm i -f"),
+    ("npmO", "npm outdated"),
+    ("npmU", "npm update"),
+    ("npmV", "npm -v"),
+    ("npmL", "npm list"),
+    ("npmL0", "npm ls --depth=0"),
+    ("npmst", "npm start"),
+    ("npmt", "npm test"),
+    ("npmR", "npm run"),
+    ("npmP", "npm publish"),
+    ("npmI", "npm init"),
+    ("npmi", "npm info"),
+    ("npmSe", "npm search"),
+    ("npmrd", "npm run dev"),
+    ("npmrb", "npm run build"),
+];
+
 #[derive(Debug, Clone)]
 pub struct ZshImportOptions {
     pub enabled: bool,
@@ -1669,11 +1690,13 @@ fn scan_oh_my_zsh_layout(
             let alias_count = apply_native_plugin_pack(report, &plugin_name);
             let has_dynamic_completion =
                 apply_native_dynamic_completion_preset(report, &plugin_name);
-            if alias_count > 0 || has_dynamic_completion {
+            let requires_native_ux = native_plugin_requires_native_ux(&plugin_name);
+            if alias_count > 0 || has_dynamic_completion || requires_native_ux {
                 report.plugins.push(native_plugin_preset(
                     plugin_name,
                     alias_count,
                     has_dynamic_completion,
+                    requires_native_ux,
                 ));
             } else {
                 report.plugins.push(unresolved_plugin(plugin_name, 1));
@@ -1795,7 +1818,12 @@ fn unresolved_plugin(name: String, diagnostics_count: usize) -> ImportedPlugin {
     }
 }
 
-fn native_plugin_preset(name: String, alias_count: usize, has_dynamic_completion: bool) -> ImportedPlugin {
+fn native_plugin_preset(
+    name: String,
+    alias_count: usize,
+    has_dynamic_completion: bool,
+    requires_native_ux: bool,
+) -> ImportedPlugin {
     let mut capabilities = Vec::new();
     if alias_count > 0 {
         capabilities.push("native_aliases".to_string());
@@ -1803,6 +1831,9 @@ fn native_plugin_preset(name: String, alias_count: usize, has_dynamic_completion
     }
     if has_dynamic_completion {
         capabilities.push("dynamic_completions_required".to_string());
+    }
+    if requires_native_ux {
+        capabilities.push("native_ux_required".to_string());
     }
 
     ImportedPlugin {
@@ -1812,18 +1843,26 @@ fn native_plugin_preset(name: String, alias_count: usize, has_dynamic_completion
         completion_files: Vec::new(),
         alias_count,
         diagnostics_count: 0,
-        tier: if has_dynamic_completion {
+        tier: if requires_native_ux {
+            PluginImportTier::Tier3Native
+        } else if has_dynamic_completion {
             PluginImportTier::Tier2Partial
         } else {
             PluginImportTier::Tier1Safe
         },
-        import_kind: if has_dynamic_completion {
+        import_kind: if requires_native_ux {
+            PluginImportKind::NativeUx
+        } else if has_dynamic_completion {
             PluginImportKind::Partial
         } else {
             PluginImportKind::AliasOnly
         },
         capabilities,
-        unsupported_features: Vec::new(),
+        unsupported_features: if requires_native_ux {
+            vec!["native-ux-shim".to_string()]
+        } else {
+            Vec::new()
+        },
     }
 }
 
@@ -1856,6 +1895,7 @@ fn native_plugin_aliases(plugin_name: &str) -> Option<&'static [(&'static str, &
         "git" => Some(NATIVE_GIT_ALIASES),
         "docker" => Some(NATIVE_DOCKER_ALIASES),
         "kubectl" => Some(NATIVE_KUBECTL_ALIASES),
+        "npm" => Some(NATIVE_NPM_ALIASES),
         _ => None,
     }
 }
@@ -1884,6 +1924,10 @@ fn native_dynamic_completion_source(plugin_name: &str) -> Option<(&'static str, 
         "kubectl" => Some(("kubectl", &["completion", "zsh"])),
         _ => None,
     }
+}
+
+fn native_plugin_requires_native_ux(plugin_name: &str) -> bool {
+    matches!(plugin_name, "npm")
 }
 
 fn classify_plugin(

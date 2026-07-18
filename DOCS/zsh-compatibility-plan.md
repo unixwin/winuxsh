@@ -537,6 +537,20 @@ native mapping is clear:
   with discovered command allowlist entries, so users can review and opt in.
 - User aliases discovered from `.zshrc` still win over native preset aliases.
 
+Implementation status: Phase 10b is implemented on
+`codex/zsh-compat-scanner`.
+
+Phase 10b adds the Oh My Zsh `npm` plugin as a conservative native preset:
+
+- `plugins=(npm)` without a readable Oh My Zsh plugin directory receives safe
+  npm aliases such as `npmg`, `npmS`, `npmD`, `npmR`, `npmrd`, and `npmrb`.
+- `npmE` is intentionally skipped because it relies on command substitution and
+  PATH mutation inside the alias body.
+- The npm F2 install/uninstall toggle is marked as `native_ux_required`; it
+  depends on ZLE `BUFFER`, `CURSOR`, `bindkey`, and history widgets, so it should
+  become a future reedline-native shim rather than sourced zsh code.
+- User aliases discovered from `.zshrc` still win over native preset aliases.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh
