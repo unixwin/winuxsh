@@ -67,9 +67,11 @@ impl CompletionContext {
 
         if let Some(p) = last_sep {
             let skip = ceil_char_boundary(before_cursor, p + 1);
-            before_cursor[skip..].trim().is_empty()
+            let segment = before_cursor[skip..].trim_start();
+            segment.is_empty() || !segment.chars().any(char::is_whitespace)
         } else {
-            before_cursor.trim_start().is_empty()
+            let segment = before_cursor.trim_start();
+            segment.is_empty() || !segment.chars().any(char::is_whitespace)
         }
     }
 
@@ -219,6 +221,23 @@ mod tests {
             10,
         );
         assert_eq!(ctx.get_current_word(), Some("hello".to_string()));
+    }
+
+    #[test]
+    fn test_is_command_position_for_partial_and_empty_commands() {
+        let empty = CompletionContext::new(PathBuf::from("/home/user"), "".to_string(), 0);
+        assert!(empty.is_command_position());
+
+        let partial =
+            CompletionContext::new(PathBuf::from("/home/user"), "gre".to_string(), 3);
+        assert!(partial.is_command_position());
+
+        let after_pipe =
+            CompletionContext::new(PathBuf::from("/home/user"), "ls | gre".to_string(), 8);
+        assert!(after_pipe.is_command_position());
+
+        let arg = CompletionContext::new(PathBuf::from("/home/user"), "echo gre".to_string(), 8);
+        assert!(!arg.is_command_position());
     }
 
     #[test]

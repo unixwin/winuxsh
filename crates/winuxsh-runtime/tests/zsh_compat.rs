@@ -961,6 +961,54 @@ plugins=(last-working-dir)
 }
 
 #[test]
+fn imports_native_dotenv_preset_when_omz_plugin_dir_is_missing() {
+    let temp = unique_temp_dir("winuxsh-zsh-native-dotenv-preset");
+    std::fs::create_dir_all(&temp).unwrap();
+    std::fs::write(
+        temp.join(".zshrc"),
+        r#"
+plugins=(dotenv)
+"#,
+    )
+    .unwrap();
+
+    let report = scan(&ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: true,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    });
+
+    let plugin = plugin(&report, "dotenv");
+    assert!(plugin.source_dir.is_none());
+    assert_eq!(plugin.import_kind, PluginImportKind::NativeUx);
+    assert_eq!(plugin.tier, PluginImportTier::Tier3Native);
+    assert!(plugin
+        .capabilities
+        .iter()
+        .any(|cap| cap == "native_plugins_required"));
+
+    let plan = import_plan_toml(
+        &ZshImportOptions {
+            enabled: true,
+            zdotdir: temp.clone(),
+            import_zshrc: true,
+            import_oh_my_zsh: true,
+            plugins: Vec::new(),
+            compat_level: ZshCompatLevel::Safe,
+        },
+        &report,
+    );
+    assert!(plan.contains("[zsh.native_plugins]"));
+    assert!(plan.contains("enabled = false"));
+    assert!(plan.contains("presets = [\"dotenv\"]"));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
 fn native_npm_preset_does_not_override_user_aliases() {
     let temp = unique_temp_dir("winuxsh-zsh-native-npm-preset-no-override");
     std::fs::create_dir_all(&temp).unwrap();

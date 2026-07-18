@@ -1001,6 +1001,63 @@ Rules:
 - cache paths stay under `~/.winuxsh/cache/last-working-dir` (plus optional
   `SSH_USER` suffix) instead of requiring Oh My Zsh's `ZSH_CACHE_DIR`.
 
+Implementation status: Phase 16h is implemented on
+`codex/zsh-compat-dotenv`.
+
+Phase 16h targets project-local environment plugins that normally source
+`.env` during startup and `chpwd`.
+
+Phase 16h adds a native `dotenv` preset:
+
+- recognize `plugins=(dotenv)` as a native dynamic plugin candidate even when
+  the Oh My Zsh plugin directory is not installed locally.
+- suggest a disabled `[zsh.native_plugins]` import-plan block with
+  `presets = ["dotenv"]`.
+- when explicitly enabled, read the shell-visible current directory's `.env`
+  from native `precmd` / `chpwd` lifecycle points and apply safe key/value
+  assignments to rubash's environment.
+- support simple `KEY=value` and `export KEY=value` records, including basic
+  single/double quoted values.
+- skip invalid variable names, oversized files, multiline shell constructs, and
+  values containing command substitution markers such as `$(` or backticks.
+
+Rules:
+
+- disabled by default and never enabled only because `.zshrc` mentions the
+  plugin.
+- no Oh My Zsh `dotenv.plugin.zsh` sourcing and no direct `.env` sourcing.
+- dotenv loading is REPL-only through native lifecycle hooks; `winuxsh -c ...`
+  and script files must remain deterministic.
+- first native pass does not implement OMZ's interactive allow/disallow prompt;
+  opt-in `[zsh.native_plugins]` is the explicit trust boundary.
+
+Verification notes:
+
+- `plugins=(dotenv)` is classified as a native dynamic preset and import-plan
+  suggests disabled `[zsh.native_plugins] presets = ["dotenv"]`.
+- Native `precmd` and `chpwd` hook points load current-directory `.env` files
+  only when the preset is explicitly enabled.
+- `.env` parsing covers simple `KEY=value`, `export KEY=value`, quoted values,
+  and comments while skipping unsafe keys such as `PATH` / `NODE_OPTIONS`,
+  invalid names, command substitution markers, backticks, and oversized files.
+
+## Windows-Native Host Contract Stabilization
+
+Implementation status: completed on `codex/zsh-compat-dotenv`.
+
+This follow-up keeps the zsh-like UX aligned with the Windows-native product
+contract:
+
+- after `cd`, winuxsh syncs rubash's shell-visible `PWD` back to the host
+  process cwd so prompt rendering, completion cwd, and external commands agree.
+- Windows shell-visible paths now normalize to `C:/...` instead of `/c/...`;
+  `/c/...` remains accepted as a compatibility input.
+- winuxcmd path-style commands translate legacy `/c/...` operands to
+  `C:/...` before execution, so `ls /c/Users` works even though winuxcmd itself
+  is Windows-native.
+- command completion treats empty command position and partial command words
+  correctly, so blank Tab lists commands and `gre<Tab>` can suggest `grep`.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh

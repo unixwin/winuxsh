@@ -93,15 +93,12 @@ impl CommandCompleter {
 
     /// Complete a command name
     pub fn complete(context: &CompletionContext) -> Result<Option<CompletionResult>> {
-        let word = match context.get_current_word() {
-            Some(w) => w,
-            None => return Ok(None),
-        };
-
         // Only complete if we're at a command position
         if !context.is_command_position() {
             return Ok(None);
         }
+
+        let word = context.get_current_word().unwrap_or_default();
 
         // Get all available commands
         let all_commands = Self::get_all_commands();

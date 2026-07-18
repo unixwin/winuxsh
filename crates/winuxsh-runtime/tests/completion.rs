@@ -76,6 +76,18 @@ fn loads_builtin_winuxcmd_definitions_without_user_dirs() {
 }
 
 #[test]
+fn command_completion_handles_empty_and_partial_command_words() {
+    let state = Arc::new(Mutex::new(CompletionState::new(PathBuf::from("."))));
+    {
+        let mut s = state.lock().unwrap();
+        s.load_completion_dirs(&[]);
+    }
+
+    assert_suggests(&state, "", "ls");
+    assert_suggests(&state, "gre", "grep");
+}
+
+#[test]
 fn user_toml_overrides_builtin_definition() {
     let temp_dir = unique_temp_dir("winuxsh-completion-override");
     std::fs::create_dir_all(&temp_dir).unwrap();

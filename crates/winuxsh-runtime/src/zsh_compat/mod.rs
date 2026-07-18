@@ -2192,6 +2192,7 @@ fn native_plugin_requires_native_ux(plugin_name: &str) -> bool {
             | "alias-finder"
             | "command-not-found"
             | "direnv"
+            | "dotenv"
             | "fzf"
             | "last-working-dir"
             | "thefuck"
@@ -2218,6 +2219,7 @@ fn native_dynamic_plugin_preset(plugin_name: &str) -> Option<&'static str> {
         "alias-finder" => Some("alias-finder"),
         "command-not-found" => Some("command-not-found"),
         "direnv" => Some("direnv"),
+        "dotenv" => Some("dotenv"),
         "fzf" => Some("fzf"),
         "last-working-dir" => Some("last-working-dir"),
         "thefuck" => Some("thefuck"),
@@ -2359,6 +2361,7 @@ fn is_native_ux_plugin(name: &str) -> bool {
         name,
         "alias-finder"
             | "command-not-found"
+            | "dotenv"
             | "fzf"
             | "last-working-dir"
             | "thefuck"

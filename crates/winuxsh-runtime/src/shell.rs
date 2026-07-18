@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use reedline::Reedline;
-use rubash::{executor::Executor, lexer::tokenize, parser::parse};
+use rubash::{executor::Executor, lexer::tokenize, parser::parse, Ast};
 
 use crate::completion::runtime::RuntimeCompletionPlugin;
 use crate::completion::CompletionState;
@@ -30,6 +30,8 @@ use crate::zsh_compat::{
 };
 
 use crate::winuxcmd;
+
+const DOTENV_MAX_SIZE: u64 = 10 * 1024 * 1024;
 
 /// Top-level shell state.
 pub struct Shell {
@@ -198,7 +200,7 @@ impl Shell {
             Vec::new()
         };
 
-        Ok(Self {
+        let mut shell = Self {
             executor,
             completion_state,
             prompt,
@@ -218,7 +220,10 @@ impl Shell {
             last_interactive_command: None,
             last_interactive_exit_code: None,
             line_editor: None,
-        })
+        };
+        shell.sync_process_cwd_from_executor_pwd();
+        shell.update_completion_state();
+        Ok(shell)
     }
 
     /// Execute a single input line via rubash. Returns the exit code.
@@ -234,71 +239,64 @@ impl Shell {
         }
 
         // parse() returns Ast directly (not Result) in rubash.
-        let ast = parse(&tokens);
+        let mut ast = parse(&tokens);
+        normalize_cd_windows_drive_args(&mut ast);
+        normalize_winuxcmd_slash_drive_args(&mut ast);
 
-        if self.native_plugin_enabled("zoxide")
+        let code = if self.native_plugin_enabled("zoxide")
             && ast.commands.len() == 1
             && ast.commands[0]
                 .words
                 .first()
                 .is_some_and(|command| command == "z")
         {
-            return self.execute_native_zoxide(&ast.commands[0].words[1..]);
-        }
-
-        if self.native_plugin_enabled("thefuck")
+            self.execute_native_zoxide(&ast.commands[0].words[1..])?
+        } else if self.native_plugin_enabled("thefuck")
             && ast.commands.len() == 1
             && ast.commands[0]
                 .words
                 .first()
                 .is_some_and(|command| command == "fuck")
         {
-            return self.execute_native_thefuck(&ast.commands[0].words[1..]);
-        }
-
-        if self.native_selector_enabled()
+            self.execute_native_thefuck(&ast.commands[0].words[1..])?
+        } else if self.native_selector_enabled()
             && ast.commands.len() == 1
             && ast.commands[0]
                 .words
                 .first()
                 .is_some_and(|command| command == "cdf" || command == "fzf-cd")
         {
-            return self.execute_native_fzf_cd(&ast.commands[0].words[1..]);
-        }
-
-        if self.native_plugin_enabled("last-working-dir")
+            self.execute_native_fzf_cd(&ast.commands[0].words[1..])?
+        } else if self.native_plugin_enabled("last-working-dir")
             && ast.commands.len() == 1
             && ast.commands[0]
                 .words
                 .first()
                 .is_some_and(|command| command == "lwd")
         {
-            return self.execute_native_last_working_dir();
-        }
-
-        match self.executor.execute_ast(&ast) {
-            Ok(()) => {}
-            Err(rubash::executor::ExecuteError::ExitCode(code)) => {
-                return Ok(code);
-            }
-            Err(rubash::executor::ExecuteError::Return(code)) => {
-                return Ok(code);
-            }
-            Err(rubash::executor::ExecuteError::CommandNotFound(cmd)) => {
-                if self.native_plugin_enabled("command-not-found") {
-                    self.print_native_command_not_found(&cmd);
-                } else {
-                    eprintln!("winuxsh: {}: command not found", cmd);
+            self.execute_native_last_working_dir()?
+        } else {
+            match self.executor.execute_ast(&ast) {
+                Ok(()) => self.executor.last_exit_code(),
+                Err(rubash::executor::ExecuteError::ExitCode(code)) => code,
+                Err(rubash::executor::ExecuteError::Return(code)) => code,
+                Err(rubash::executor::ExecuteError::CommandNotFound(cmd)) => {
+                    if self.native_plugin_enabled("command-not-found") {
+                        self.print_native_command_not_found(&cmd);
+                    } else {
+                        eprintln!("winuxsh: {}: command not found", cmd);
+                    }
+                    127
                 }
-                return Ok(127);
+                Err(e) => {
+                    eprintln!("winuxsh: {}", e);
+                    1
+                }
             }
-            Err(e) => {
-                eprintln!("winuxsh: {}", e);
-                return Ok(1);
-            }
-        }
+        };
 
-        Ok(self.executor.last_exit_code())
+        self.sync_process_cwd_from_executor_pwd();
+        Ok(code)
     }
 
     /// Execute a line as an interactive REPL command, including native hook
@@ -386,6 +384,9 @@ impl Shell {
         if self.native_plugin_enabled("direnv") {
             self.apply_direnv_export();
         }
+        if self.native_plugin_enabled("dotenv") {
+            self.apply_dotenv_current_dir();
+        }
         if self.native_plugin_enabled("zoxide") {
             self.track_zoxide_current_dir();
         }
@@ -402,6 +403,9 @@ impl Shell {
     fn run_native_chpwd_plugins(&mut self) {
         if self.native_plugin_enabled("direnv") {
             self.apply_direnv_export();
+        }
+        if self.native_plugin_enabled("dotenv") {
+            self.apply_dotenv_current_dir();
         }
         if self.native_plugin_enabled("zoxide") {
             self.track_zoxide_current_dir();
@@ -454,6 +458,37 @@ impl Shell {
         }
         if let Err(err) = self.execute_script(script) {
             log::warn!("native direnv preset failed to apply export: {}", err);
+        }
+    }
+
+    fn apply_dotenv_current_dir(&mut self) {
+        let Some(pwd) = self.executor.get_env("PWD").map(str::to_owned) else {
+            return;
+        };
+        let dotenv_path = PathBuf::from(shell_path_to_host_path(&pwd)).join(".env");
+        let Ok(metadata) = std::fs::metadata(&dotenv_path) else {
+            return;
+        };
+        if !metadata.is_file() {
+            return;
+        }
+        if metadata.len() > DOTENV_MAX_SIZE {
+            log::debug!(
+                "native dotenv preset skipped oversized file {}",
+                dotenv_path.display()
+            );
+            return;
+        }
+        let Ok(content) = std::fs::read_to_string(&dotenv_path) else {
+            log::debug!(
+                "native dotenv preset could not read {}",
+                dotenv_path.display()
+            );
+            return;
+        };
+
+        for (key, value) in parse_dotenv_assignments(&content) {
+            self.executor.set_env(&key, &value);
         }
     }
 
@@ -649,7 +684,9 @@ impl Shell {
             return;
         }
 
-        let ast = parse(&tokens);
+        let mut ast = parse(&tokens);
+        normalize_cd_windows_drive_args(&mut ast);
+        normalize_winuxcmd_slash_drive_args(&mut ast);
         if ast.commands.len() != 1 {
             return;
         }
@@ -742,10 +779,39 @@ impl Shell {
     /// Update the shared completion state from the current env + cwd.
     pub fn update_completion_state(&self) {
         if let Ok(mut state) = self.completion_state.lock() {
-            state.current_dir = std::env::current_dir().unwrap_or_else(|_| state.current_dir.clone());
+            state.current_dir = self
+                .executor_pwd_host_path()
+                .or_else(|| std::env::current_dir().ok())
+                .unwrap_or_else(|| state.current_dir.clone());
             state.env_vars = std::env::vars()
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
+        }
+    }
+
+    fn executor_pwd_host_path(&self) -> Option<PathBuf> {
+        let pwd = self.executor.get_env("PWD")?;
+        let host_path = PathBuf::from(shell_path_to_host_path(pwd));
+        host_path.is_dir().then_some(host_path)
+    }
+
+    fn sync_process_cwd_from_executor_pwd(&mut self) {
+        let Some(pwd) = self.executor.get_env("PWD").map(str::to_owned) else {
+            return;
+        };
+        let host_pwd = shell_path_to_host_path(&pwd);
+        let host_path = PathBuf::from(&host_pwd);
+        if !host_path.is_dir() || std::env::set_current_dir(&host_path).is_err() {
+            return;
+        }
+
+        let normalized_pwd = host_path_to_shell_path(&host_pwd);
+        self.executor.set_env("PWD", &normalized_pwd);
+        if let Some(old_pwd) = self.executor.get_env("OLDPWD").map(str::to_owned) {
+            let normalized_old_pwd = normalize_shell_visible_path(&old_pwd);
+            if normalized_old_pwd != old_pwd {
+                self.executor.set_env("OLDPWD", &normalized_old_pwd);
+            }
         }
     }
 
@@ -771,37 +837,151 @@ impl Shell {
             return Ok(0);
         }
 
-        let ast = parse(&tokens);
+        let mut ast = parse(&tokens);
+        normalize_cd_windows_drive_args(&mut ast);
+        normalize_winuxcmd_slash_drive_args(&mut ast);
 
-        match self.executor.execute_ast(&ast) {
-            Ok(()) => {}
-            Err(rubash::executor::ExecuteError::ExitCode(code)) => {
-                return Ok(code);
-            }
-            Err(rubash::executor::ExecuteError::Return(code)) => {
-                return Ok(code);
-            }
+        let code = match self.executor.execute_ast(&ast) {
+            Ok(()) => self.executor.last_exit_code(),
+            Err(rubash::executor::ExecuteError::ExitCode(code)) => code,
+            Err(rubash::executor::ExecuteError::Return(code)) => code,
             Err(rubash::executor::ExecuteError::CommandNotFound(cmd)) => {
                 eprintln!("winuxsh: {}: command not found", cmd);
-                return Ok(127);
+                127
             }
             Err(e) => {
                 eprintln!("winuxsh: {}", e);
-                return Ok(1);
+                1
             }
-        }
+        };
 
-        Ok(self.executor.last_exit_code())
+        self.sync_process_cwd_from_executor_pwd();
+        Ok(code)
     }
 }
 
 fn same_shell_dir(left: &str, right: &str) -> bool {
-    let left = left.trim_end_matches(['/', '\\']).replace('/', "\\");
-    let right = right.trim_end_matches(['/', '\\']).replace('/', "\\");
+    let left = normalize_shell_dir_for_compare(left);
+    let right = normalize_shell_dir_for_compare(right);
     if cfg!(windows) {
         left.eq_ignore_ascii_case(&right)
     } else {
         left == right
+    }
+}
+
+fn normalize_cd_windows_drive_args(ast: &mut Ast) {
+    if !cfg!(windows) {
+        return;
+    }
+
+    for command in &mut ast.commands {
+        if !command
+            .words
+            .first()
+            .is_some_and(|word| word.eq_ignore_ascii_case("cd"))
+        {
+            continue;
+        }
+
+        for word in command.words.iter_mut().skip(1) {
+            if let Some(normalized) = windows_drive_path_to_slash_drive(word) {
+                *word = normalized;
+            }
+        }
+    }
+}
+
+fn normalize_winuxcmd_slash_drive_args(ast: &mut Ast) {
+    if !cfg!(windows) {
+        return;
+    }
+
+    for command in &mut ast.commands {
+        let Some(command_name) = command.words.first() else {
+            continue;
+        };
+        if !is_winuxcmd_path_command(command_name) {
+            continue;
+        }
+
+        for word in command.words.iter_mut().skip(1) {
+            if let Some(normalized) = slash_drive_arg_to_windows_native(word) {
+                *word = normalized;
+            }
+        }
+    }
+}
+
+fn is_winuxcmd_path_command(command: &str) -> bool {
+    matches!(
+        command,
+        "ls" | "cat"
+            | "grep"
+            | "find"
+            | "cp"
+            | "mv"
+            | "rm"
+            | "mkdir"
+            | "touch"
+            | "chmod"
+            | "tar"
+    )
+}
+
+fn slash_drive_arg_to_windows_native(value: &str) -> Option<String> {
+    if let Some(path) = slash_drive_path_to_windows_native(value) {
+        return Some(path);
+    }
+
+    let (prefix, path) = value.split_once('=')?;
+    slash_drive_path_to_windows_native(path).map(|path| format!("{prefix}={path}"))
+}
+
+fn slash_drive_path_to_windows_native(value: &str) -> Option<String> {
+    let normalized = value.replace('\\', "/");
+    let bytes = normalized.as_bytes();
+    if bytes.len() >= 2
+        && bytes[0] == b'/'
+        && bytes[1].is_ascii_alphabetic()
+        && (bytes.len() == 2 || bytes.get(2) == Some(&b'/'))
+    {
+        Some(shell_path_to_host_path(&normalized).replace('\\', "/"))
+    } else {
+        None
+    }
+}
+
+fn windows_drive_path_to_slash_drive(value: &str) -> Option<String> {
+    if !cfg!(windows) {
+        return None;
+    }
+
+    let normalized = value.replace('\\', "/");
+    let bytes = normalized.as_bytes();
+    if bytes.len() < 2 || bytes[1] != b':' || !bytes[0].is_ascii_alphabetic() {
+        return None;
+    }
+
+    let drive = (bytes[0] as char).to_ascii_lowercase();
+    if bytes.len() == 2 {
+        return Some(format!("/{drive}"));
+    }
+    if bytes.get(2) == Some(&b'/') {
+        return Some(format!("/{drive}{}", &normalized[2..]));
+    }
+
+    None
+}
+
+fn normalize_shell_dir_for_compare(value: &str) -> String {
+    let normalized = normalize_shell_visible_path(value)
+        .trim_end_matches(['/', '\\'])
+        .replace('/', "\\");
+    if normalized.is_empty() {
+        value.to_string()
+    } else {
+        normalized
     }
 }
 
@@ -859,6 +1039,123 @@ fn is_package_search_candidate(command: &str) -> bool {
         && !command.contains('/')
         && !command.contains('\\')
         && !command.contains(':')
+}
+
+fn parse_dotenv_assignments(content: &str) -> Vec<(String, String)> {
+    let mut assignments = Vec::new();
+    for raw_line in content.lines() {
+        let mut line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("export") {
+            if rest.chars().next().is_some_and(char::is_whitespace) {
+                line = rest.trim_start();
+            }
+        }
+
+        let Some((key, raw_value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        if !is_safe_dotenv_key(key) || is_forbidden_dotenv_key(key) {
+            continue;
+        }
+
+        let Some(value) = parse_dotenv_value(raw_value.trim()) else {
+            continue;
+        };
+        assignments.push((key.to_string(), value));
+    }
+    assignments
+}
+
+fn parse_dotenv_value(value: &str) -> Option<String> {
+    if value.contains("$(") || value.contains('`') {
+        return None;
+    }
+    if value.starts_with('"') || value.starts_with('\'') {
+        return parse_quoted_dotenv_value(value);
+    }
+    let value = strip_unquoted_dotenv_comment(value).trim();
+    if value.contains(';') {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+fn parse_quoted_dotenv_value(value: &str) -> Option<String> {
+    let quote = value.chars().next()?;
+    let mut escaped = false;
+    let mut out = String::new();
+    for ch in value[quote.len_utf8()..].chars() {
+        if escaped {
+            out.push(match ch {
+                'n' if quote == '"' => '\n',
+                'r' if quote == '"' => '\r',
+                't' if quote == '"' => '\t',
+                other => other,
+            });
+            escaped = false;
+            continue;
+        }
+        if quote == '"' && ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == quote {
+            return Some(out);
+        }
+        out.push(ch);
+    }
+    None
+}
+
+fn strip_unquoted_dotenv_comment(value: &str) -> &str {
+    let bytes = value.as_bytes();
+    for index in 0..bytes.len() {
+        if bytes[index] == b'#' && (index == 0 || bytes[index - 1].is_ascii_whitespace()) {
+            return &value[..index];
+        }
+    }
+    value
+}
+
+fn is_safe_dotenv_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn is_forbidden_dotenv_key(key: &str) -> bool {
+    matches!(
+        key.to_ascii_uppercase().as_str(),
+        "BASH_ENV"
+            | "DYLD_INSERT_LIBRARIES"
+            | "EDITOR"
+            | "ENV"
+            | "GIT_CONFIG_GLOBAL"
+            | "GIT_DIR"
+            | "GIT_EDITOR"
+            | "GIT_EXEC_PATH"
+            | "GIT_EXTERNAL_DIFF"
+            | "GIT_PAGER"
+            | "GIT_SSH"
+            | "GIT_SSH_COMMAND"
+            | "GIT_SSL_NO_VERIFY"
+            | "GIT_TEMPLATE_DIR"
+            | "LD_LIBRARY_PATH"
+            | "LD_PRELOAD"
+            | "NODE_OPTIONS"
+            | "PAGER"
+            | "PATH"
+            | "VISUAL"
+            | "ZDOTDIR"
+            | "ZSH"
+    )
 }
 
 fn default_last_working_dir_cache_path(home_dir: &Path) -> PathBuf {
@@ -1016,18 +1313,17 @@ fn shell_path_to_host_path(value: &str) -> String {
 
 fn host_path_to_shell_path(value: &str) -> String {
     if cfg!(windows) {
-        let normalized = value.replace('\\', "/");
-        let bytes = normalized.as_bytes();
-        if bytes.len() >= 3
-            && bytes[1] == b':'
-            && bytes[0].is_ascii_alphabetic()
-            && bytes[2] == b'/'
-        {
-            let drive = (bytes[0] as char).to_ascii_lowercase();
-            return format!("/{drive}/{}", &normalized[3..]);
-        }
+        return value.replace('\\', "/");
     }
     value.to_string()
+}
+
+fn normalize_shell_visible_path(value: &str) -> String {
+    if cfg!(windows) {
+        shell_path_to_host_path(value).replace('\\', "/")
+    } else {
+        value.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -1139,6 +1435,152 @@ mod tests {
         } else {
             assert_eq!(shell_path_to_host_path("/c/Users/me/project"), "/c/Users/me/project");
         }
+    }
+
+    #[test]
+    fn host_path_to_shell_path_uses_windows_native_drive_paths() {
+        if cfg!(windows) {
+            assert_eq!(
+                host_path_to_shell_path(r"C:\Users\me\project"),
+                "C:/Users/me/project"
+            );
+            assert_eq!(
+                host_path_to_shell_path("C:/Users/me/project"),
+                "C:/Users/me/project"
+            );
+        } else {
+            assert_eq!(host_path_to_shell_path("/home/me/project"), "/home/me/project");
+        }
+    }
+
+    #[test]
+    fn winuxcmd_slash_drive_args_are_translated_for_path_commands() {
+        let tokens = tokenize("ls /c/Users; echo /c/Users");
+        let mut ast = parse(&tokens);
+        normalize_winuxcmd_slash_drive_args(&mut ast);
+
+        if cfg!(windows) {
+            assert_eq!(ast.commands[0].words[1], "C:/Users");
+            assert_eq!(ast.commands[1].words[1], "/c/Users");
+        } else {
+            assert_eq!(ast.commands[0].words[1], "/c/Users");
+            assert_eq!(ast.commands[1].words[1], "/c/Users");
+        }
+    }
+
+    #[test]
+    fn interactive_cd_syncs_process_cwd_and_normalizes_pwd() {
+        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _cwd_guard = CwdGuard::capture();
+        let temp = unique_temp_dir("winuxsh-cwd-sync");
+        let target = temp.join("target");
+        std::fs::create_dir_all(&target).unwrap();
+
+        let mut shell = test_shell(HookConfig::default());
+        let target_shell_path = shell_display_path(&target);
+        let code = shell
+            .execute_interactive_line(&format!("cd {}", shell_quote(&target_shell_path)))
+            .unwrap();
+        assert_eq!(
+            code,
+            0,
+            "cd failed, PWD={:?}, target={target_shell_path}",
+            shell.executor.get_env("PWD")
+        );
+
+        let completion_cwd = shell
+            .completion_state
+            .lock()
+            .unwrap()
+            .current_dir
+            .canonicalize()
+            .unwrap();
+        assert_eq!(
+            completion_cwd,
+            target.canonicalize().unwrap(),
+            "completion cwd did not sync, PWD={:?}",
+            shell.executor.get_env("PWD")
+        );
+        assert_eq!(
+            shell.executor.get_env("PWD").as_deref(),
+            Some(target_shell_path.as_str())
+        );
+        if cfg!(windows) {
+            assert!(
+                !shell
+                    .executor
+                    .get_env("PWD")
+                    .unwrap_or_default()
+                    .starts_with("/c/"),
+                "PWD should be Windows-native, got {:?}",
+                shell.executor.get_env("PWD")
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn native_dotenv_precmd_applies_safe_assignments() {
+        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _cwd_guard = CwdGuard::capture();
+        let temp = unique_temp_dir("winuxsh-native-dotenv-precmd");
+        std::fs::create_dir_all(&temp).unwrap();
+        std::fs::write(
+            temp.join(".env"),
+            r#"
+SAFE_VALUE=alpha
+export QUOTED_VALUE="hello world"
+SINGLE_VALUE='single value'
+COMMENTED_VALUE=ok # comment
+PATH=bad
+NODE_OPTIONS=--require bad
+BAD-KEY=bad
+EXPAND_VALUE=$(whoami)
+BACKTICK_VALUE=`whoami`
+"#,
+        )
+        .unwrap();
+
+        let mut shell = test_shell(HookConfig::default());
+        shell.native_plugins.enabled = true;
+        shell.native_plugins.presets = vec!["dotenv".to_string()];
+        shell.executor.set_env("PWD", &shell_display_path(&temp));
+        shell.run_precmd_hooks();
+
+        assert_eq!(shell.executor.get_env("SAFE_VALUE"), Some("alpha"));
+        assert_eq!(shell.executor.get_env("QUOTED_VALUE"), Some("hello world"));
+        assert_eq!(shell.executor.get_env("SINGLE_VALUE"), Some("single value"));
+        assert_eq!(shell.executor.get_env("COMMENTED_VALUE"), Some("ok"));
+        assert!(shell.executor.get_env("BAD-KEY").is_none());
+        assert!(shell.executor.get_env("EXPAND_VALUE").is_none());
+        assert!(shell.executor.get_env("BACKTICK_VALUE").is_none());
+        assert_ne!(shell.executor.get_env("PATH"), Some("bad"));
+        assert_ne!(shell.executor.get_env("NODE_OPTIONS"), Some("--require bad"));
+
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn native_dotenv_chpwd_applies_project_env() {
+        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _cwd_guard = CwdGuard::capture();
+        let temp = unique_temp_dir("winuxsh-native-dotenv-chpwd");
+        let project = temp.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join(".env"), "PROJECT_ENV=loaded\n").unwrap();
+
+        let mut shell = test_shell(HookConfig::default());
+        shell.native_plugins.enabled = true;
+        shell.native_plugins.presets = vec!["dotenv".to_string()];
+        let project_shell_path = shell_display_path(&project);
+        shell
+            .execute_interactive_line(&format!("cd {}", shell_quote(&project_shell_path)))
+            .unwrap();
+
+        assert_eq!(shell.executor.get_env("PROJECT_ENV"), Some("loaded"));
+
+        let _ = std::fs::remove_dir_all(temp);
     }
 
     #[test]
@@ -1378,16 +1820,7 @@ mod tests {
     }
 
     fn shell_display_path(path: &std::path::Path) -> String {
-        let mut value = path.to_string_lossy().replace('\\', "/");
-        if cfg!(windows)
-            && value.len() >= 3
-            && value.as_bytes()[1] == b':'
-            && value.as_bytes()[2] == b'/'
-        {
-            let drive = value.as_bytes()[0] as char;
-            value = format!("/{}{}", drive.to_ascii_lowercase(), &value[2..]);
-        }
-        value
+        path.to_string_lossy().replace('\\', "/")
     }
 
     fn host_display_path(path: &std::path::Path) -> String {
@@ -1409,6 +1842,24 @@ mod tests {
         match old_path {
             Some(path) => std::env::set_var("PATH", path),
             None => std::env::remove_var("PATH"),
+        }
+    }
+
+    struct CwdGuard {
+        previous: PathBuf,
+    }
+
+    impl CwdGuard {
+        fn capture() -> Self {
+            Self {
+                previous: std::env::current_dir().unwrap(),
+            }
+        }
+    }
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.previous);
         }
     }
 
