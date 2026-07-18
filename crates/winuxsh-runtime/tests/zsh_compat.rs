@@ -345,6 +345,85 @@ alias dps='docker ps --format table'
 }
 
 #[test]
+fn reports_dynamic_completion_generators_in_plugin_scripts() {
+    let temp = unique_temp_dir("winuxsh-zsh-dynamic-completion");
+    let kubectl_plugin_dir = temp.join(".oh-my-zsh").join("plugins").join("kubectl");
+    std::fs::create_dir_all(&kubectl_plugin_dir).unwrap();
+    std::fs::write(
+        temp.join(".zshrc"),
+        r#"
+plugins=(kubectl)
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        kubectl_plugin_dir.join("kubectl.plugin.zsh"),
+        r#"
+if [[ ! -f "$ZSH_CACHE_DIR/completions/_kubectl" ]]; then
+  typeset -g -A _comps
+  autoload -Uz _kubectl
+  _comps[kubectl]=_kubectl
+fi
+
+kubectl completion zsh 2> /dev/null >| "$ZSH_CACHE_DIR/completions/_kubectl" &|
+alias k=kubectl
+"#,
+    )
+    .unwrap();
+
+    let report = scan(&ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: true,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    });
+
+    let kubectl = plugin(&report, "kubectl");
+    assert_eq!(kubectl.import_kind, PluginImportKind::Partial);
+    assert_eq!(kubectl.tier, PluginImportTier::Tier2Partial);
+    assert!(kubectl
+        .capabilities
+        .iter()
+        .any(|cap| cap == "dynamic_completions_required"));
+    assert!(kubectl
+        .unsupported_features
+        .iter()
+        .any(|feature| feature == "dynamic-completion"));
+    assert!(report.aliases.iter().any(|alias| {
+        alias.name == "k" && alias.value == "kubectl" && alias.origin == "plugin"
+    }));
+
+    let source = report
+        .dynamic_completion_sources
+        .iter()
+        .find(|source| source.command == "kubectl")
+        .expect("expected kubectl dynamic completion source");
+    assert_eq!(source.args, vec!["completion", "zsh"]);
+    assert_eq!(source.target_shell, "zsh");
+    assert_eq!(source.origin, "plugin");
+    assert!(report.diagnostics.iter().any(|diag| {
+        diag.severity == DiagnosticSeverity::Unsupported && diag.feature == "dynamic-completion"
+    }));
+
+    let plan = import_plan_toml(
+        &ZshImportOptions {
+            enabled: true,
+            zdotdir: temp.clone(),
+            import_zshrc: true,
+            import_oh_my_zsh: true,
+            plugins: Vec::new(),
+            compat_level: ZshCompatLevel::Safe,
+        },
+        &report,
+    );
+    assert!(plan.contains("dynamic zsh completion generators detected: 1"));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
 fn reports_unsupported_global_aliases_and_zmodload() {
     let temp = unique_temp_dir("winuxsh-zsh-unsupported");
     std::fs::create_dir_all(&temp).unwrap();

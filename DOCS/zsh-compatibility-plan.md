@@ -423,6 +423,32 @@ Phase 8b adds the Oh My Zsh `docker` plugin as a conservative native alias pack:
 - The dynamic Docker completion/cache logic in the Oh My Zsh plugin remains
   report-only future work; winuxsh does not execute that zsh code.
 
+Implementation status: Phase 8c is implemented on
+`codex/zsh-compat-scanner`.
+
+Phase 8c starts the dynamic plugin bridge by scanning, not executing, known
+dynamic completion generators:
+
+- The scanner now records lines such as `kubectl completion zsh`,
+  `docker completion zsh`, and `source <(tool completion zsh)` as structured
+  dynamic completion sources.
+- Plugins with alias assets plus dynamic completion generators are classified as
+  partial and expose `dynamic_completions_required` in their capabilities.
+- Dynamic completion functions that depend on zsh internals such as `compadd`,
+  `_describe`, `_values`, `_wanted`, and `_comps[...]` remain unsupported until
+  winuxsh has a native completion-provider API.
+- The next implementation step is a native cache/provider that can run explicit
+  external generators with timeout and translate their zsh output; startup must
+  still not execute arbitrary plugin scripts.
+
+Why static packs still matter:
+
+- Many Oh My Zsh plugins are mostly aliases and static `_arguments` completion
+  metadata, so users get immediate value without running zsh code.
+- Static import creates a safe compatibility floor and preserves user overrides.
+- Dynamic support should layer on top as explicit native providers for common
+  CLIs, not as zsh script execution.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh

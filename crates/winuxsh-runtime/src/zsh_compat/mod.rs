@@ -157,6 +157,7 @@ pub struct ZshImportReport {
     pub zstyles: Vec<ImportedZstyle>,
     pub highlight_styles: Vec<ImportedHighlightStyle>,
     pub completion_assets: Vec<CompletionAsset>,
+    pub dynamic_completion_sources: Vec<DynamicCompletionSource>,
     pub oh_my_zsh_detected: bool,
     pub diagnostics: Vec<ZshCompatDiagnostic>,
 }
@@ -179,6 +180,10 @@ impl ZshImportReport {
         out.push(format!("fpath entries: {}", self.fpath_entries.len()));
         out.push(format!("plugins: {}", self.plugins.len()));
         out.push(format!("completion assets: {}", self.completion_assets.len()));
+        out.push(format!(
+            "dynamic completion sources: {}",
+            self.dynamic_completion_sources.len()
+        ));
         out.push(format!("zstyles: {}", self.zstyles.len()));
         out.push(format!("highlight styles: {}", self.highlight_styles.len()));
         out.push(format!(
@@ -367,6 +372,16 @@ pub struct CompletionAsset {
     pub kind: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct DynamicCompletionSource {
+    pub command: String,
+    pub args: Vec<String>,
+    pub target_shell: String,
+    pub source_file: Option<PathBuf>,
+    pub line: Option<usize>,
+    pub origin: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ZshCompatDiagnostic {
     pub severity: DiagnosticSeverity,
@@ -505,6 +520,15 @@ pub fn import_plan_toml(options: &ZshImportOptions, report: &ZshImportReport) ->
             report.completion_assets.len()
         ));
         out.push("# They are translated at startup by [zsh].auto_apply.".to_string());
+    }
+
+    if !report.dynamic_completion_sources.is_empty() {
+        out.push(String::new());
+        out.push(format!(
+            "# dynamic zsh completion generators detected: {}",
+            report.dynamic_completion_sources.len()
+        ));
+        out.push("# They require a native winuxsh completion provider/cache before use.".to_string());
     }
 
     out.join("\n")
@@ -666,6 +690,10 @@ pub fn zsh_compat_doctor_text(
         report.path_entries.len(),
         report.completion_assets.len(),
         report.plugins.len()
+    ));
+    out.push(format!(
+        "Dynamic completion generators: {}",
+        report.dynamic_completion_sources.len()
     ));
     out.push(format!(
         "Plugin tiers: safe={}, partial={}, native={}, unsupported={}, missing={}",
@@ -958,6 +986,30 @@ fn scan_content(
         }
 
         scan_unsupported(line, source_file, line_no, report);
+        if let Some((command, args, target_shell)) = parse_dynamic_completion_source(line) {
+            push_dynamic_completion_source(
+                report,
+                DynamicCompletionSource {
+                    command: command.clone(),
+                    args: args.clone(),
+                    target_shell,
+                    source_file: source_file.map(Path::to_path_buf),
+                    line: Some(line_no),
+                    origin: scan_mode_origin(mode).to_string(),
+                },
+            );
+            report.diagnostics.push(ZshCompatDiagnostic {
+                severity: DiagnosticSeverity::Unsupported,
+                feature: "dynamic-completion".to_string(),
+                message: format!(
+                    "dynamic completion generator detected: {} {}",
+                    command,
+                    args.join(" ")
+                ),
+                source_file: source_file.map(Path::to_path_buf),
+                line: Some(line_no),
+            });
+        }
 
         if let Some((name, value)) = parse_alias(line, source_file, line_no, report) {
             report.aliases.push(ImportedAlias {
@@ -1313,6 +1365,18 @@ fn classify_plugin(
     }
     if native_ux {
         capabilities.push("native_ux_required".to_string());
+    }
+    if unsupported_features
+        .iter()
+        .any(|feature| feature == "dynamic-completion")
+    {
+        capabilities.push("dynamic_completions_required".to_string());
+    }
+    if unsupported_features
+        .iter()
+        .any(|feature| feature == "zsh-completion-function")
+    {
+        capabilities.push("zsh_completion_function_required".to_string());
     }
     if has_unsupported {
         capabilities.push("unsupported_zsh_internals".to_string());
@@ -2368,6 +2432,31 @@ fn scan_unsupported(
             "zle-highlighting",
             "region_highlight maps to native reedline highlighting",
         ),
+        (
+            "compadd",
+            "zsh-completion-function",
+            "zsh completion functions require native completion providers",
+        ),
+        (
+            "_describe",
+            "zsh-completion-function",
+            "zsh completion functions require native completion providers",
+        ),
+        (
+            "_values",
+            "zsh-completion-function",
+            "zsh completion functions require native completion providers",
+        ),
+        (
+            "_wanted",
+            "zsh-completion-function",
+            "zsh completion functions require native completion providers",
+        ),
+        (
+            "_comps[",
+            "zsh-completion-function",
+            "zsh completion function registration is not executed",
+        ),
     ] {
         if line.contains(needle) {
             report.diagnostics.push(ZshCompatDiagnostic {
@@ -2393,6 +2482,99 @@ fn scan_unsupported(
             line: Some(line_no),
         });
     }
+}
+
+fn push_dynamic_completion_source(report: &mut ZshImportReport, source: DynamicCompletionSource) {
+    if report.dynamic_completion_sources.iter().any(|existing| {
+        existing.command == source.command
+            && existing.args == source.args
+            && existing.target_shell == source.target_shell
+            && existing.source_file == source.source_file
+            && existing.line == source.line
+    }) {
+        return;
+    }
+    report.dynamic_completion_sources.push(source);
+}
+
+fn parse_dynamic_completion_source(line: &str) -> Option<(String, Vec<String>, String)> {
+    let candidate = process_substitution_command(line).unwrap_or_else(|| line.to_string());
+    let prefix = command_prefix_before_control(&candidate);
+    let words = split_shell_words(&prefix);
+    if words.len() < 3 {
+        return None;
+    }
+
+    for idx in 0..words.len().saturating_sub(1) {
+        if words[idx] == "completion" && words[idx + 1] == "zsh" {
+            let mut command_idx = 0usize;
+            while command_idx < idx && is_inline_env_assignment(&words[command_idx]) {
+                command_idx += 1;
+            }
+            if words.get(command_idx).is_some_and(|word| word == "command") {
+                command_idx += 1;
+            }
+            if command_idx >= idx {
+                return None;
+            }
+            let command = words[command_idx].clone();
+            if !is_safe_name(&command) {
+                return None;
+            }
+            let args = words[command_idx + 1..=idx + 1].to_vec();
+            return Some((command, args, "zsh".to_string()));
+        }
+    }
+
+    None
+}
+
+fn process_substitution_command(line: &str) -> Option<String> {
+    let start = line.find("<(")?;
+    let after_start = start + 2;
+    let end = line[after_start..].rfind(')')? + after_start;
+    let inner = line[after_start..end].trim();
+    (!inner.is_empty()).then(|| inner.to_string())
+}
+
+fn command_prefix_before_control(line: &str) -> String {
+    let mut single = false;
+    let mut double = false;
+    let mut escaped = false;
+    let mut out = String::new();
+
+    for ch in line.chars() {
+        if escaped {
+            out.push(ch);
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' if !single => {
+                out.push(ch);
+                escaped = true;
+            }
+            '\'' if !double => {
+                single = !single;
+                out.push(ch);
+            }
+            '"' if !single => {
+                double = !double;
+                out.push(ch);
+            }
+            '|' | '>' if !single && !double => break,
+            _ => out.push(ch),
+        }
+    }
+
+    out.trim().to_string()
+}
+
+fn is_inline_env_assignment(word: &str) -> bool {
+    let Some((key, _)) = word.split_once('=') else {
+        return false;
+    };
+    is_env_identifier(key)
 }
 
 fn merged_plugin_names(report: &ZshImportReport, configured: &[String]) -> Vec<String> {

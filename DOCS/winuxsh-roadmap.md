@@ -98,6 +98,7 @@ status: active
 - [x] Phase 7e doctor CLI: `--zsh-compat-doctor` 聚合 scan/status/rollback，给出安全 apply 判断和下一步命令
 - [x] Phase 8a native plugin pack: `plugins=(git)` 缺少 OMZ 插件目录时提供保守 git alias pack，不覆盖用户 alias
 - [x] Phase 8b native plugin pack: `plugins=(docker)` 缺少 OMZ 插件目录时提供保守 docker alias pack，不覆盖用户 alias
+- [x] Phase 8c dynamic completion scan: 识别 `tool completion zsh` 这类动态 completion generator，报告为 native provider 待接入
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证
