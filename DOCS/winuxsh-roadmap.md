@@ -96,6 +96,7 @@ status: active
 - [x] Phase 7c import-status CLI: `--zsh-compat-import-status` 只读检查 managed block / TOML / 备份 / 下一次 apply 可行性
 - [x] Phase 7d rollback-plan CLI: `--zsh-compat-import-rollback-plan` 只读输出最近备份与恢复命令
 - [x] Phase 7e doctor CLI: `--zsh-compat-doctor` 聚合 scan/status/rollback，给出安全 apply 判断和下一步命令
+- [x] Phase 8a native plugin pack: `plugins=(git)` 缺少 OMZ 插件目录时提供保守 git alias pack，不覆盖用户 alias
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证

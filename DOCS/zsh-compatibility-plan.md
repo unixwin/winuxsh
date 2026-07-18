@@ -381,6 +381,26 @@ Once the importer works, build a local package layer:
 
 This should start local-only. Online registry behavior comes later.
 
+## Phase 8 - Native Plugin Packs
+
+Implementation status: Phase 8a is implemented on
+`codex/zsh-compat-scanner`.
+
+Phase 8a starts the local-only native plugin pack layer with the Oh My Zsh
+`git` plugin:
+
+- If `.zshrc` declares `plugins=(git)` but no readable Oh My Zsh `git`
+  plugin directory is available, winuxsh should still provide a conservative
+  native alias pack.
+- Native aliases must be marked with `origin = "native-plugin:git"` in the
+  report and import plan.
+- Native aliases must not override aliases already discovered from the user's
+  zsh files.
+- No zsh plugin scripts are executed and no Oh My Zsh source is vendored.
+
+Later Phase 8 work can add native packs for `docker`, `npm`, `node`, `python`,
+`pip`, `kubectl`, and related completion metadata after each pack has tests.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh

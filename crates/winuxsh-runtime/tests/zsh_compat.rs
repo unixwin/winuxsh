@@ -152,6 +152,99 @@ source $ZSH/oh-my-zsh.sh
 }
 
 #[test]
+fn imports_native_git_alias_pack_when_omz_plugin_dir_is_missing() {
+    let temp = unique_temp_dir("winuxsh-zsh-native-git-pack");
+    std::fs::create_dir_all(&temp).unwrap();
+    std::fs::write(
+        temp.join(".zshrc"),
+        r#"
+plugins=(git)
+"#,
+    )
+    .unwrap();
+
+    let report = scan(&ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: true,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    });
+
+    let git = plugin(&report, "git");
+    assert!(git.source_dir.is_none());
+    assert_eq!(git.import_kind, PluginImportKind::AliasOnly);
+    assert_eq!(git.tier, PluginImportTier::Tier1Safe);
+    assert!(git.alias_count >= 20);
+    assert!(git.capabilities.iter().any(|cap| cap == "native_aliases"));
+    assert!(report.aliases.iter().any(|alias| {
+        alias.name == "gst"
+            && alias.value == "git status"
+            && alias.origin == "native-plugin:git"
+    }));
+    assert!(report.aliases.iter().any(|alias| {
+        alias.name == "gco"
+            && alias.value == "git checkout"
+            && alias.origin == "native-plugin:git"
+    }));
+
+    let plan = import_plan_toml(
+        &ZshImportOptions {
+            enabled: true,
+            zdotdir: temp.clone(),
+            import_zshrc: true,
+            import_oh_my_zsh: true,
+            plugins: Vec::new(),
+            compat_level: ZshCompatLevel::Safe,
+        },
+        &report,
+    );
+    assert!(plan.contains("\"gst\" = \"git status\""));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn native_git_alias_pack_does_not_override_user_aliases() {
+    let temp = unique_temp_dir("winuxsh-zsh-native-git-pack-no-override");
+    std::fs::create_dir_all(&temp).unwrap();
+    std::fs::write(
+        temp.join(".zshrc"),
+        r#"
+plugins=(git)
+alias gst='git status --short'
+"#,
+    )
+    .unwrap();
+
+    let report = scan(&ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: true,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    });
+
+    let gst_aliases: Vec<_> = report
+        .aliases
+        .iter()
+        .filter(|alias| alias.name == "gst")
+        .collect();
+    assert_eq!(gst_aliases.len(), 1);
+    assert_eq!(gst_aliases[0].value, "git status --short");
+    assert_eq!(gst_aliases[0].origin, "profile");
+    assert!(report.aliases.iter().any(|alias| {
+        alias.name == "gco"
+            && alias.value == "git checkout"
+            && alias.origin == "native-plugin:git"
+    }));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
 fn reports_unsupported_global_aliases_and_zmodload() {
     let temp = unique_temp_dir("winuxsh-zsh-unsupported");
     std::fs::create_dir_all(&temp).unwrap();

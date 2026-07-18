@@ -18,6 +18,57 @@ use crate::config::{EditorMode, ZshCompatLevel, ZshConfig};
 pub const ZSH_IMPORT_BLOCK_START: &str = "# >>> winuxsh zsh compat import >>>";
 pub const ZSH_IMPORT_BLOCK_END: &str = "# <<< winuxsh zsh compat import <<<";
 
+const NATIVE_GIT_ALIASES: &[(&str, &str)] = &[
+    ("g", "git"),
+    ("ga", "git add"),
+    ("gaa", "git add --all"),
+    ("gap", "git apply"),
+    ("gapa", "git add --patch"),
+    ("gau", "git add --update"),
+    ("gb", "git branch"),
+    ("gba", "git branch --all"),
+    ("gbd", "git branch --delete"),
+    ("gbD", "git branch --delete --force"),
+    ("gbr", "git branch --remote"),
+    ("gcb", "git checkout -b"),
+    ("gcl", "git clone --recurse-submodules"),
+    ("gco", "git checkout"),
+    ("gc", "git commit --verbose"),
+    ("gca", "git commit --verbose --all"),
+    ("gcam", "git commit --all --message"),
+    ("gcmsg", "git commit --message"),
+    ("gd", "git diff"),
+    ("gdca", "git diff --cached"),
+    ("gds", "git diff --staged"),
+    ("gf", "git fetch"),
+    ("gfo", "git fetch origin"),
+    ("gl", "git pull"),
+    ("glo", "git log --oneline --decorate"),
+    ("glog", "git log --oneline --decorate --graph"),
+    ("gp", "git push"),
+    ("gpd", "git push --dry-run"),
+    ("gpf", "git push --force-with-lease"),
+    ("grb", "git rebase"),
+    ("grba", "git rebase --abort"),
+    ("grbc", "git rebase --continue"),
+    ("grbi", "git rebase --interactive"),
+    ("grh", "git reset"),
+    ("grhh", "git reset --hard"),
+    ("grs", "git restore"),
+    ("grst", "git restore --staged"),
+    ("gst", "git status"),
+    ("gss", "git status --short"),
+    ("gsb", "git status --short --branch"),
+    ("gsta", "git stash push"),
+    ("gstaa", "git stash apply"),
+    ("gstd", "git stash drop"),
+    ("gstl", "git stash list"),
+    ("gstp", "git stash pop"),
+    ("gsts", "git stash show --patch"),
+    ("gsw", "git switch"),
+    ("gswc", "git switch --create"),
+];
+
 #[derive(Debug, Clone)]
 pub struct ZshImportOptions {
     pub enabled: bool,
@@ -1025,7 +1076,12 @@ fn scan_oh_my_zsh_layout(
             .find(|path| path.is_dir());
 
         let Some(source_dir) = source_dir else {
-            report.plugins.push(unresolved_plugin(plugin_name, 1));
+            let alias_count = apply_native_plugin_pack(report, &plugin_name);
+            if alias_count > 0 {
+                report.plugins.push(native_alias_plugin(plugin_name, alias_count));
+            } else {
+                report.plugins.push(unresolved_plugin(plugin_name, 1));
+            }
             continue;
         };
 
@@ -1140,6 +1196,52 @@ fn unresolved_plugin(name: String, diagnostics_count: usize) -> ImportedPlugin {
         import_kind: PluginImportKind::Missing,
         capabilities: Vec::new(),
         unsupported_features: Vec::new(),
+    }
+}
+
+fn native_alias_plugin(name: String, alias_count: usize) -> ImportedPlugin {
+    ImportedPlugin {
+        name,
+        source_dir: None,
+        plugin_script: None,
+        completion_files: Vec::new(),
+        alias_count,
+        diagnostics_count: 0,
+        tier: PluginImportTier::Tier1Safe,
+        import_kind: PluginImportKind::AliasOnly,
+        capabilities: vec!["native_aliases".to_string(), "aliases".to_string()],
+        unsupported_features: Vec::new(),
+    }
+}
+
+fn apply_native_plugin_pack(report: &mut ZshImportReport, plugin_name: &str) -> usize {
+    let Some(aliases) = native_plugin_aliases(plugin_name) else {
+        return 0;
+    };
+
+    let mut seen_aliases: HashSet<String> =
+        report.aliases.iter().map(|alias| alias.name.clone()).collect();
+    let mut added = 0usize;
+    for (name, value) in aliases {
+        if !is_identifierish(name) || !seen_aliases.insert((*name).to_string()) {
+            continue;
+        }
+        report.aliases.push(ImportedAlias {
+            name: (*name).to_string(),
+            value: (*value).to_string(),
+            source_file: None,
+            line: None,
+            origin: format!("native-plugin:{}", plugin_name),
+        });
+        added += 1;
+    }
+    added
+}
+
+fn native_plugin_aliases(plugin_name: &str) -> Option<&'static [(&'static str, &'static str)]> {
+    match plugin_name {
+        "git" => Some(NATIVE_GIT_ALIASES),
+        _ => None,
     }
 }
 
