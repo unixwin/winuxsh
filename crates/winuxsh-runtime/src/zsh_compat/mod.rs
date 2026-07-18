@@ -2193,6 +2193,7 @@ fn native_plugin_requires_native_ux(plugin_name: &str) -> bool {
             | "command-not-found"
             | "direnv"
             | "fzf"
+            | "last-working-dir"
             | "thefuck"
             | "zoxide"
             | "zsh-interactive-cd"
@@ -2218,6 +2219,7 @@ fn native_dynamic_plugin_preset(plugin_name: &str) -> Option<&'static str> {
         "command-not-found" => Some("command-not-found"),
         "direnv" => Some("direnv"),
         "fzf" => Some("fzf"),
+        "last-working-dir" => Some("last-working-dir"),
         "thefuck" => Some("thefuck"),
         "zoxide" => Some("zoxide"),
         "zsh-interactive-cd" => Some("zsh-interactive-cd"),
@@ -2358,6 +2360,7 @@ fn is_native_ux_plugin(name: &str) -> bool {
         "alias-finder"
             | "command-not-found"
             | "fzf"
+            | "last-working-dir"
             | "thefuck"
             | "zoxide"
             | "zsh-interactive-cd"

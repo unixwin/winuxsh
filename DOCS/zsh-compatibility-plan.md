@@ -971,6 +971,36 @@ Rules:
 - selector commands may launch native `fzf` only after explicit
   `[zsh.native_plugins]` opt-in; non-interactive scripts remain unaffected.
 
+Implementation status: Phase 16g is implemented on
+`codex/zsh-compat-last-working-dir`.
+
+Phase 16g targets stateful directory plugins that normally use `chpwd` to keep
+per-user shell state across interactive sessions.
+
+Phase 16g adds a native `last-working-dir` preset:
+
+- recognize `plugins=(last-working-dir)` as a native dynamic plugin candidate
+  even when the Oh My Zsh plugin directory is not installed locally.
+- suggest a disabled `[zsh.native_plugins]` import-plan block with
+  `presets = ["last-working-dir"]`.
+- when explicitly enabled, provide a native `lwd` command shim that reads the
+  cached shell-visible directory and `cd`s through rubash.
+- when explicitly enabled in the interactive REPL, restore the cached directory
+  once at startup only if the shell starts in the normal Windows home
+  directory, matching the Oh My Zsh plugin's "do not steal an explicitly opened
+  folder" behavior.
+- update the cached directory from native `chpwd` lifecycle points.
+
+Rules:
+
+- disabled by default and never enabled only because `.zshrc` mentions the
+  plugin.
+- no Oh My Zsh `last-working-dir.plugin.zsh` sourcing.
+- startup restore is REPL-only; `winuxsh -c ...` and script files must not
+  automatically change directory.
+- cache paths stay under `~/.winuxsh/cache/last-working-dir` (plus optional
+  `SSH_USER` suffix) instead of requiring Oh My Zsh's `ZSH_CACHE_DIR`.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh

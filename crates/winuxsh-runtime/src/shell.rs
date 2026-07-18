@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -36,7 +36,8 @@ pub struct Shell {
     pub executor: Executor,
     pub completion_state: Arc<Mutex<CompletionState>>,
     pub prompt: WinuxshPrompt,
-    pub history_path: std::path::PathBuf,
+    pub home_dir: PathBuf,
+    pub history_path: PathBuf,
     pub editor_mode: EditorMode,
     pub autosuggest: AutosuggestConfig,
     pub syntax_highlighting: SyntaxHighlightConfig,
@@ -46,6 +47,8 @@ pub struct Shell {
     pub hooks: HookConfig,
     pub aliases: HashMap<String, String>,
     pub zoxide_last_tracked_dir: Option<String>,
+    pub last_working_dir_cache_path: PathBuf,
+    pub last_working_dir_restored: bool,
     pub last_interactive_command: Option<String>,
     pub last_interactive_exit_code: Option<i32>,
     pub line_editor: Option<Reedline>,
@@ -130,10 +133,10 @@ impl Shell {
             &config.theme_name,
         );
 
-        // 7. History file in home dir.
-        let history_path = dirs::home_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join(".winuxsh_history");
+        // 7. User-local state files.
+        let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        let history_path = home_dir.join(".winuxsh_history");
+        let last_working_dir_cache_path = default_last_working_dir_cache_path(&home_dir);
 
         // 8. Completion state.
         let completion_state = Arc::new(Mutex::new(CompletionState::new(
@@ -199,6 +202,7 @@ impl Shell {
             executor,
             completion_state,
             prompt,
+            home_dir,
             history_path,
             editor_mode: config.editor.edit_mode,
             autosuggest: config.zsh.autosuggestions.with_env_overrides(),
@@ -209,6 +213,8 @@ impl Shell {
             hooks: config.hooks,
             aliases,
             zoxide_last_tracked_dir: None,
+            last_working_dir_cache_path,
+            last_working_dir_restored: false,
             last_interactive_command: None,
             last_interactive_exit_code: None,
             line_editor: None,
@@ -260,6 +266,16 @@ impl Shell {
             return self.execute_native_fzf_cd(&ast.commands[0].words[1..]);
         }
 
+        if self.native_plugin_enabled("last-working-dir")
+            && ast.commands.len() == 1
+            && ast.commands[0]
+                .words
+                .first()
+                .is_some_and(|command| command == "lwd")
+        {
+            return self.execute_native_last_working_dir();
+        }
+
         match self.executor.execute_ast(&ast) {
             Ok(()) => {}
             Err(rubash::executor::ExecuteError::ExitCode(code)) => {
@@ -299,6 +315,36 @@ impl Shell {
         }
         self.update_completion_state();
         Ok(code)
+    }
+
+    /// Restore the last working directory once for interactive REPL startup.
+    ///
+    /// This mirrors Oh My Zsh's last-working-dir guard: only jump when the
+    /// shell starts in the normal home directory, so terminals opened directly
+    /// inside a project are left alone.
+    pub fn restore_last_working_dir_for_repl(&mut self) {
+        if self.last_working_dir_restored || !self.native_plugin_enabled("last-working-dir") {
+            return;
+        }
+        self.last_working_dir_restored = true;
+
+        let Some(old_pwd) = self.executor.get_env("PWD").map(str::to_owned) else {
+            return;
+        };
+        let home_pwd = host_path_to_shell_path(&self.home_dir.to_string_lossy());
+        if !same_shell_dir(&old_pwd, &home_pwd) {
+            return;
+        }
+
+        if self.execute_native_last_working_dir().ok() != Some(0) {
+            return;
+        }
+
+        let Some(new_pwd) = self.executor.get_env("PWD").map(str::to_owned) else {
+            return;
+        };
+        self.run_chpwd_hooks_if_changed(&old_pwd, &new_pwd);
+        self.update_completion_state();
     }
 
     /// Run native hooks before rendering the next prompt.
@@ -359,6 +405,9 @@ impl Shell {
         }
         if self.native_plugin_enabled("zoxide") {
             self.track_zoxide_current_dir();
+        }
+        if self.native_plugin_enabled("last-working-dir") {
+            self.save_last_working_dir_current_dir();
         }
     }
 
@@ -527,6 +576,38 @@ impl Shell {
         };
         let selected = host_path_to_shell_path(&selected);
         self.execute_line(&format!("cd {}", shell_quote(&selected)))
+    }
+
+    fn execute_native_last_working_dir(&mut self) -> anyhow::Result<i32> {
+        let Some(target) = self.read_last_working_dir_target() else {
+            return Ok(1);
+        };
+        self.execute_line(&format!("cd {}", shell_quote(&target)))
+    }
+
+    fn read_last_working_dir_target(&self) -> Option<String> {
+        let content = std::fs::read_to_string(&self.last_working_dir_cache_path).ok()?;
+        let target = content.trim_matches(['\r', '\n']).trim();
+        if target.is_empty() {
+            return None;
+        }
+        Some(host_path_to_shell_path(target))
+    }
+
+    fn save_last_working_dir_current_dir(&self) {
+        let Some(pwd) = self.executor.get_env("PWD") else {
+            return;
+        };
+        let Some(parent) = self.last_working_dir_cache_path.parent() else {
+            return;
+        };
+        if let Err(err) = std::fs::create_dir_all(parent) {
+            log::debug!("native last-working-dir preset could not create cache dir: {}", err);
+            return;
+        }
+        if let Err(err) = std::fs::write(&self.last_working_dir_cache_path, format!("{pwd}\n")) {
+            log::debug!("native last-working-dir preset could not write cache: {}", err);
+        }
     }
 
     fn print_native_command_not_found(&self, command: &str) {
@@ -778,6 +859,29 @@ fn is_package_search_candidate(command: &str) -> bool {
         && !command.contains('/')
         && !command.contains('\\')
         && !command.contains(':')
+}
+
+fn default_last_working_dir_cache_path(home_dir: &Path) -> PathBuf {
+    let mut file_name = "last-working-dir".to_string();
+    if let Ok(ssh_user) = std::env::var("SSH_USER") {
+        let suffix = sanitize_cache_file_suffix(ssh_user.trim());
+        if !suffix.is_empty() {
+            file_name.push('.');
+            file_name.push_str(&suffix);
+        }
+    }
+    home_dir.join(".winuxsh").join("cache").join(file_name)
+}
+
+fn sanitize_cache_file_suffix(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| match ch {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+            ch if ch.is_control() => '_',
+            ch => ch,
+        })
+        .collect()
 }
 
 fn resolve_shell_path_argument(pwd: &str, arg: &str) -> PathBuf {
@@ -1149,11 +1253,104 @@ mod tests {
         let _ = std::fs::remove_dir_all(temp);
     }
 
+    #[test]
+    fn native_last_working_dir_command_and_repl_restore_use_cache() {
+        let temp = unique_temp_dir("winuxsh-native-last-working-dir");
+        let home = temp.join("home");
+        let target = temp.join("target");
+        let other = temp.join("other");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+
+        let cache_path = temp.join("cache").join("last-working-dir");
+        std::fs::create_dir_all(cache_path.parent().unwrap()).unwrap();
+        let target_shell_path = shell_display_path(&target);
+        std::fs::write(&cache_path, format!("{target_shell_path}\n")).unwrap();
+
+        let mut shell = test_shell(HookConfig::default());
+        shell.home_dir = home.clone();
+        shell.last_working_dir_cache_path = cache_path.clone();
+        shell.native_plugins.enabled = true;
+        shell.native_plugins.presets = vec!["last-working-dir".to_string()];
+        shell
+            .execute_line(&format!("cd {}", shell_quote(&shell_display_path(&other))))
+            .unwrap();
+
+        assert_eq!(shell.execute_line("lwd").unwrap(), 0);
+        let pwd = shell.executor.get_env("PWD").unwrap_or_default();
+        assert!(
+            same_shell_dir(&pwd, &target_shell_path),
+            "{pwd} != {target_shell_path}"
+        );
+
+        let home_shell_path = shell_display_path(&home);
+        let mut restore_shell = test_shell(HookConfig::default());
+        restore_shell.home_dir = home.clone();
+        restore_shell.last_working_dir_cache_path = cache_path.clone();
+        restore_shell.native_plugins.enabled = true;
+        restore_shell.native_plugins.presets = vec!["last-working-dir".to_string()];
+        restore_shell
+            .execute_line(&format!("cd {}", shell_quote(&home_shell_path)))
+            .unwrap();
+        restore_shell.restore_last_working_dir_for_repl();
+        let restored_pwd = restore_shell.executor.get_env("PWD").unwrap_or_default();
+        assert!(
+            same_shell_dir(&restored_pwd, &target_shell_path),
+            "{restored_pwd} != {target_shell_path}"
+        );
+
+        let other_shell_path = shell_display_path(&other);
+        let mut no_restore_shell = test_shell(HookConfig::default());
+        no_restore_shell.home_dir = home;
+        no_restore_shell.last_working_dir_cache_path = cache_path;
+        no_restore_shell.native_plugins.enabled = true;
+        no_restore_shell.native_plugins.presets = vec!["last-working-dir".to_string()];
+        no_restore_shell
+            .execute_line(&format!("cd {}", shell_quote(&other_shell_path)))
+            .unwrap();
+        no_restore_shell.restore_last_working_dir_for_repl();
+        let unchanged_pwd = no_restore_shell.executor.get_env("PWD").unwrap_or_default();
+        assert!(
+            same_shell_dir(&unchanged_pwd, &other_shell_path),
+            "{unchanged_pwd} != {other_shell_path}"
+        );
+
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn native_last_working_dir_chpwd_writes_cache() {
+        let temp = unique_temp_dir("winuxsh-native-last-working-dir-chpwd");
+        let home = temp.join("home");
+        let target = temp.join("target");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+
+        let cache_path = temp.join("cache").join("last-working-dir");
+        let target_shell_path = shell_display_path(&target);
+
+        let mut shell = test_shell(HookConfig::default());
+        shell.home_dir = home;
+        shell.last_working_dir_cache_path = cache_path.clone();
+        shell.native_plugins.enabled = true;
+        shell.native_plugins.presets = vec!["last-working-dir".to_string()];
+        shell
+            .execute_interactive_line(&format!("cd {}", shell_quote(&target_shell_path)))
+            .unwrap();
+
+        let cached = std::fs::read_to_string(&cache_path).unwrap();
+        assert_eq!(cached.trim(), target_shell_path);
+
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
     fn test_shell(hooks: HookConfig) -> Shell {
         Shell {
             executor: Executor::new(),
             completion_state: Arc::new(Mutex::new(CompletionState::new(PathBuf::from(".")))),
             prompt: WinuxshPrompt::new(None, None, None, "default"),
+            home_dir: PathBuf::from("."),
             history_path: PathBuf::from(".winuxsh_history"),
             editor_mode: EditorMode::Emacs,
             autosuggest: AutosuggestConfig::default(),
@@ -1164,6 +1361,8 @@ mod tests {
             hooks,
             aliases: HashMap::new(),
             zoxide_last_tracked_dir: None,
+            last_working_dir_cache_path: PathBuf::from(".winuxsh/cache/last-working-dir"),
+            last_working_dir_restored: false,
             last_interactive_command: None,
             last_interactive_exit_code: None,
             line_editor: None,

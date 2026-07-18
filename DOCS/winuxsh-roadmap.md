@@ -118,6 +118,7 @@ status: active
 - [x] Phase 16d native dynamic plugin preset: `thefuck` 通过显式 `[zsh.native_plugins]` opt-in，提供 native `fuck` correction shim，基于上一条交互命令调用 `thefuck`
 - [x] Phase 16e native dynamic plugin preset: `command-not-found` 通过显式 `[zsh.native_plugins]` opt-in，在命令缺失时输出 Windows-native 安装搜索提示
 - [x] Phase 16f native selector plugin preset: `fzf` / `zsh-interactive-cd` 通过显式 `[zsh.native_plugins]` opt-in，提供 native `cdf` / `fzf-cd` 目录选择 shim
+- [x] Phase 16g native state plugin preset: `last-working-dir` 通过显式 `[zsh.native_plugins]` opt-in，提供 native `lwd` 与交互 REPL 启动目录恢复
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证

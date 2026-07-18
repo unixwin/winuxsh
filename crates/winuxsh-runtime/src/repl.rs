@@ -237,6 +237,7 @@ pub fn run_repl(shell: &mut Shell) -> anyhow::Result<()> {
     println!("Type 'exit' to quit. Press Ctrl+D for EOF.");
     println!();
 
+    shell.restore_last_working_dir_for_repl();
     let mut line_editor = build_line_editor(shell)?;
 
     loop {
