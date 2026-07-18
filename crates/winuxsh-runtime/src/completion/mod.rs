@@ -6,6 +6,7 @@ pub mod completer;
 pub mod external;
 pub mod bash_import;
 pub mod path;
+pub mod runtime;
 pub mod variables;
 
 pub use completer::{WinuxshCompleter, CompletionState};

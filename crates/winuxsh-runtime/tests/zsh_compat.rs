@@ -9,9 +9,10 @@ use winuxsh_runtime::zsh_compat::{
     completion_defs_from_report, dynamic_completion_defs_from_report_with_runner,
     dynamic_completion_defs_from_report_with_options, git_prompt_format_from_report,
     import_plan_toml, inspect_import_config_status, inspect_import_rollback_plan, safe_path_value,
-    scan, translate_zsh_prompt, CompletionAsset, DiagnosticSeverity, DynamicCompletionRunOptions,
-    DynamicCompletionKind, DynamicCompletionSource, ImportedAlias, ImportedEnv, ImportedPlugin,
-    PluginImportKind, PluginImportTier, ZshCompatDiagnostic,
+    runtime_completion_commands_from_report, scan, translate_zsh_prompt, CompletionAsset,
+    DiagnosticSeverity, DynamicCompletionRunOptions, DynamicCompletionKind, DynamicCompletionSource,
+    ImportedAlias, ImportedEnv, ImportedPlugin, PluginImportKind, PluginImportTier,
+    ZshCompatDiagnostic,
     ZshImportApplyReadiness, ZshImportBlockState, ZshImportConfigStatus, ZshImportOptions,
     ZshImportReport, ZshImportRollbackPlan, ZSH_IMPORT_BLOCK_END, ZSH_IMPORT_BLOCK_START,
     zsh_compat_doctor_text,
@@ -732,11 +733,57 @@ alias npmR="npm run"
         &report,
     );
     assert!(plan.contains("runtime zsh completion providers detected: 1"));
-    assert!(plan.contains("# runtime provider commands: [\"npm\"]"));
+    assert!(plan.contains("[zsh.runtime_completions]"));
+    assert!(plan.contains("enabled = false"));
+    assert!(plan.contains("commands = [\"npm\"]"));
+    assert!(plan.contains("timeout_millis = 1000"));
     assert!(!plan.contains("[zsh.dynamic_completions]"));
-    assert!(!plan.contains("commands = [\"npm\"]"));
 
     let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn builds_runtime_completion_commands_from_explicit_allowlist() {
+    let report = ZshImportReport {
+        dynamic_completion_sources: vec![
+            DynamicCompletionSource {
+                kind: DynamicCompletionKind::RuntimeProvider,
+                command: "npm".to_string(),
+                args: vec!["completion".to_string(), "--".to_string()],
+                target_shell: "words".to_string(),
+                source_file: None,
+                line: None,
+                origin: "native-plugin:npm".to_string(),
+            },
+            DynamicCompletionSource {
+                kind: DynamicCompletionKind::ScriptGenerator,
+                command: "kubectl".to_string(),
+                args: vec!["completion".to_string(), "zsh".to_string()],
+                target_shell: "zsh".to_string(),
+                source_file: None,
+                line: None,
+                origin: "native-plugin:kubectl".to_string(),
+            },
+            DynamicCompletionSource {
+                kind: DynamicCompletionKind::RuntimeProvider,
+                command: "unsafe/name".to_string(),
+                args: vec!["completion".to_string(), "--".to_string()],
+                target_shell: "words".to_string(),
+                source_file: None,
+                line: None,
+                origin: "test".to_string(),
+            },
+        ],
+        ..Default::default()
+    };
+
+    assert!(runtime_completion_commands_from_report(&report, &[]).is_empty());
+
+    let commands = runtime_completion_commands_from_report(&report, &["npm".to_string()]);
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].command, "npm");
+    assert_eq!(commands[0].args, vec!["completion", "--"]);
+    assert_eq!(commands[0].origin, "native-plugin:npm");
 }
 
 #[test]

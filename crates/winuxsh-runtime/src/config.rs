@@ -86,6 +86,7 @@ pub struct ZshConfig {
     pub autosuggestions: AutosuggestConfig,
     pub syntax_highlighting: SyntaxHighlightConfig,
     pub dynamic_completions: DynamicCompletionConfig,
+    pub runtime_completions: RuntimeCompletionConfig,
 }
 
 impl Default for ZshConfig {
@@ -101,6 +102,7 @@ impl Default for ZshConfig {
             autosuggestions: AutosuggestConfig::default(),
             syntax_highlighting: SyntaxHighlightConfig::default(),
             dynamic_completions: DynamicCompletionConfig::default(),
+            runtime_completions: RuntimeCompletionConfig::default(),
         }
     }
 }
@@ -122,6 +124,23 @@ impl Default for DynamicCompletionConfig {
             timeout_millis: 1500,
             cache_ttl_secs: Some(86400),
             cache_dir: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeCompletionConfig {
+    pub enabled: bool,
+    pub commands: Vec<String>,
+    pub timeout_millis: u64,
+}
+
+impl Default for RuntimeCompletionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            commands: Vec::new(),
+            timeout_millis: 1000,
         }
     }
 }
@@ -319,6 +338,7 @@ struct ZshToml {
     autosuggestions: Option<AutosuggestToml>,
     syntax_highlighting: Option<SyntaxHighlightToml>,
     dynamic_completions: Option<DynamicCompletionToml>,
+    runtime_completions: Option<RuntimeCompletionToml>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -344,6 +364,13 @@ struct DynamicCompletionToml {
     timeout_millis: Option<u64>,
     cache_ttl_secs: Option<u64>,
     cache_dir: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RuntimeCompletionToml {
+    enabled: Option<bool>,
+    commands: Option<Vec<String>>,
+    timeout_millis: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -454,6 +481,10 @@ fn build_zsh_config(parsed: ZshToml) -> ZshConfig {
             .dynamic_completions
             .map(build_dynamic_completion_config)
             .unwrap_or_default(),
+        runtime_completions: parsed
+            .runtime_completions
+            .map(build_runtime_completion_config)
+            .unwrap_or_default(),
     }
 }
 
@@ -485,6 +516,15 @@ fn build_dynamic_completion_config(parsed: DynamicCompletionToml) -> DynamicComp
         timeout_millis: parsed.timeout_millis.unwrap_or(defaults.timeout_millis),
         cache_ttl_secs: parsed.cache_ttl_secs.or(defaults.cache_ttl_secs),
         cache_dir: parsed.cache_dir.map(PathBuf::from),
+    }
+}
+
+fn build_runtime_completion_config(parsed: RuntimeCompletionToml) -> RuntimeCompletionConfig {
+    let defaults = RuntimeCompletionConfig::default();
+    RuntimeCompletionConfig {
+        enabled: parsed.enabled.unwrap_or(defaults.enabled),
+        commands: parsed.commands.unwrap_or(defaults.commands),
+        timeout_millis: parsed.timeout_millis.unwrap_or(defaults.timeout_millis),
     }
 }
 
@@ -575,6 +615,11 @@ commands = ["docker", "kubectl"]
 timeout_millis = 2000
 cache_ttl_secs = 120
 cache_dir = "C:/Users/me/.winuxsh/cache/zsh-completions"
+
+[zsh.runtime_completions]
+enabled = true
+commands = ["npm"]
+timeout_millis = 750
 "#,
         );
 
@@ -613,6 +658,9 @@ cache_dir = "C:/Users/me/.winuxsh/cache/zsh-completions"
             config.zsh.dynamic_completions.cache_dir,
             Some(PathBuf::from("C:/Users/me/.winuxsh/cache/zsh-completions"))
         );
+        assert!(config.zsh.runtime_completions.enabled);
+        assert_eq!(config.zsh.runtime_completions.commands, vec!["npm"]);
+        assert_eq!(config.zsh.runtime_completions.timeout_millis, 750);
     }
 
     #[test]

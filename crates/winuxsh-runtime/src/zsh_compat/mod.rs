@@ -16,6 +16,7 @@ use anyhow::{anyhow, Context};
 use serde::{Deserialize, Serialize};
 
 use crate::completion::external::{CommandDef, FlagDef, PathLiteral, ValuesSource};
+use crate::completion::runtime::RuntimeCompletionCommand;
 use crate::config::{EditorMode, ZshCompatLevel, ZshConfig};
 
 pub const ZSH_IMPORT_BLOCK_START: &str = "# >>> winuxsh zsh compat import >>>";
@@ -784,10 +785,14 @@ pub fn import_plan_toml(options: &ZshImportOptions, report: &ZshImportReport) ->
             "# They depend on the current input buffer and need native winuxsh providers."
                 .to_string(),
         );
+        out.push("# They remain disabled until you explicitly set enabled = true.".to_string());
+        out.push("[zsh.runtime_completions]".to_string());
+        out.push("enabled = false".to_string());
         out.push(format!(
-            "# runtime provider commands: {}",
+            "commands = {}",
             toml_array(&runtime_completion_commands_for_import_plan(report))
         ));
+        out.push("timeout_millis = 1000".to_string());
     }
 
     out.join("\n")
@@ -1223,6 +1228,35 @@ pub fn dynamic_completion_defs_from_report_with_options(
     dynamic_completion_defs_from_report_with_runner(report, |source| {
         cached_or_run_dynamic_completion_source(source, options)
     })
+}
+
+pub fn runtime_completion_commands_from_report(
+    report: &ZshImportReport,
+    allowed_commands: &[String],
+) -> Vec<RuntimeCompletionCommand> {
+    let allowed: HashSet<&str> = allowed_commands.iter().map(String::as_str).collect();
+    let mut seen = HashSet::new();
+    let mut commands = Vec::new();
+
+    for source in &report.dynamic_completion_sources {
+        if source.kind != DynamicCompletionKind::RuntimeProvider
+            || source.target_shell != "words"
+            || !is_safe_name(&source.command)
+            || !allowed.contains(source.command.as_str())
+            || !seen.insert(source.command.clone())
+        {
+            continue;
+        }
+
+        commands.push(RuntimeCompletionCommand {
+            command: source.command.clone(),
+            args: source.args.clone(),
+            origin: source.origin.clone(),
+        });
+    }
+
+    commands.sort_by(|left, right| left.command.cmp(&right.command));
+    commands
 }
 
 fn cached_or_run_dynamic_completion_source(

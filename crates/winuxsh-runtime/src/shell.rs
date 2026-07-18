@@ -6,17 +6,19 @@
 
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use reedline::Reedline;
 use rubash::{executor::Executor, lexer::tokenize, parser::parse};
 
+use crate::completion::runtime::RuntimeCompletionPlugin;
 use crate::completion::CompletionState;
 use crate::config::{load as load_config, AutosuggestConfig, EditorMode, SyntaxHighlightConfig};
 use crate::prompt::WinuxshPrompt;
 use crate::zsh_compat::{
     apply_alias, apply_safe_aliases, apply_safe_env, completion_defs_from_report,
     dynamic_completion_defs_from_report_with_options, git_prompt_format_from_report, scan,
-    DynamicCompletionRunOptions, ZshImportOptions,
+    runtime_completion_commands_from_report, DynamicCompletionRunOptions, ZshImportOptions,
 };
 
 use crate::winuxcmd;
@@ -130,6 +132,22 @@ impl Shell {
         {
             let mut s = completion_state.lock().unwrap();
             s.load_completion_dirs_with_definitions(&config.completion_dirs, zsh_completion_defs);
+            if config.zsh.runtime_completions.enabled {
+                if let Some(report) = zsh_report.as_ref() {
+                    let runtime_commands = runtime_completion_commands_from_report(
+                        report,
+                        &config.zsh.runtime_completions.commands,
+                    );
+                    if !runtime_commands.is_empty() {
+                        s.add_plugin(Arc::new(RuntimeCompletionPlugin::new(
+                            runtime_commands,
+                            Duration::from_millis(
+                                config.zsh.runtime_completions.timeout_millis.max(1),
+                            ),
+                        )));
+                    }
+                }
+            }
         }
 
         let mut syntax_highlighting = config.zsh.syntax_highlighting.clone();

@@ -3,11 +3,13 @@
 //! Builds a CompletionState, registers a fixture dir, then asks for
 //! `rg -<Tab>` completions and asserts the expected flags are returned.
 
+use std::ffi::OsString;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
-use winuxsh_runtime::completion::{CompletionContext, CompletionState};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use winuxsh_runtime::completion::external::{CommandDef, FlagDef};
+use winuxsh_runtime::completion::runtime::{RuntimeCompletionCommand, RuntimeCompletionPlugin};
+use winuxsh_runtime::completion::{CompletionContext, CompletionState};
 
 #[test]
 fn loads_toml_definitions_from_dir() {
@@ -193,6 +195,50 @@ description = "user override flag"
     let _ = std::fs::remove_dir_all(temp_dir);
 }
 
+#[test]
+fn runtime_completion_provider_runs_allowed_command_with_current_words() {
+    let _lock = env_lock().lock().unwrap();
+    let _env = EnvGuard::capture(&["PATH"]);
+    let temp_dir = unique_temp_dir("winuxsh-runtime-completion-provider");
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    std::fs::write(
+        temp_dir.join("npm.cmd"),
+        r#"@echo off
+if "%1"=="completion" if "%2"=="--" goto complete
+exit /b 2
+:complete
+echo build
+echo bundle
+echo test
+"#,
+    )
+    .unwrap();
+
+    let old_path = std::env::var_os("PATH").unwrap_or_default();
+    let mut path_entries = vec![temp_dir.clone()];
+    path_entries.extend(std::env::split_paths(&old_path));
+    std::env::set_var("PATH", std::env::join_paths(path_entries).unwrap());
+
+    let state = Arc::new(Mutex::new(CompletionState::new(PathBuf::from("."))));
+    {
+        let mut s = state.lock().unwrap();
+        s.add_plugin(Arc::new(RuntimeCompletionPlugin::new(
+            vec![RuntimeCompletionCommand {
+                command: "npm".to_string(),
+                args: vec!["completion".to_string(), "--".to_string()],
+                origin: "test".to_string(),
+            }],
+            Duration::from_secs(2),
+        )));
+    }
+
+    assert_suggests(&state, "npm run b", "build");
+    assert_suggests(&state, "npm run b", "bundle");
+    assert_not_suggests(&state, "npm run b", "test");
+
+    let _ = std::fs::remove_dir_all(temp_dir);
+}
+
 fn suggestions_for(state: &Arc<Mutex<CompletionState>>, input: &str) -> Vec<String> {
     let ctx = CompletionContext::new(PathBuf::from("."), input.to_string(), input.len());
     let s = state.lock().unwrap();
@@ -226,4 +272,35 @@ fn unique_temp_dir(prefix: &str) -> PathBuf {
         .unwrap()
         .as_nanos();
     std::env::temp_dir().join(format!("{}-{}-{}", prefix, std::process::id(), nanos))
+}
+
+fn env_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+struct EnvGuard {
+    saved: Vec<(String, Option<OsString>)>,
+}
+
+impl EnvGuard {
+    fn capture(names: &[&str]) -> Self {
+        Self {
+            saved: names
+                .iter()
+                .map(|name| ((*name).to_string(), std::env::var_os(name)))
+                .collect(),
+        }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        for (name, value) in &self.saved {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
 }

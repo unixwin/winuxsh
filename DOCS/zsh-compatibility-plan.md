@@ -582,9 +582,50 @@ This gives the project a concrete plugin compatibility map:
 | Static alias/config | `git`, `docker`, `npm` aliases | import/apply safely | existing TOML/import layer |
 | Static `_arguments` completion | simple `_cmd` assets | translate to `CommandDef` | existing completion translator |
 | Script generator completion | `kubectl completion zsh` | allowlisted run + cache + translate | existing dynamic provider |
-| Runtime completion provider | `npm completion -- "${words[@]}"` | report only | reedline runtime provider API |
+| Runtime completion provider | `npm completion -- "${words[@]}"` | opt-in `[zsh.runtime_completions]` provider | completion runtime provider API |
 | ZLE widget/keybinding | npm F2 toggle, history widgets | report/native UX required | reedline widget/keybinding shims |
 | Lifecycle hooks | `precmd`, `preexec`, `chpwd` | report only | native shell lifecycle hooks |
+
+## Phase 11 - Runtime Completion Providers
+
+Implementation status: Phase 11a is implemented on
+`codex/zsh-compat-scanner`.
+
+Phase 11a connects the second dynamic plugin shape: providers that ask a CLI for
+candidate words at Tab time, using the current command buffer.
+
+```toml
+[zsh.runtime_completions]
+enabled = true
+commands = ["npm"]
+timeout_millis = 1000
+```
+
+Current behavior:
+
+- Runtime providers remain disabled by default and require an explicit command
+  allowlist in native TOML.
+- The scanner/import plan reports npm-style providers as
+  `[zsh.runtime_completions]`, separate from `[zsh.dynamic_completions]`.
+- `Shell::new()` registers a native completion provider only after a safe zsh
+  scan finds a matching `runtime_provider` source and the command is allowlisted.
+- The provider appends current words to the discovered command shape, e.g.
+  `npm completion -- npm run b`, then filters stdout lines by the current word.
+- Runtime execution uses a timeout, stderr/stdout capture, and Windows PATH
+  lookup for `.exe`, `.cmd`, and `.bat` so npm-style shims work natively.
+- It does not source zsh code, evaluate `compadd`, or execute arbitrary plugin
+  scripts.
+
+Why this matters:
+
+- Static alias/completion packs are still useful for many Oh My Zsh plugins, but
+  they are not enough for CLIs whose candidates depend on project state,
+  subcommands, package scripts, clusters, or remote context.
+- Script generators such as `kubectl completion zsh` are startup/cache oriented;
+  runtime providers such as `npm completion -- "${words[@]}"` are interactive
+  and must be queried with the current line.
+- ZLE widgets and lifecycle hooks remain a separate class; they need reedline
+  widget shims and shell lifecycle hook points rather than completion providers.
 
 ## Non-Goals
 
