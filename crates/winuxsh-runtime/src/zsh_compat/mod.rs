@@ -7,7 +7,8 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context};
 use serde::Serialize;
@@ -380,6 +381,21 @@ pub struct DynamicCompletionSource {
     pub source_file: Option<PathBuf>,
     pub line: Option<usize>,
     pub origin: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct DynamicCompletionRunOptions {
+    pub allowed_commands: Vec<String>,
+    pub timeout: Duration,
+}
+
+impl Default for DynamicCompletionRunOptions {
+    fn default() -> Self {
+        Self {
+            allowed_commands: Vec::new(),
+            timeout: Duration::from_millis(1500),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -952,6 +968,144 @@ where
     let mut values: Vec<CommandDef> = definitions.into_values().collect();
     values.sort_by(|left, right| left.command.cmp(&right.command));
     values
+}
+
+pub fn dynamic_completion_defs_from_report_with_options(
+    report: &ZshImportReport,
+    options: &DynamicCompletionRunOptions,
+) -> Vec<CommandDef> {
+    dynamic_completion_defs_from_report_with_runner(report, |source| {
+        run_dynamic_completion_source(source, options)
+    })
+}
+
+fn run_dynamic_completion_source(
+    source: &DynamicCompletionSource,
+    options: &DynamicCompletionRunOptions,
+) -> Result<String, String> {
+    if source.target_shell != "zsh" {
+        return Err(format!(
+            "unsupported dynamic completion target shell: {}",
+            source.target_shell
+        ));
+    }
+    if !is_safe_name(&source.command) || !is_dynamic_completion_command_allowed(source, options) {
+        return Err(format!(
+            "dynamic completion command is not allowed: {}",
+            source.command
+        ));
+    }
+    if source.args.iter().any(|arg| !is_safe_dynamic_completion_arg(arg)) {
+        return Err(format!(
+            "dynamic completion command has unsafe args: {}",
+            source.args.join(" ")
+        ));
+    }
+
+    let stdout_path = dynamic_completion_temp_path(&source.command, "stdout");
+    let stderr_path = dynamic_completion_temp_path(&source.command, "stderr");
+    let stdout = std::fs::File::create(&stdout_path)
+        .map_err(|err| format!("failed to create stdout capture: {}", err))?;
+    let stderr = std::fs::File::create(&stderr_path)
+        .map_err(|err| format!("failed to create stderr capture: {}", err))?;
+
+    let mut child = match Command::new(&source.command)
+        .args(&source.args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr))
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(err) => {
+            let _ = std::fs::remove_file(&stdout_path);
+            let _ = std::fs::remove_file(&stderr_path);
+            return Err(format!("failed to run dynamic completion command: {}", err));
+        }
+    };
+
+    let start = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if start.elapsed() >= options.timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = std::fs::remove_file(&stdout_path);
+                    let _ = std::fs::remove_file(&stderr_path);
+                    return Err(format!(
+                        "dynamic completion command timed out after {:?}",
+                        options.timeout
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            Err(err) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = std::fs::remove_file(&stdout_path);
+                let _ = std::fs::remove_file(&stderr_path);
+                return Err(format!(
+                    "failed while waiting for dynamic completion command: {}",
+                    err
+                ));
+            }
+        }
+    };
+
+    let stdout = std::fs::read_to_string(&stdout_path).unwrap_or_default();
+    let stderr = std::fs::read_to_string(&stderr_path).unwrap_or_default();
+    let _ = std::fs::remove_file(&stdout_path);
+    let _ = std::fs::remove_file(&stderr_path);
+
+    if !status.success() {
+        return Err(format!(
+            "dynamic completion command exited with {}: {}",
+            status,
+            stderr.trim()
+        ));
+    }
+
+    Ok(stdout)
+}
+
+fn is_dynamic_completion_command_allowed(
+    source: &DynamicCompletionSource,
+    options: &DynamicCompletionRunOptions,
+) -> bool {
+    options
+        .allowed_commands
+        .iter()
+        .any(|command| command == &source.command)
+}
+
+fn is_safe_dynamic_completion_arg(arg: &str) -> bool {
+    !arg.is_empty() && !arg.chars().any(|ch| matches!(ch, '\0' | '\n' | '\r'))
+}
+
+fn dynamic_completion_temp_path(command: &str, stream: &str) -> PathBuf {
+    let safe_command: String = command
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    std::env::temp_dir().join(format!(
+        "winuxsh-zsh-completion-{}-{}-{}.{}",
+        safe_command,
+        std::process::id(),
+        nanos,
+        stream
+    ))
 }
 
 fn default_zdotdir() -> PathBuf {

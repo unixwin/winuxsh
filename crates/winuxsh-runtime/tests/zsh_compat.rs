@@ -1,16 +1,17 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use winuxsh_runtime::config::ZshCompatLevel;
 use winuxsh_runtime::zsh_compat::{
     apply_import_plan_to_config_with_backup_suffix, apply_safe_aliases, apply_safe_env,
     completion_defs_from_report, dynamic_completion_defs_from_report_with_runner,
-    git_prompt_format_from_report, import_plan_toml, inspect_import_config_status,
-    inspect_import_rollback_plan, safe_path_value, scan, translate_zsh_prompt, CompletionAsset,
-    DiagnosticSeverity, DynamicCompletionSource, ImportedAlias, ImportedEnv, ImportedPlugin,
-    PluginImportKind, PluginImportTier, ZshCompatDiagnostic,
+    dynamic_completion_defs_from_report_with_options, git_prompt_format_from_report,
+    import_plan_toml, inspect_import_config_status, inspect_import_rollback_plan, safe_path_value,
+    scan, translate_zsh_prompt, CompletionAsset, DiagnosticSeverity, DynamicCompletionRunOptions,
+    DynamicCompletionSource, ImportedAlias, ImportedEnv, ImportedPlugin, PluginImportKind,
+    PluginImportTier, ZshCompatDiagnostic,
     ZshImportApplyReadiness, ZshImportBlockState, ZshImportConfigStatus, ZshImportOptions,
     ZshImportReport, ZshImportRollbackPlan, ZSH_IMPORT_BLOCK_END, ZSH_IMPORT_BLOCK_START,
     zsh_compat_doctor_text,
@@ -1130,6 +1131,69 @@ _arguments \
         .flags
         .iter()
         .any(|flag| flag.short.as_deref() == Some("-o") && flag.takes_value));
+}
+
+#[test]
+fn runs_allowed_dynamic_completion_generator_with_timeout() {
+    let _lock = env_lock().lock().unwrap();
+    let _env = EnvGuard::capture(&["PATH"]);
+    let temp = unique_temp_dir("winuxsh-zsh-dynamic-completion-runner");
+    std::fs::create_dir_all(&temp).unwrap();
+    let command_path = temp.join("dyncli.cmd");
+    std::fs::write(
+        &command_path,
+        r#"@echo off
+if "%1"=="completion" if "%2"=="zsh" goto completion
+exit /b 2
+:completion
+echo #compdef dyncli.cmd
+echo _arguments \
+echo   "--config=[config file]::config:_files" \
+echo   "--verbose[verbose output]"
+"#,
+    )
+    .unwrap();
+
+    let old_path = std::env::var_os("PATH").unwrap_or_default();
+    let mut path_entries = vec![temp.clone()];
+    path_entries.extend(std::env::split_paths(&old_path));
+    std::env::set_var("PATH", std::env::join_paths(path_entries).unwrap());
+
+    let report = ZshImportReport {
+        dynamic_completion_sources: vec![DynamicCompletionSource {
+            command: "dyncli.cmd".to_string(),
+            args: vec!["completion".to_string(), "zsh".to_string()],
+            target_shell: "zsh".to_string(),
+            source_file: None,
+            line: None,
+            origin: "plugin".to_string(),
+        }],
+        ..Default::default()
+    };
+
+    assert!(dynamic_completion_defs_from_report_with_options(
+        &report,
+        &DynamicCompletionRunOptions::default()
+    )
+    .is_empty());
+
+    let options = DynamicCompletionRunOptions {
+        allowed_commands: vec!["dyncli.cmd".to_string()],
+        timeout: Duration::from_secs(2),
+    };
+    let defs = dynamic_completion_defs_from_report_with_options(&report, &options);
+
+    assert_eq!(defs.len(), 1);
+    let dyncli = &defs[0];
+    assert_eq!(dyncli.command, "dyncli.cmd");
+    assert!(dyncli.flags.iter().any(|flag| {
+        flag.long.as_deref() == Some("--config") && flag.takes_value
+    }));
+    assert!(dyncli.flags.iter().any(|flag| {
+        flag.long.as_deref() == Some("--verbose") && !flag.takes_value
+    }));
+
+    let _ = std::fs::remove_dir_all(temp);
 }
 
 fn unique_temp_dir(prefix: &str) -> PathBuf {

@@ -464,6 +464,21 @@ Phase 8d adds the first dynamic completion translation seam:
   a native cache/provider with command allowlisting, timeout, stderr capture, and
   stale-cache fallback.
 
+Implementation status: Phase 8e is implemented on
+`codex/zsh-compat-scanner`.
+
+Phase 8e adds the first safe dynamic completion runner:
+
+- Dynamic generators still do not run by default.
+- `dynamic_completion_defs_from_report_with_options` executes only explicitly
+  allowed command names from structured dynamic completion sources.
+- The runner captures stdout/stderr through temporary files, polls the child
+  process, and kills it on timeout to avoid hanging the shell or filling pipes.
+- Tests use a local fake `dyncli.cmd completion zsh` generator to prove the
+  provider can execute, translate, and reject non-allowlisted commands.
+- The next phase should persist generated zsh completion output in a cache and
+  wire selected providers into startup behind config.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh

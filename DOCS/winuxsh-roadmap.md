@@ -100,6 +100,7 @@ status: active
 - [x] Phase 8b native plugin pack: `plugins=(docker)` 缺少 OMZ 插件目录时提供保守 docker alias pack，不覆盖用户 alias
 - [x] Phase 8c dynamic completion scan: 识别 `tool completion zsh` 这类动态 completion generator，报告为 native provider 待接入
 - [x] Phase 8d dynamic completion translation: 用注入 runner 将 `tool completion zsh` 输出翻译为 winuxsh `CommandDef`，尚不在启动时执行外部命令
+- [x] Phase 8e dynamic completion runner: 显式 allowlist + timeout 执行动态 generator，默认不运行外部命令
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证
