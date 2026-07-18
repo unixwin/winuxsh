@@ -530,6 +530,115 @@ pub fn inspect_import_rollback_plan(config_path: &Path) -> anyhow::Result<ZshImp
     })
 }
 
+pub fn zsh_compat_doctor_text(
+    report: &ZshImportReport,
+    status: &ZshImportConfigStatus,
+    rollback: &ZshImportRollbackPlan,
+) -> String {
+    let info_count = diagnostic_count(report, DiagnosticSeverity::Info);
+    let warn_count = diagnostic_count(report, DiagnosticSeverity::Warn);
+    let unsupported_count = diagnostic_count(report, DiagnosticSeverity::Unsupported);
+
+    let safe_plugin_count = plugin_tier_count(report, PluginImportTier::Tier1Safe);
+    let partial_plugin_count = plugin_tier_count(report, PluginImportTier::Tier2Partial);
+    let native_plugin_count = plugin_tier_count(report, PluginImportTier::Tier3Native);
+    let unsupported_plugin_count = plugin_tier_count(report, PluginImportTier::Tier4Unsupported);
+    let missing_plugin_count = plugin_tier_count(report, PluginImportTier::Missing);
+
+    let prompt_ready = report
+        .prompt
+        .as_ref()
+        .and_then(|prompt| prompt.translated_format.as_ref())
+        .is_some()
+        || report
+            .right_prompt
+            .as_ref()
+            .and_then(|prompt| prompt.translated_format.as_ref())
+            .is_some();
+    let git_prompt_ready = git_prompt_format_from_report(report).is_some();
+
+    let mut out = Vec::new();
+    out.push("Zsh compatibility doctor".to_string());
+    out.push(format!("Config: {}", status.config_path.display()));
+    out.push(format!(
+        "Discovered: source files={}, oh-my-zsh={}",
+        report.source_files.len(),
+        yes_no(report.oh_my_zsh_detected)
+    ));
+    out.push(format!(
+        "Imports: aliases={}, env={}, PATH entries={}, completions={}, plugins={}",
+        report.aliases.len(),
+        report.env.len(),
+        report.path_entries.len(),
+        report.completion_assets.len(),
+        report.plugins.len()
+    ));
+    out.push(format!(
+        "Plugin tiers: safe={}, partial={}, native={}, unsupported={}, missing={}",
+        safe_plugin_count,
+        partial_plugin_count,
+        native_plugin_count,
+        unsupported_plugin_count,
+        missing_plugin_count
+    ));
+    out.push(format!(
+        "Native UX: edit_mode={}, prompt={}, git_prompt={}, highlight_styles={}",
+        report.edit_mode.as_deref().unwrap_or("(none)"),
+        yes_no(prompt_ready),
+        yes_no(git_prompt_ready),
+        report.highlight_styles.len()
+    ));
+    out.push(format!(
+        "Diagnostics: info={}, warnings={}, unsupported={}",
+        info_count, warn_count, unsupported_count
+    ));
+    out.push(format!(
+        "Import config: exists={}, managed_block={}, toml={}",
+        yes_no(status.config_exists),
+        block_state_label(status.block_state),
+        if status.toml_valid { "valid" } else { "invalid" }
+    ));
+    if let Some(error) = &status.toml_error {
+        out.push(format!("TOML detail: {}", error));
+    }
+    out.push(format!(
+        "Next apply: {}",
+        apply_readiness_label(status.apply_readiness)
+    ));
+    if let Some(error) = &status.apply_error {
+        out.push(format!("Apply detail: {}", error));
+    }
+    out.push(format!(
+        "Rollback: backups={}, latest={}",
+        rollback.backup_paths.len(),
+        rollback
+            .latest_backup_path
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "none".to_string())
+    ));
+    if let Some(command) = &rollback.restore_command {
+        out.push(format!("Restore latest backup: {}", command));
+    }
+
+    out.push("Next commands:".to_string());
+    out.push("  - Detailed report: winuxsh --zsh-compat-report".to_string());
+    out.push("  - Review import patch: winuxsh --zsh-compat-import-plan".to_string());
+    match status.apply_readiness {
+        ZshImportApplyReadiness::AddNewBlock | ZshImportApplyReadiness::ReplaceExistingBlock => {
+            out.push("  - Apply safe import: winuxsh --zsh-compat-import-apply".to_string());
+        }
+        ZshImportApplyReadiness::Blocked => {
+            out.push(
+                "  - Resolve blocker or merge manually before running import-apply".to_string(),
+            );
+        }
+    }
+    out.push("  - Rollback plan: winuxsh --zsh-compat-import-rollback-plan".to_string());
+
+    out.join("\n")
+}
+
 #[doc(hidden)]
 pub fn apply_import_plan_to_config_with_backup_suffix(
     config_path: &Path,
@@ -1974,6 +2083,46 @@ fn backup_paths_for(config_path: &Path) -> anyhow::Result<Vec<PathBuf>> {
 fn powershell_single_quote_path(path: &Path) -> String {
     let value = path.to_string_lossy().replace('\'', "''");
     format!("'{}'", value)
+}
+
+fn yes_no(value: bool) -> &'static str {
+    if value {
+        "yes"
+    } else {
+        "no"
+    }
+}
+
+fn diagnostic_count(report: &ZshImportReport, severity: DiagnosticSeverity) -> usize {
+    report
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == severity)
+        .count()
+}
+
+fn plugin_tier_count(report: &ZshImportReport, tier: PluginImportTier) -> usize {
+    report
+        .plugins
+        .iter()
+        .filter(|plugin| plugin.tier == tier)
+        .count()
+}
+
+fn block_state_label(state: ZshImportBlockState) -> &'static str {
+    match state {
+        ZshImportBlockState::Missing => "missing",
+        ZshImportBlockState::Present => "present",
+        ZshImportBlockState::Malformed => "malformed",
+    }
+}
+
+fn apply_readiness_label(readiness: ZshImportApplyReadiness) -> &'static str {
+    match readiness {
+        ZshImportApplyReadiness::AddNewBlock => "ready (add new block)",
+        ZshImportApplyReadiness::ReplaceExistingBlock => "ready (replace existing block)",
+        ZshImportApplyReadiness::Blocked => "blocked",
+    }
 }
 
 fn record_assignment(

@@ -95,6 +95,7 @@ status: active
 - [x] Phase 7b import-apply CLI: `--zsh-compat-import-apply` 显式写入 `.winshrc.toml`，写前备份，仅替换 winuxsh 管理块
 - [x] Phase 7c import-status CLI: `--zsh-compat-import-status` 只读检查 managed block / TOML / 备份 / 下一次 apply 可行性
 - [x] Phase 7d rollback-plan CLI: `--zsh-compat-import-rollback-plan` 只读输出最近备份与恢复命令
+- [x] Phase 7e doctor CLI: `--zsh-compat-doctor` 聚合 scan/status/rollback，给出安全 apply 判断和下一步命令
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证

@@ -12,6 +12,7 @@
 //!   winuxsh --zsh-compat-import-apply → write the import patch with a backup
 //!   winuxsh --zsh-compat-import-status → inspect import block and backups
 //!   winuxsh --zsh-compat-import-rollback-plan → print restore command
+//!   winuxsh --zsh-compat-doctor → summarize zsh compatibility health
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -74,6 +75,10 @@ fn run(args: &[String]) -> anyhow::Result<()> {
             print_zsh_compat_import_rollback_plan()?;
             Ok(())
         }
+        "--zsh-compat-doctor" => {
+            print_zsh_compat_doctor()?;
+            Ok(())
+        }
         "-c" => {
             if args.len() < 3 {
                 anyhow::bail!("-c requires an argument");
@@ -119,6 +124,7 @@ fn print_usage() {
     println!("  winuxsh --zsh-compat-import-apply Write that import patch with a backup");
     println!("  winuxsh --zsh-compat-import-status Inspect import block and backup status");
     println!("  winuxsh --zsh-compat-import-rollback-plan Print latest backup restore command");
+    println!("  winuxsh --zsh-compat-doctor Summarize zsh compatibility health");
 }
 
 fn print_zsh_compat_import_plan() -> anyhow::Result<()> {
@@ -208,6 +214,22 @@ fn print_zsh_compat_import_rollback_plan() -> anyhow::Result<()> {
     } else {
         println!("Restore command: unavailable (no backups found)");
     }
+    Ok(())
+}
+
+fn print_zsh_compat_doctor() -> anyhow::Result<()> {
+    let config = winuxsh_runtime::config::load();
+    let options = winuxsh_runtime::zsh_compat::ZshImportOptions::for_report(&config.zsh);
+    let report = winuxsh_runtime::zsh_compat::scan(&options);
+    let plan = winuxsh_runtime::zsh_compat::import_plan_toml(&options, &report);
+    let config_path = winuxsh_runtime::config::default_config_path();
+    let status = winuxsh_runtime::zsh_compat::inspect_import_config_status(&config_path, &plan)?;
+    let rollback = winuxsh_runtime::zsh_compat::inspect_import_rollback_plan(&config_path)?;
+
+    println!(
+        "{}",
+        winuxsh_runtime::zsh_compat::zsh_compat_doctor_text(&report, &status, &rollback)
+    );
     Ok(())
 }
 

@@ -318,7 +318,7 @@ Phase 6b adds a native bridge for common Oh My Zsh Git prompt forms:
 
 ## Phase 7 - Oh-My-Winuxsh Compatibility Layer
 
-Implementation status: Phase 7a through Phase 7d are implemented on
+Implementation status: Phase 7a through Phase 7e are implemented on
 `codex/zsh-compat-scanner`.
 
 Phase 7a adds a safe local import-plan command:
@@ -362,6 +362,15 @@ Phase 7d adds a read-only rollback plan command:
   exact PowerShell copy command a user or agent can run.
 - The command must not restore files automatically. A future explicit rollback
   apply command can be added after the plan command is tested.
+
+Phase 7e adds a read-only doctor command:
+
+- `winuxsh --zsh-compat-doctor` aggregates the zsh scan report, import status,
+  and rollback plan into a compact operator-facing summary.
+- The command should answer: what was discovered, whether `apply` is safe, what
+  blocks it if not, and whether a rollback point exists.
+- The command must remain read-only and must not replace the detailed report,
+  JSON report, import-plan, status, or rollback-plan commands.
 
 Once the importer works, build a local package layer:
 

@@ -9,8 +9,10 @@ use winuxsh_runtime::zsh_compat::{
     completion_defs_from_report, git_prompt_format_from_report, import_plan_toml,
     inspect_import_config_status, inspect_import_rollback_plan, safe_path_value, scan,
     translate_zsh_prompt, CompletionAsset, DiagnosticSeverity, ImportedAlias, ImportedEnv,
-    PluginImportKind, PluginImportTier, ZshImportApplyReadiness, ZshImportBlockState,
-    ZshImportOptions, ZshImportReport, ZSH_IMPORT_BLOCK_END, ZSH_IMPORT_BLOCK_START,
+    ImportedPlugin, PluginImportKind, PluginImportTier, ZshCompatDiagnostic,
+    ZshImportApplyReadiness, ZshImportBlockState, ZshImportConfigStatus, ZshImportOptions,
+    ZshImportReport, ZshImportRollbackPlan, ZSH_IMPORT_BLOCK_END, ZSH_IMPORT_BLOCK_START,
+    zsh_compat_doctor_text,
 };
 
 #[test]
@@ -577,6 +579,101 @@ fn reports_latest_rollback_backup_and_restore_command() {
 }
 
 #[test]
+fn formats_doctor_summary_for_ready_import() {
+    let config_path = PathBuf::from("C:/Users/me/.winshrc.toml");
+    let backup_path = PathBuf::from("C:/Users/me/.winshrc.toml.100.bak");
+    let report = ZshImportReport {
+        source_files: vec![PathBuf::from("C:/Users/me/.zshrc")],
+        aliases: vec![imported_alias("ll", "ls -l")],
+        env: vec![imported_env("ZSH_THEME", "robbyrussell")],
+        path_entries: vec![PathBuf::from("C:/Users/me/bin")],
+        completion_assets: vec![CompletionAsset {
+            source_file: PathBuf::from("C:/Users/me/.oh-my-zsh/plugins/git/_git"),
+            commands: vec!["git".to_string()],
+            kind: "zsh".to_string(),
+        }],
+        plugins: vec![ImportedPlugin {
+            name: "git".to_string(),
+            source_dir: None,
+            plugin_script: None,
+            completion_files: Vec::new(),
+            alias_count: 1,
+            diagnostics_count: 0,
+            tier: PluginImportTier::Tier1Safe,
+            import_kind: PluginImportKind::AliasAndCompletion,
+            capabilities: Vec::new(),
+            unsupported_features: Vec::new(),
+        }],
+        oh_my_zsh_detected: true,
+        edit_mode: Some("vi".to_string()),
+        diagnostics: vec![
+            diagnostic(DiagnosticSeverity::Info, "info"),
+            diagnostic(DiagnosticSeverity::Warn, "warn"),
+            diagnostic(DiagnosticSeverity::Unsupported, "unsupported"),
+        ],
+        ..Default::default()
+    };
+    let status = ZshImportConfigStatus {
+        config_path: config_path.clone(),
+        config_exists: true,
+        block_state: ZshImportBlockState::Missing,
+        toml_valid: true,
+        toml_error: None,
+        apply_readiness: ZshImportApplyReadiness::AddNewBlock,
+        apply_error: None,
+        backup_paths: Vec::new(),
+    };
+    let rollback = ZshImportRollbackPlan {
+        config_path,
+        backup_paths: vec![backup_path.clone()],
+        latest_backup_path: Some(backup_path),
+        restore_command: Some("Copy-Item -LiteralPath 'backup' -Destination 'config' -Force".to_string()),
+    };
+
+    let doctor = zsh_compat_doctor_text(&report, &status, &rollback);
+
+    assert!(doctor.contains("Zsh compatibility doctor"));
+    assert!(doctor.contains("Discovered: source files=1, oh-my-zsh=yes"));
+    assert!(doctor.contains("Imports: aliases=1, env=1, PATH entries=1, completions=1, plugins=1"));
+    assert!(doctor.contains("Plugin tiers: safe=1, partial=0, native=0, unsupported=0, missing=0"));
+    assert!(doctor.contains("Native UX: edit_mode=vi"));
+    assert!(doctor.contains("Diagnostics: info=1, warnings=1, unsupported=1"));
+    assert!(doctor.contains("Next apply: ready (add new block)"));
+    assert!(doctor.contains("Apply safe import: winuxsh --zsh-compat-import-apply"));
+    assert!(doctor.contains("Restore latest backup: Copy-Item"));
+}
+
+#[test]
+fn formats_doctor_summary_for_blocked_import() {
+    let config_path = PathBuf::from("C:/Users/me/.winshrc.toml");
+    let report = ZshImportReport::default();
+    let status = ZshImportConfigStatus {
+        config_path: config_path.clone(),
+        config_exists: true,
+        block_state: ZshImportBlockState::Malformed,
+        toml_valid: true,
+        toml_error: None,
+        apply_readiness: ZshImportApplyReadiness::Blocked,
+        apply_error: Some("found malformed marker".to_string()),
+        backup_paths: Vec::new(),
+    };
+    let rollback = ZshImportRollbackPlan {
+        config_path,
+        backup_paths: Vec::new(),
+        latest_backup_path: None,
+        restore_command: None,
+    };
+
+    let doctor = zsh_compat_doctor_text(&report, &status, &rollback);
+
+    assert!(doctor.contains("managed_block=malformed"));
+    assert!(doctor.contains("Next apply: blocked"));
+    assert!(doctor.contains("Apply detail: found malformed marker"));
+    assert!(doctor.contains("Resolve blocker or merge manually"));
+    assert!(!doctor.contains("Apply safe import: winuxsh --zsh-compat-import-apply"));
+}
+
+#[test]
 fn safe_path_value_prepends_imported_entries_and_dedupes() {
     let _lock = env_lock().lock().unwrap();
     let _env = EnvGuard::capture(&["PATH"]);
@@ -782,6 +879,16 @@ fn imported_env(key: &str, value: &str) -> ImportedEnv {
     ImportedEnv {
         key: key.to_string(),
         value: value.to_string(),
+        source_file: None,
+        line: None,
+    }
+}
+
+fn diagnostic(severity: DiagnosticSeverity, feature: &str) -> ZshCompatDiagnostic {
+    ZshCompatDiagnostic {
+        severity,
+        feature: feature.to_string(),
+        message: format!("{} message", feature),
         source_file: None,
         line: None,
     }
