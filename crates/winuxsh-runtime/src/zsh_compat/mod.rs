@@ -2189,6 +2189,7 @@ fn native_plugin_requires_native_ux(plugin_name: &str) -> bool {
     matches!(
         plugin_name,
         "npm"
+            | "alias-finder"
             | "direnv"
             | "zsh-autosuggestions"
             | "zsh-syntax-highlighting"
@@ -2208,6 +2209,7 @@ fn native_plugin_widget_preset(plugin_name: &str) -> Option<&'static str> {
 
 fn native_dynamic_plugin_preset(plugin_name: &str) -> Option<&'static str> {
     match plugin_name {
+        "alias-finder" => Some("alias-finder"),
         "direnv" => Some("direnv"),
         _ => None,
     }
@@ -2343,7 +2345,8 @@ fn unsupported_features_since(
 fn is_native_ux_plugin(name: &str) -> bool {
     matches!(
         name,
-        "zsh-autosuggestions"
+        "alias-finder"
+            | "zsh-autosuggestions"
             | "zsh-syntax-highlighting"
             | "fast-syntax-highlighting"
             | "zsh-history-substring-search"
@@ -3131,10 +3134,16 @@ fn native_plugin_presets_for_import_plan(report: &ZshImportReport) -> Vec<String
         if hook.function == "_direnv_hook" {
             presets.insert("direnv".to_string());
         }
+        if hook.function == "preexec_alias-finder" || hook.function == "alias-finder" {
+            presets.insert("alias-finder".to_string());
+        }
     }
     for function in &report.zsh_functions {
         if function.function == "_direnv_hook" {
             presets.insert("direnv".to_string());
+        }
+        if function.function == "preexec_alias-finder" || function.function == "alias-finder" {
+            presets.insert("alias-finder".to_string());
         }
     }
     let mut presets: Vec<String> = presets.into_iter().collect();

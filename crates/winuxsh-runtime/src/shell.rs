@@ -5,6 +5,7 @@
 //! to rubash; this layer only adds the Windows-facing UX.
 
 
+use std::collections::HashMap;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -20,7 +21,7 @@ use crate::config::{
 };
 use crate::prompt::WinuxshPrompt;
 use crate::zsh_compat::{
-    apply_alias, apply_safe_aliases, apply_safe_env, completion_defs_from_report,
+    apply_alias, apply_safe_env, completion_defs_from_report,
     dynamic_completion_defs_from_report_with_options, git_prompt_format_from_report, scan,
     runtime_completion_commands_from_report, DynamicCompletionRunOptions, NativeWidgetSuggestion,
     ZshImportOptions,
@@ -41,6 +42,7 @@ pub struct Shell {
     pub native_widget_bindings: Vec<NativeWidgetSuggestion>,
     pub native_plugins: NativePluginConfig,
     pub hooks: HookConfig,
+    pub aliases: HashMap<String, String>,
     pub line_editor: Option<Reedline>,
 }
 
@@ -76,12 +78,21 @@ impl Shell {
 
         // 5. Apply imported aliases first, then native config aliases so
         // ~/.winshrc.toml remains authoritative when names collide.
+        let mut aliases = HashMap::new();
         if let Some(report) = &zsh_report {
-            let summary = apply_safe_aliases(report, &mut executor);
-            log::debug!("zsh safe alias import: aliases={}", summary.aliases_applied);
+            let mut aliases_applied = 0usize;
+            for alias in &report.aliases {
+                if apply_alias(&mut executor, &alias.name, &alias.value) {
+                    aliases.insert(alias.name.clone(), alias.value.clone());
+                    aliases_applied += 1;
+                }
+            }
+            log::debug!("zsh safe alias import: aliases={}", aliases_applied);
         }
         for (name, value) in &config.aliases {
-            if !apply_alias(&mut executor, name, value) {
+            if apply_alias(&mut executor, name, value) {
+                aliases.insert(name.clone(), value.clone());
+            } else {
                 log::warn!("Skipping invalid alias from config: {}", name);
             }
         }
@@ -191,6 +202,7 @@ impl Shell {
             native_widget_bindings,
             native_plugins: config.zsh.native_plugins,
             hooks: config.hooks,
+            aliases,
             line_editor: None,
         })
     }
@@ -237,6 +249,7 @@ impl Shell {
         let old_pwd = self.executor.get_env("PWD").map(str::to_owned);
         self.run_preexec_hooks(line);
         let code = self.execute_line(line)?;
+        self.sync_alias_mirror_from_line(line, code);
         let new_pwd = self.executor.get_env("PWD").map(str::to_owned);
         if let (Some(old_pwd), Some(new_pwd)) = (old_pwd, new_pwd) {
             self.run_chpwd_hooks_if_changed(&old_pwd, &new_pwd);
@@ -259,6 +272,7 @@ impl Shell {
         if command.is_empty() {
             return;
         }
+        self.run_native_preexec_plugins(command);
         let hooks = self.hooks.preexec.clone();
         self.run_hook_scripts(&hooks, &[("WINUXSH_PREEXEC_COMMAND", command.to_string())]);
     }
@@ -282,6 +296,14 @@ impl Shell {
     fn run_native_precmd_plugins(&mut self) {
         if self.native_plugin_enabled("direnv") {
             self.apply_direnv_export();
+        }
+    }
+
+    fn run_native_preexec_plugins(&mut self, command: &str) {
+        if self.native_plugin_enabled("alias-finder") {
+            for suggestion in self.native_alias_finder_matches(command) {
+                println!("{}", suggestion);
+            }
         }
     }
 
@@ -328,6 +350,88 @@ impl Shell {
         }
         if let Err(err) = self.execute_script(script) {
             log::warn!("native direnv preset failed to apply export: {}", err);
+        }
+    }
+
+    fn native_alias_finder_matches(&self, command: &str) -> Vec<String> {
+        let command = normalize_alias_finder_command(command);
+        if command.is_empty() {
+            return Vec::new();
+        }
+
+        let mut matches: Vec<_> = self
+            .aliases
+            .iter()
+            .filter_map(|(name, value)| {
+                if normalize_alias_finder_command(value) == command && name != &command {
+                    Some(format!("winuxsh: alias available: {}={}", name, shell_quote(value)))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        matches.sort();
+        matches
+    }
+
+    fn sync_alias_mirror_from_line(&mut self, line: &str, code: i32) {
+        if code != 0 {
+            return;
+        }
+
+        let tokens = tokenize(line);
+        if tokens.is_empty() {
+            return;
+        }
+
+        let ast = parse(&tokens);
+        if ast.commands.len() != 1 {
+            return;
+        }
+
+        let mut words = ast.commands[0].words.as_slice();
+        if words.first().is_some_and(|word| word == "builtin") {
+            words = &words[1..];
+        }
+
+        match words.first().map(String::as_str) {
+            Some("alias") => self.sync_alias_assignments(&words[1..]),
+            Some("unalias") => self.sync_unalias_arguments(&words[1..]),
+            _ => {}
+        }
+    }
+
+    fn sync_alias_assignments(&mut self, args: &[String]) {
+        for arg in args {
+            if arg == "-p" || arg == "--" {
+                continue;
+            }
+            let Some((name, value)) = arg.split_once('=') else {
+                continue;
+            };
+            if name.is_empty() {
+                continue;
+            }
+            self.aliases
+                .insert(name.to_string(), strip_rubash_alias_quote_marker(value).to_string());
+        }
+    }
+
+    fn sync_unalias_arguments(&mut self, args: &[String]) {
+        let mut allow_options = true;
+        for arg in args {
+            if allow_options && arg == "--" {
+                allow_options = false;
+                continue;
+            }
+            if allow_options && arg == "-a" {
+                self.aliases.clear();
+                continue;
+            }
+            if allow_options && arg.starts_with('-') {
+                continue;
+            }
+            self.aliases.remove(arg);
         }
     }
 
@@ -427,6 +531,18 @@ fn same_shell_dir(left: &str, right: &str) -> bool {
     }
 }
 
+fn normalize_alias_finder_command(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn strip_rubash_alias_quote_marker(value: &str) -> &str {
+    value.strip_prefix('\x1c').unwrap_or(value)
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -474,6 +590,37 @@ mod tests {
         assert_eq!(shell.executor.get_env("DIRENV_TEST_VALUE"), Some("active"));
     }
 
+    #[test]
+    fn native_alias_finder_matches_known_alias_values() {
+        let mut shell = test_shell(HookConfig::default());
+        shell.native_plugins.enabled = true;
+        shell.native_plugins.presets = vec!["alias-finder".to_string()];
+        shell
+            .aliases
+            .insert("gst".to_string(), "git status".to_string());
+
+        assert_eq!(
+            shell.native_alias_finder_matches(" git   status "),
+            vec!["winuxsh: alias available: gst='git status'"]
+        );
+        assert!(shell.native_alias_finder_matches("git diff").is_empty());
+    }
+
+    #[test]
+    fn alias_mirror_tracks_successful_interactive_alias_commands() {
+        let mut shell = test_shell(HookConfig::default());
+
+        shell.execute_interactive_line("alias gst='git status'").unwrap();
+        assert_eq!(shell.aliases.get("gst").map(String::as_str), Some("git status"));
+        assert_eq!(
+            shell.native_alias_finder_matches("git status"),
+            vec!["winuxsh: alias available: gst='git status'"]
+        );
+
+        shell.execute_interactive_line("unalias gst").unwrap();
+        assert!(shell.native_alias_finder_matches("git status").is_empty());
+    }
+
     fn test_shell(hooks: HookConfig) -> Shell {
         Shell {
             executor: Executor::new(),
@@ -487,6 +634,7 @@ mod tests {
             native_widget_bindings: Vec::new(),
             native_plugins: NativePluginConfig::default(),
             hooks,
+            aliases: HashMap::new(),
             line_editor: None,
         }
     }
@@ -497,10 +645,6 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("{}-{}-{}", prefix, std::process::id(), nanos))
-    }
-
-    fn shell_quote(value: &str) -> String {
-        format!("'{}'", value.replace('\'', "'\\''"))
     }
 
     fn shell_display_path(path: &std::path::Path) -> String {

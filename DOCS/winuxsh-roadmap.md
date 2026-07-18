@@ -113,6 +113,7 @@ status: active
 - [x] Phase 14b native UX plugin presets: 缺少插件目录时也将 `zsh-autosuggestions` / `zsh-history-substring-search` / syntax-highlighting 类插件归为 native UX
 - [x] Phase 15a autoload/function suggestions: 扫描 `autoload` 与函数定义，按 completion/hook/widget/prompt/helper 形态输出报告和 import-plan TODO
 - [x] Phase 16a native dynamic plugin preset: `direnv` 通过显式 `[zsh.native_plugins]` opt-in，在 native precmd/chpwd hook 点运行 `direnv export bash`
+- [x] Phase 16b native dynamic plugin preset: `alias-finder` 通过显式 `[zsh.native_plugins]` opt-in，在 native preexec hook 点提示已知 alias
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证

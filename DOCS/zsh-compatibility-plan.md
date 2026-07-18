@@ -821,6 +821,37 @@ Rules:
 - use `direnv export bash`, not `direnv export zsh`, because rubash owns shell
   semantics.
 
+Implementation status: Phase 16b is implemented on
+`codex/zsh-compat-scanner`.
+
+Phase 16b targets the next dynamic shape: preexec helper plugins. Static
+aliases and completion files are only the compatibility floor; many useful zsh
+plugins are event-driven. They watch the command line before execution, refresh
+state before each prompt, respond to directory changes, or bind ZLE widgets.
+Winuxsh should map those shapes onto native hook/provider/widget surfaces rather
+than trying to run the zsh implementation.
+
+Phase 16b adds a native `alias-finder` preset:
+
+- recognize `plugins=(alias-finder)` as a native dynamic plugin candidate even
+  when the Oh My Zsh plugin directory is not installed locally.
+- suggest a disabled `[zsh.native_plugins]` import-plan block with
+  `presets = ["alias-finder"]`.
+- when explicitly enabled, run at the native `preexec` lifecycle point and look
+  for already-loaded aliases whose value exactly matches the typed command.
+- print a quiet suggestion such as `winuxsh: alias available: gst='git status'`
+  before command execution.
+- keep zstyle options such as `longer`, `cheaper`, and `autoload` out of scope
+  until the exact-match preset has tests and real usage feedback.
+
+Rules:
+
+- disabled by default and never enabled only because `.zshrc` mentions the
+  plugin.
+- no Oh My Zsh `alias-finder.plugin.zsh` sourcing.
+- use winuxsh's native alias mirror from imported `.zshrc` aliases and native
+  TOML aliases; rubash remains the authority for command execution.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh
