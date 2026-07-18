@@ -670,6 +670,25 @@ Why this matters:
 - The next lifecycle step is a compatibility translator for very small,
   auditable hook patterns, plus native presets for common hook-based plugins.
 
+Implementation status: Phase 12b is implemented on
+`codex/zsh-compat-scanner`.
+
+Phase 12b makes hook-shaped dynamic plugins visible and actionable in the
+compatibility report:
+
+- scan `add-zsh-hook precmd/preexec/chpwd <function>` registrations.
+- scan `precmd_functions`, `preexec_functions`, and `chpwd_functions` arrays.
+- scan direct `precmd()`, `preexec()`, and `chpwd()` function definitions.
+- classify hook-only plugins as native UX required instead of opaque
+  unsupported plugins.
+- emit `native_hooks` in the JSON/plain report and commented `[hooks]` TODOs in
+  `--zsh-compat-import-plan`.
+
+Winuxsh still does not copy or execute zsh hook function bodies. The generated
+plan deliberately contains disabled TODO scripts so users or future native
+presets can translate reviewed hook behavior into native winuxsh/rubash hook
+commands.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh

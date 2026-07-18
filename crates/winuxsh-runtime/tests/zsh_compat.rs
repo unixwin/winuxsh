@@ -743,6 +743,81 @@ alias npmR="npm run"
 }
 
 #[test]
+fn reports_native_lifecycle_hook_suggestions() {
+    let temp = unique_temp_dir("winuxsh-zsh-native-hook-suggestions");
+    let hook_plugin_dir = temp.join(".oh-my-zsh").join("plugins").join("hooky");
+    std::fs::create_dir_all(&hook_plugin_dir).unwrap();
+    std::fs::write(
+        temp.join(".zshrc"),
+        r#"
+plugins=(hooky)
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        hook_plugin_dir.join("hooky.plugin.zsh"),
+        r#"
+add-zsh-hook precmd hooky_precmd
+preexec_functions+=(hooky_preexec)
+chpwd() { hooky_chpwd; }
+"#,
+    )
+    .unwrap();
+
+    let report = scan(&ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: true,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    });
+
+    let hooky = plugin(&report, "hooky");
+    assert_eq!(hooky.import_kind, PluginImportKind::NativeUx);
+    assert_eq!(hooky.tier, PluginImportTier::Tier3Native);
+    assert!(hooky
+        .capabilities
+        .iter()
+        .any(|cap| cap == "native_lifecycle_hooks_required"));
+
+    assert!(report
+        .native_hooks
+        .iter()
+        .any(|hook| hook.hook == "precmd" && hook.function == "hooky_precmd"));
+    assert!(report
+        .native_hooks
+        .iter()
+        .any(|hook| hook.hook == "preexec" && hook.function == "hooky_preexec"));
+    assert!(report
+        .native_hooks
+        .iter()
+        .any(|hook| hook.hook == "chpwd" && hook.function == "chpwd"));
+    assert!(report.diagnostics.iter().any(|diag| {
+        diag.severity == DiagnosticSeverity::Unsupported && diag.feature == "zsh-hook"
+    }));
+
+    let plan = import_plan_toml(
+        &ZshImportOptions {
+            enabled: true,
+            zdotdir: temp.clone(),
+            import_zshrc: true,
+            import_oh_my_zsh: true,
+            plugins: Vec::new(),
+            compat_level: ZshCompatLevel::Safe,
+        },
+        &report,
+    );
+    assert!(plan.contains("zsh lifecycle hooks detected: 3"));
+    assert!(plan.contains("# [hooks]"));
+    assert!(plan.contains("# precmd = [\"# TODO translate zsh hook function: hooky_precmd\"]"));
+    assert!(plan.contains("# preexec = [\"# TODO translate zsh hook function: hooky_preexec\"]"));
+    assert!(plan.contains("# chpwd = [\"# TODO translate zsh hook function: chpwd\"]"));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
 fn builds_runtime_completion_commands_from_explicit_allowlist() {
     let report = ZshImportReport {
         dynamic_completion_sources: vec![

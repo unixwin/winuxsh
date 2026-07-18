@@ -301,6 +301,7 @@ pub struct ZshImportReport {
     pub highlight_styles: Vec<ImportedHighlightStyle>,
     pub completion_assets: Vec<CompletionAsset>,
     pub dynamic_completion_sources: Vec<DynamicCompletionSource>,
+    pub native_hooks: Vec<NativeHookSuggestion>,
     pub oh_my_zsh_detected: bool,
     pub diagnostics: Vec<ZshCompatDiagnostic>,
 }
@@ -327,6 +328,7 @@ impl ZshImportReport {
             "dynamic completion sources: {}",
             self.dynamic_completion_sources.len()
         ));
+        out.push(format!("native hook suggestions: {}", self.native_hooks.len()));
         out.push(format!("zstyles: {}", self.zstyles.len()));
         out.push(format!("highlight styles: {}", self.highlight_styles.len()));
         out.push(format!(
@@ -386,6 +388,16 @@ impl ZshImportReport {
                     source.kind,
                     source.target_shell,
                     source.origin
+                ));
+            }
+        }
+
+        if !self.native_hooks.is_empty() {
+            out.push("native hook suggestions:".to_string());
+            for hook in &self.native_hooks {
+                out.push(format!(
+                    "  - {} {} origin={}",
+                    hook.hook, hook.function, hook.origin
                 ));
             }
         }
@@ -535,6 +547,15 @@ pub struct DynamicCompletionSource {
     pub command: String,
     pub args: Vec<String>,
     pub target_shell: String,
+    pub source_file: Option<PathBuf>,
+    pub line: Option<usize>,
+    pub origin: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct NativeHookSuggestion {
+    pub hook: String,
+    pub function: String,
     pub source_file: Option<PathBuf>,
     pub line: Option<usize>,
     pub origin: String,
@@ -793,6 +814,23 @@ pub fn import_plan_toml(options: &ZshImportOptions, report: &ZshImportReport) ->
             toml_array(&runtime_completion_commands_for_import_plan(report))
         ));
         out.push("timeout_millis = 1000".to_string());
+    }
+
+    if !report.native_hooks.is_empty() {
+        out.push(String::new());
+        out.push(format!(
+            "# zsh lifecycle hooks detected: {}",
+            report.native_hooks.len()
+        ));
+        out.push("# Review and translate these zsh functions before enabling native hooks.".to_string());
+        out.push("# winuxsh never sources zsh hook function bodies directly.".to_string());
+        out.push("# [hooks]".to_string());
+        for hook in ["precmd", "preexec", "chpwd"] {
+            let scripts = native_hook_todos_for_import_plan(report, hook);
+            if !scripts.is_empty() {
+                out.push(format!("# {} = {}", hook, toml_array(&scripts)));
+            }
+        }
     }
 
     out.join("\n")
@@ -1577,6 +1615,9 @@ fn scan_content(
         }
 
         scan_unsupported(line, source_file, line_no, report);
+        for hook in parse_native_hook_suggestions(line, source_file, line_no, mode) {
+            push_native_hook_suggestion(report, hook);
+        }
         if let Some((command, args, target_shell, kind)) = parse_dynamic_completion_source(line) {
             push_dynamic_completion_source(
                 report,
@@ -2024,7 +2065,7 @@ fn classify_plugin(
     let native_ux = is_native_ux_plugin(name)
         || unsupported_features
             .iter()
-            .any(|feature| matches!(feature.as_str(), "zle-buffer" | "zle-highlighting"));
+            .any(|feature| matches!(feature.as_str(), "zle-buffer" | "zle-highlighting" | "zsh-hook"));
 
     let mut capabilities = Vec::new();
     if has_aliases {
@@ -2828,6 +2869,21 @@ fn runtime_completion_commands_for_import_plan(report: &ZshImportReport) -> Vec<
     commands
 }
 
+fn native_hook_todos_for_import_plan(report: &ZshImportReport, hook: &str) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut scripts = Vec::new();
+    for suggestion in &report.native_hooks {
+        if suggestion.hook == hook && seen.insert(suggestion.function.clone()) {
+            scripts.push(format!(
+                "# TODO translate zsh hook function: {}",
+                suggestion.function
+            ));
+        }
+    }
+    scripts.sort();
+    scripts
+}
+
 fn dynamic_completion_script_generator_count(report: &ZshImportReport) -> usize {
     report
         .dynamic_completion_sources
@@ -3260,15 +3316,133 @@ fn scan_unsupported(
 }
 
 fn is_zsh_hook_function(line: &str) -> bool {
-    line.starts_with("precmd()")
-        || line.starts_with("preexec()")
-        || line.starts_with("chpwd()")
-        || line.starts_with("precmd ()")
-        || line.starts_with("preexec ()")
-        || line.starts_with("chpwd ()")
-        || line.starts_with("function precmd")
-        || line.starts_with("function preexec")
-        || line.starts_with("function chpwd")
+    zsh_hook_function_name(line).is_some()
+}
+
+fn parse_native_hook_suggestions(
+    line: &str,
+    source_file: Option<&Path>,
+    line_no: usize,
+    mode: ScanMode,
+) -> Vec<NativeHookSuggestion> {
+    let mut suggestions = Vec::new();
+
+    if let Some((hook, function)) = parse_add_zsh_hook(line) {
+        suggestions.push(native_hook_suggestion(
+            hook,
+            function,
+            source_file,
+            line_no,
+            mode,
+        ));
+    }
+
+    for (hook, function) in parse_hook_functions_array(line) {
+        suggestions.push(native_hook_suggestion(
+            hook,
+            function,
+            source_file,
+            line_no,
+            mode,
+        ));
+    }
+
+    if let Some(hook) = zsh_hook_function_name(line) {
+        suggestions.push(native_hook_suggestion(
+            hook.to_string(),
+            hook.to_string(),
+            source_file,
+            line_no,
+            mode,
+        ));
+    }
+
+    suggestions
+}
+
+fn native_hook_suggestion(
+    hook: String,
+    function: String,
+    source_file: Option<&Path>,
+    line_no: usize,
+    mode: ScanMode,
+) -> NativeHookSuggestion {
+    NativeHookSuggestion {
+        hook,
+        function,
+        source_file: source_file.map(Path::to_path_buf),
+        line: Some(line_no),
+        origin: scan_mode_origin(mode).to_string(),
+    }
+}
+
+fn parse_add_zsh_hook(line: &str) -> Option<(String, String)> {
+    let rest = line.strip_prefix("add-zsh-hook ")?;
+    let words = split_shell_words(rest);
+    let mut positional = words.iter().filter(|word| !word.starts_with('-'));
+    let hook = positional.next()?.to_string();
+    let function = positional.next()?.to_string();
+    if is_zsh_hook_name(&hook) && is_safe_hook_function_name(&function) {
+        Some((hook, function))
+    } else {
+        None
+    }
+}
+
+fn parse_hook_functions_array(line: &str) -> Vec<(String, String)> {
+    let Some((array_name, value)) = line.split_once('=') else {
+        return Vec::new();
+    };
+    let array_name = array_name.trim().strip_suffix('+').unwrap_or(array_name.trim());
+    let (hook, array_name) = match array_name {
+        "precmd_functions" => ("precmd", "precmd_functions"),
+        "preexec_functions" => ("preexec", "preexec_functions"),
+        "chpwd_functions" => ("chpwd", "chpwd_functions"),
+        _ => return Vec::new(),
+    };
+    if !line.trim_start().starts_with(array_name) {
+        return Vec::new();
+    }
+    let value = value.trim();
+    let Some(inner) = value.strip_prefix('(').and_then(|value| value.strip_suffix(')')) else {
+        return Vec::new();
+    };
+    split_shell_words(inner)
+        .into_iter()
+        .filter(|function| is_safe_hook_function_name(function))
+        .map(|function| (hook.to_string(), function))
+        .collect()
+}
+
+fn zsh_hook_function_name(line: &str) -> Option<&'static str> {
+    for hook in ["precmd", "preexec", "chpwd"] {
+        if line.starts_with(&format!("{hook}()"))
+            || line.starts_with(&format!("{hook} ()"))
+            || line.starts_with(&format!("function {hook}"))
+        {
+            return Some(hook);
+        }
+    }
+    None
+}
+
+fn is_zsh_hook_name(value: &str) -> bool {
+    matches!(value, "precmd" | "preexec" | "chpwd")
+}
+
+fn is_safe_hook_function_name(value: &str) -> bool {
+    is_safe_name(value) && !value.starts_with('-') && !value.contains('/')
+}
+
+fn push_native_hook_suggestion(report: &mut ZshImportReport, suggestion: NativeHookSuggestion) {
+    if report.native_hooks.iter().any(|existing| {
+        existing.hook == suggestion.hook
+            && existing.function == suggestion.function
+            && existing.origin == suggestion.origin
+    }) {
+        return;
+    }
+    report.native_hooks.push(suggestion);
 }
 
 fn push_dynamic_completion_source(report: &mut ZshImportReport, source: DynamicCompletionSource) {
