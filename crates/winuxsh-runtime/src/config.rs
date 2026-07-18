@@ -341,8 +341,7 @@ impl Default for FullConfig {
 /// Load config from `~/.winshrc.toml`. Returns defaults if the file
 /// does not exist or cannot be parsed (logs warning).
 pub fn load() -> FullConfig {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let config_path = home.join(".winshrc.toml");
+    let config_path = default_config_path();
 
     let content = match std::fs::read_to_string(&config_path) {
         Ok(c) => c,
@@ -358,6 +357,11 @@ pub fn load() -> FullConfig {
     };
 
     build_config(parsed)
+}
+
+pub fn default_config_path() -> PathBuf {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    home.join(".winshrc.toml")
 }
 
 fn build_config(parsed: WinshrcToml) -> FullConfig {

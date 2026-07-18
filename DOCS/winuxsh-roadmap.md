@@ -92,6 +92,7 @@ status: active
 - [ ] 主题市场
 - [ ] 插件管理 CLI
 - [x] Phase 7a import-plan CLI: `--zsh-compat-import-plan` 输出可审阅 `.winshrc.toml` patch，不自动写用户配置
+- [x] Phase 7b import-apply CLI: `--zsh-compat-import-apply` 显式写入 `.winshrc.toml`，写前备份，仅替换 winuxsh 管理块
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证

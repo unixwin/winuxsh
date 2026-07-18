@@ -5,10 +5,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use winuxsh_runtime::config::ZshCompatLevel;
 use winuxsh_runtime::zsh_compat::{
-    apply_safe_aliases, apply_safe_env, completion_defs_from_report, safe_path_value,
-    CompletionAsset, DiagnosticSeverity, ImportedAlias, ImportedEnv, ZshImportOptions,
-    PluginImportKind, PluginImportTier, ZshImportReport, git_prompt_format_from_report, import_plan_toml, scan,
-    translate_zsh_prompt,
+    apply_import_plan_to_config_with_backup_suffix, apply_safe_aliases, apply_safe_env,
+    completion_defs_from_report, git_prompt_format_from_report, import_plan_toml,
+    safe_path_value, scan, translate_zsh_prompt, CompletionAsset, DiagnosticSeverity,
+    ImportedAlias, ImportedEnv, PluginImportKind, PluginImportTier, ZshImportOptions,
+    ZshImportReport, ZSH_IMPORT_BLOCK_END, ZSH_IMPORT_BLOCK_START,
 };
 
 #[test]
@@ -349,6 +350,88 @@ RPROMPT='%m'
 
     let _ = std::fs::remove_dir_all(temp);
 }
+
+#[test]
+fn applies_import_plan_to_new_config_file() {
+    let temp = unique_temp_dir("winuxsh-zsh-import-apply-new");
+    std::fs::create_dir_all(&temp).unwrap();
+    let config_path = temp.join(".winshrc.toml");
+    let plan = r#"
+[zsh]
+enabled = true
+auto_apply = true
+"#;
+
+    let summary =
+        apply_import_plan_to_config_with_backup_suffix(&config_path, plan, "test-new").unwrap();
+    let written = std::fs::read_to_string(&config_path).unwrap();
+
+    assert!(!summary.replaced_existing_block);
+    assert!(summary.backup_path.is_none());
+    assert!(written.contains(ZSH_IMPORT_BLOCK_START));
+    assert!(written.contains(ZSH_IMPORT_BLOCK_END));
+    assert!(written.contains("auto_apply = true"));
+    toml::from_str::<toml::Value>(&written).unwrap();
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn replaces_existing_import_plan_block_and_creates_backup() {
+    let temp = unique_temp_dir("winuxsh-zsh-import-apply-replace");
+    std::fs::create_dir_all(&temp).unwrap();
+    let config_path = temp.join(".winshrc.toml");
+    let original = format!(
+        "theme = \"default\"\n\n{}\n[zsh]\nenabled = false\n{}\n",
+        ZSH_IMPORT_BLOCK_START, ZSH_IMPORT_BLOCK_END
+    );
+    std::fs::write(&config_path, &original).unwrap();
+
+    let plan = r#"
+[zsh]
+enabled = true
+auto_apply = true
+"#;
+    let summary =
+        apply_import_plan_to_config_with_backup_suffix(&config_path, plan, "test-replace")
+            .unwrap();
+    let written = std::fs::read_to_string(&config_path).unwrap();
+    let backup_path = summary.backup_path.unwrap();
+
+    assert!(summary.replaced_existing_block);
+    assert_eq!(std::fs::read_to_string(&backup_path).unwrap(), original);
+    assert!(written.contains("theme = \"default\""));
+    assert!(written.contains("enabled = true"));
+    assert!(!written.contains("enabled = false"));
+    toml::from_str::<toml::Value>(&written).unwrap();
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn refuses_import_apply_when_generated_block_would_duplicate_tables() {
+    let temp = unique_temp_dir("winuxsh-zsh-import-apply-duplicate");
+    std::fs::create_dir_all(&temp).unwrap();
+    let config_path = temp.join(".winshrc.toml");
+    let original = "[zsh]\nenabled = false\n";
+    std::fs::write(&config_path, original).unwrap();
+
+    let err = apply_import_plan_to_config_with_backup_suffix(
+        &config_path,
+        "[zsh]\nenabled = true\n",
+        "test-duplicate",
+    )
+    .unwrap_err();
+
+    assert!(err.to_string().contains("generated zsh import block"));
+    assert_eq!(std::fs::read_to_string(&config_path).unwrap(), original);
+    assert!(!config_path
+        .with_file_name(".winshrc.toml.test-duplicate.bak")
+        .exists());
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
 #[test]
 fn safe_path_value_prepends_imported_entries_and_dedupes() {
     let _lock = env_lock().lock().unwrap();

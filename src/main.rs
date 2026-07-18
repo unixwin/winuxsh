@@ -9,6 +9,7 @@
 //!   winuxsh --zsh-compat-report      → scan zsh config and print report
 //!   winuxsh --zsh-compat-report-json → scan zsh config and print JSON report
 //!   winuxsh --zsh-compat-import-plan → print a reviewable .winshrc.toml patch
+//!   winuxsh --zsh-compat-import-apply → write the import patch with a backup
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -59,6 +60,10 @@ fn run(args: &[String]) -> anyhow::Result<()> {
             print_zsh_compat_import_plan()?;
             Ok(())
         }
+        "--zsh-compat-import-apply" => {
+            apply_zsh_compat_import_plan()?;
+            Ok(())
+        }
         "-c" => {
             if args.len() < 3 {
                 anyhow::bail!("-c requires an argument");
@@ -101,6 +106,7 @@ fn print_usage() {
     println!("  winuxsh --zsh-compat-report      Scan zsh config and show a safe import report");
     println!("  winuxsh --zsh-compat-report-json Scan zsh config and show a JSON import report");
     println!("  winuxsh --zsh-compat-import-plan Print a reviewable .winshrc.toml import patch");
+    println!("  winuxsh --zsh-compat-import-apply Write that import patch with a backup");
 }
 
 fn print_zsh_compat_import_plan() -> anyhow::Result<()> {
@@ -111,6 +117,29 @@ fn print_zsh_compat_import_plan() -> anyhow::Result<()> {
         "{}",
         winuxsh_runtime::zsh_compat::import_plan_toml(&options, &report)
     );
+    Ok(())
+}
+
+fn apply_zsh_compat_import_plan() -> anyhow::Result<()> {
+    let config = winuxsh_runtime::config::load();
+    let options = winuxsh_runtime::zsh_compat::ZshImportOptions::for_report(&config.zsh);
+    let report = winuxsh_runtime::zsh_compat::scan(&options);
+    let plan = winuxsh_runtime::zsh_compat::import_plan_toml(&options, &report);
+    let config_path = winuxsh_runtime::config::default_config_path();
+    let summary = winuxsh_runtime::zsh_compat::apply_import_plan_to_config(&config_path, &plan)?;
+
+    println!(
+        "Wrote zsh compatibility import block to {}",
+        summary.config_path.display()
+    );
+    if summary.replaced_existing_block {
+        println!("Replaced the previous winuxsh-managed zsh import block");
+    } else {
+        println!("Added a new winuxsh-managed zsh import block");
+    }
+    if let Some(backup_path) = summary.backup_path {
+        println!("Backup: {}", backup_path.display());
+    }
     Ok(())
 }
 

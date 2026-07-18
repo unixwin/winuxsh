@@ -7,11 +7,16 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
+use anyhow::{anyhow, Context};
 use serde::Serialize;
 
 use crate::completion::external::{CommandDef, FlagDef, PathLiteral, ValuesSource};
 use crate::config::{EditorMode, ZshCompatLevel, ZshConfig};
+
+pub const ZSH_IMPORT_BLOCK_START: &str = "# >>> winuxsh zsh compat import >>>";
+pub const ZSH_IMPORT_BLOCK_END: &str = "# <<< winuxsh zsh compat import <<<";
 
 #[derive(Debug, Clone)]
 pub struct ZshImportOptions {
@@ -409,6 +414,75 @@ pub fn import_plan_toml(options: &ZshImportOptions, report: &ZshImportReport) ->
     }
 
     out.join("\n")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ZshImportApplySummary {
+    pub config_path: PathBuf,
+    pub backup_path: Option<PathBuf>,
+    pub replaced_existing_block: bool,
+}
+
+pub fn apply_import_plan_to_config(
+    config_path: &Path,
+    plan: &str,
+) -> anyhow::Result<ZshImportApplySummary> {
+    let suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
+        .to_string();
+    apply_import_plan_to_config_with_backup_suffix(config_path, plan, &suffix)
+}
+
+#[doc(hidden)]
+pub fn apply_import_plan_to_config_with_backup_suffix(
+    config_path: &Path,
+    plan: &str,
+    backup_suffix: &str,
+) -> anyhow::Result<ZshImportApplySummary> {
+    let original = match std::fs::read_to_string(config_path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => {
+            return Err(err)
+                .with_context(|| format!("failed to read {}", config_path.display()))
+        }
+    };
+
+    let block = managed_import_block(plan);
+    let (next, replaced_existing_block) = replace_managed_import_block(&original, &block)?;
+    toml::from_str::<toml::Value>(&next).with_context(|| {
+        "generated zsh import block would make ~/.winshrc.toml invalid; run \
+         --zsh-compat-import-plan and merge manually"
+    })?;
+
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    let backup_path = if config_path.exists() {
+        let backup_path = unique_backup_path_for(config_path, backup_suffix);
+        std::fs::copy(config_path, &backup_path).with_context(|| {
+            format!(
+                "failed to create config backup {}",
+                backup_path.display()
+            )
+        })?;
+        Some(backup_path)
+    } else {
+        None
+    };
+
+    std::fs::write(config_path, next)
+        .with_context(|| format!("failed to write {}", config_path.display()))?;
+
+    Ok(ZshImportApplySummary {
+        config_path: config_path.to_path_buf(),
+        backup_path,
+        replaced_existing_block,
+    })
 }
 
 pub fn apply_safe_env(report: &ZshImportReport) -> SafeApplySummary {
@@ -1658,6 +1732,64 @@ fn toml_quote(value: &str) -> String {
     }
     out.push('"');
     out
+}
+
+fn managed_import_block(plan: &str) -> String {
+    format!(
+        "{}\n{}\n{}\n",
+        ZSH_IMPORT_BLOCK_START,
+        plan.trim(),
+        ZSH_IMPORT_BLOCK_END
+    )
+}
+
+fn replace_managed_import_block(
+    original: &str,
+    block: &str,
+) -> anyhow::Result<(String, bool)> {
+    let Some(start) = original.find(ZSH_IMPORT_BLOCK_START) else {
+        let mut next = original.to_string();
+        if !next.trim().is_empty() {
+            if !next.ends_with('\n') {
+                next.push('\n');
+            }
+            next.push('\n');
+        }
+        next.push_str(block);
+        return Ok((next, false));
+    };
+
+    let after_start = start + ZSH_IMPORT_BLOCK_START.len();
+    let Some(end_relative) = original[after_start..].find(ZSH_IMPORT_BLOCK_END) else {
+        return Err(anyhow!(
+            "found zsh import block start marker without matching end marker in ~/.winshrc.toml"
+        ));
+    };
+    let end = after_start + end_relative + ZSH_IMPORT_BLOCK_END.len();
+
+    let mut next = String::new();
+    next.push_str(&original[..start]);
+    next.push_str(block);
+    next.push_str(&original[end..]);
+    Ok((next, true))
+}
+
+fn backup_path_for(config_path: &Path, suffix: &str) -> PathBuf {
+    let file_name = config_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(".winshrc.toml");
+    config_path.with_file_name(format!("{}.{}.bak", file_name, suffix))
+}
+
+fn unique_backup_path_for(config_path: &Path, suffix: &str) -> PathBuf {
+    let mut backup_path = backup_path_for(config_path, suffix);
+    let mut attempt = 1usize;
+    while backup_path.exists() {
+        backup_path = backup_path_for(config_path, &format!("{}-{}", suffix, attempt));
+        attempt += 1;
+    }
+    backup_path
 }
 
 fn record_assignment(
