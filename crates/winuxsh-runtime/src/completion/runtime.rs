@@ -62,7 +62,7 @@ impl RuntimeCompletionPlugin {
             .lines()
             .map(str::trim)
             .filter(|line| !line.is_empty())
-            .filter(|line| current_word.is_empty() || line.starts_with(&current_word))
+            .filter(|line| context.behavior.matches(line, &current_word))
             .filter(|line| seen.insert((*line).to_string()))
             .map(str::to_string)
             .collect();

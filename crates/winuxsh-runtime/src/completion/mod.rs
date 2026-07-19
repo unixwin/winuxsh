@@ -13,6 +13,47 @@ pub use completer::{WinuxshCompleter, CompletionState};
 
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompletionMatchMode {
+    Prefix,
+    Substring,
+}
+
+impl Default for CompletionMatchMode {
+    fn default() -> Self {
+        Self::Prefix
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CompletionBehavior {
+    pub case_sensitive: bool,
+    pub match_mode: CompletionMatchMode,
+    pub max_command_results: Option<usize>,
+}
+
+impl CompletionBehavior {
+    pub fn matches(&self, candidate: &str, query: &str) -> bool {
+        if query.is_empty() {
+            return true;
+        }
+
+        if self.case_sensitive {
+            return match self.match_mode {
+                CompletionMatchMode::Prefix => candidate.starts_with(query),
+                CompletionMatchMode::Substring => candidate.contains(query),
+            };
+        }
+
+        let candidate = candidate.to_ascii_lowercase();
+        let query = query.to_ascii_lowercase();
+        match self.match_mode {
+            CompletionMatchMode::Prefix => candidate.starts_with(&query),
+            CompletionMatchMode::Substring => candidate.contains(&query),
+        }
+    }
+}
+
 /// Completion context
 pub struct CompletionContext {
     /// Current working directory
@@ -21,6 +62,8 @@ pub struct CompletionContext {
     pub input: String,
     /// Cursor position in input
     pub cursor_pos: usize,
+    /// User-configurable matching behavior.
+    pub behavior: CompletionBehavior,
 }
 
 /// Shell word under the cursor, parsed only for completion purposes.
@@ -35,10 +78,25 @@ pub struct ShellWord {
 
 impl CompletionContext {
     pub fn new(current_dir: PathBuf, input: String, cursor_pos: usize) -> Self {
+        Self::with_behavior(
+            current_dir,
+            input,
+            cursor_pos,
+            CompletionBehavior::default(),
+        )
+    }
+
+    pub fn with_behavior(
+        current_dir: PathBuf,
+        input: String,
+        cursor_pos: usize,
+        behavior: CompletionBehavior,
+    ) -> Self {
         Self {
             current_dir,
             input,
             cursor_pos,
+            behavior,
         }
     }
 
@@ -221,6 +279,27 @@ mod tests {
             10,
         );
         assert_eq!(ctx.get_current_word(), Some("hello".to_string()));
+    }
+
+    #[test]
+    fn completion_behavior_matches_prefix_and_substring_modes() {
+        let default_behavior = CompletionBehavior::default();
+        assert!(default_behavior.matches("grep", "gre"));
+        assert!(default_behavior.matches("grep", "GRE"));
+        assert!(!default_behavior.matches("grep", "ep"));
+
+        let substring = CompletionBehavior {
+            match_mode: CompletionMatchMode::Substring,
+            ..CompletionBehavior::default()
+        };
+        assert!(substring.matches("grep", "ep"));
+
+        let case_sensitive = CompletionBehavior {
+            case_sensitive: true,
+            ..CompletionBehavior::default()
+        };
+        assert!(case_sensitive.matches("grep", "gre"));
+        assert!(!case_sensitive.matches("grep", "GRE"));
     }
 
     #[test]

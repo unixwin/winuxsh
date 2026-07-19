@@ -128,6 +128,7 @@ status: active
 - [x] Windows cwd authority regression: 启动时以真实 process cwd 初始化 rubash `PWD`，且 `cd target; native-child` 同一交互行中同步 process cwd，避免 prompt/ls 与 `PWD` 分裂
 - [x] Phase 22 prompt indicator polish: `[shell]` 支持 emacs/vi/default/multiline/history-search prompt indicators，补齐 zsh-like 模式提示入口
 - [x] Phase 23 history config polish: `[history]` 支持 history path、max size、ignore-space-prefixed，保持默认 `~/.winuxsh_history`
+- [x] Phase 24 completion UX config: `[completions]` 支持 case sensitivity、prefix/substring matching、max command results
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证
@@ -140,6 +141,7 @@ status: active
 - [x] REPL cwd sequence tests: 覆盖 `execute_line("cd target; cwdprobe")` 中 Windows `.cmd` 子进程 cwd 与 `PWD` 一致
 - [x] Phase 22 prompt indicator tests: 覆盖 emacs/vi insert/normal、多行提示、Ctrl+R history search passing/failing 模板
 - [x] Phase 23 history config tests: 覆盖默认 history、`~` 路径展开、max size、ignore-space-prefixed reedline 接入
+- [x] Phase 24 completion UX tests: 覆盖默认 prefix、substring、case-sensitive path、command result cap
 - [ ] 作业控制/内建命令语义优先走 rubash，不在 winuxsh 重复实现
 
 ## 关键架构决策 (锁定)

@@ -5,7 +5,9 @@ use std::path::PathBuf;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use reedline::{Completer, Span, Suggestion};
-use crate::completion::{CompletionContext, CompletionPlugin, CompletionResult};
+use crate::completion::{
+    CompletionBehavior, CompletionContext, CompletionPlugin, CompletionResult,
+};
 use crate::completion::path::PathCompleter;
 use crate::completion::variables::VariableCompleter;
 use crate::completion::external::{
@@ -16,6 +18,7 @@ use crate::completion::external::{
 pub struct CompletionState {
     pub current_dir: PathBuf,
     pub env_vars: HashMap<String, String>,
+    pub behavior: CompletionBehavior,
     /// Registered completion plugins (e.g. command completion, external tool completion)
     pub plugins: Vec<Arc<dyn CompletionPlugin>>,
 }
@@ -25,6 +28,7 @@ impl CompletionState {
         Self {
             current_dir,
             env_vars: HashMap::new(),
+            behavior: CompletionBehavior::default(),
             plugins: Vec::new(),
         }
     }
@@ -88,13 +92,23 @@ impl WinuxshCompleter {
 
     /// Complete input
     fn complete_input(&mut self, input: &str, cursor_pos: usize) -> Vec<Suggestion> {
-        let (current_dir, env_vars, plugins) = if let Ok(state) = self.state.lock() {
-            (state.current_dir.clone(), state.env_vars.clone(), state.plugins.clone())
+        let (current_dir, env_vars, behavior, plugins) = if let Ok(state) = self.state.lock() {
+            (
+                state.current_dir.clone(),
+                state.env_vars.clone(),
+                state.behavior,
+                state.plugins.clone(),
+            )
         } else {
             return Vec::new();
         };
 
-        let context = CompletionContext::new(current_dir, input.to_string(), cursor_pos);
+        let context = CompletionContext::with_behavior(
+            current_dir,
+            input.to_string(),
+            cursor_pos,
+            behavior,
+        );
         let mut all_suggestions = Vec::new();
 
         // Try each plugin in order; only the first non-None result is used

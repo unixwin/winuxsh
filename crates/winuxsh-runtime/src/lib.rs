@@ -29,6 +29,7 @@ pub use config::{
     ZshCompatLevel, ZshConfig,
 };
 pub use theme::Theme;
-pub use completion::WinuxshCompleter;
-pub use completion::CompletionState;
+pub use completion::{
+    CompletionBehavior, CompletionMatchMode, CompletionState, WinuxshCompleter,
+};
 pub use prompt::PromptIndicators;

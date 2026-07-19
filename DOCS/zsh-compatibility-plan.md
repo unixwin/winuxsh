@@ -1262,6 +1262,62 @@ Rules:
 - do not introduce SQLite/history isolation in this phase.
 - keep non-interactive `-c` and script execution unaffected.
 
+## Phase 24 - Completion UX Config
+
+Implementation status: completed on `master`.
+
+This phase adds a small native completion behavior surface inspired by zsh
+matcher ergonomics and modern shell config. It should not implement zsh
+`matcher-list` wholesale yet; it should expose the most useful controls needed
+for daily Windows-native tab completion.
+
+Target config:
+
+```toml
+[completions]
+case_sensitive = false
+matching = "prefix" # prefix | substring
+max_command_results = 500
+```
+
+Coverage target:
+
+- omitted fields preserve the current behavior: case-insensitive prefix
+  matching with no command-result cap.
+- `matching = "substring"` lets command/path/value completion match candidates
+  that contain the typed word, not only candidates that start with it.
+- `case_sensitive = true` makes matching respect the typed case.
+- `max_command_results` caps command-position candidates so blank Tab stays
+  responsive on large Windows PATHs.
+
+Rules:
+
+- keep command execution and rubash semantics unchanged.
+- do not implement fuzzy matching or zsh matcher-list in this phase.
+
+Implemented:
+
+- `[completions].case_sensitive` controls command/path/flag/value matching case.
+- `[completions].matching` supports `prefix` and `substring`, with unknown values
+  falling back to `prefix`.
+- `[completions].max_command_results` caps command-position suggestions without
+  changing path or argument completion.
+- `WINUXSH_CONFIG` can point tests or advanced wrappers at an explicit config
+  file; the default remains `~/.winshrc.toml`.
+
+Verification:
+
+- `cargo fmt --check`
+- `cargo test --lib -p winuxsh-runtime --locked`
+- `cargo test -p winuxsh-runtime --test completion --locked`
+- `cargo test --test completion_probe --locked`
+- `cargo test -p winuxsh-runtime --test zsh_compat --locked`
+- `cargo test --test host_contract --locked`
+- `cargo build --locked`
+- `cargo test --test compat --locked -- --ignored`
+- keep user TOML completion definitions and zsh-imported definitions on the
+  existing priority path.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh

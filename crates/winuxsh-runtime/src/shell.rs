@@ -148,9 +148,11 @@ impl Shell {
         let last_working_dir_cache_path = default_last_working_dir_cache_path(&home_dir);
 
         // 8. Completion state.
-        let completion_state = Arc::new(Mutex::new(CompletionState::new(
+        let mut initial_completion_state = CompletionState::new(
             std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-        )));
+        );
+        initial_completion_state.behavior = config.completion_behavior;
+        let completion_state = Arc::new(Mutex::new(initial_completion_state));
         let mut zsh_completion_defs = zsh_report
             .as_ref()
             .map(completion_defs_from_report)

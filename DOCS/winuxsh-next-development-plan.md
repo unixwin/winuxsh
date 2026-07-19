@@ -114,7 +114,7 @@ Verification:
   - right prompt
   - vi/emacs prompt indicators
   - configurable multiline indicator
-- Add completion UX config:
+- `[completions]` UX config is implemented:
   - case sensitivity
   - prefix vs substring matching
   - max external command results

@@ -42,6 +42,36 @@ fn partial_command_word_suggests_command() {
 }
 
 #[test]
+fn substring_completion_config_suggests_middle_command_match() {
+    let env = ProbeEnv::new("winuxsh-completion-substring");
+    env.write_config(
+        r#"
+[completions]
+matching = "substring"
+"#,
+    );
+
+    let suggestions = run_probe("ep", &env, &[]);
+
+    assert_contains(&suggestions, "grep");
+}
+
+#[test]
+fn command_completion_result_cap_limits_blank_tab() {
+    let env = ProbeEnv::new("winuxsh-completion-result-cap");
+    env.write_config(
+        r#"
+[completions]
+max_command_results = 1
+"#,
+    );
+
+    let suggestions = run_probe("", &env, &[]);
+
+    assert_eq!(suggestions.len(), 1, "got {suggestions:?}");
+}
+
+#[test]
 fn path_command_is_suggested_by_prefix() {
     if !cfg!(windows) {
         return;
@@ -132,6 +162,24 @@ fn path_completion_escapes_spaces_in_candidates() {
 }
 
 #[test]
+fn case_sensitive_completion_config_respects_path_case() {
+    let env = ProbeEnv::new("winuxsh-completion-case-sensitive");
+    env.write_config(
+        r#"
+[completions]
+case_sensitive = true
+"#,
+    );
+    std::fs::write(env.start.join("Alpha.txt"), "alpha").unwrap();
+
+    let lower = run_probe("ls a", &env, &[]);
+    assert_not_contains(&lower, "Alpha.txt");
+
+    let upper = run_probe("ls A", &env, &[]);
+    assert_contains(&upper, "Alpha.txt");
+}
+
+#[test]
 fn path_completion_matches_escaped_spaces_in_input() {
     let env = ProbeEnv::new("winuxsh-completion-escaped-input");
     let parent = env.start.join("parent dir");
@@ -195,6 +243,7 @@ fn run_winuxsh_probe(line: &str, cwd: &Path, home: &Path, extra_env: &[(&str, St
         .current_dir(cwd)
         .env("HOME", home)
         .env("USERPROFILE", home)
+        .env("WINUXSH_CONFIG", home.join(".winshrc.toml"))
         .env("ZDOTDIR", home);
 
     for (key, value) in extra_env {
@@ -278,6 +327,10 @@ impl ProbeEnv {
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(&start).unwrap();
         Self { root, home, start }
+    }
+
+    fn write_config(&self, content: &str) {
+        std::fs::write(self.home.join(".winshrc.toml"), content).unwrap();
     }
 }
 

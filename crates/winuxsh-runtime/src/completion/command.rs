@@ -103,11 +103,13 @@ impl CommandCompleter {
         // Get all available commands
         let all_commands = Self::get_all_commands();
 
-        // Filter commands that start with the word
-        let matches: Vec<String> = all_commands
+        let mut matches: Vec<String> = all_commands
             .into_iter()
-            .filter(|cmd| cmd.to_lowercase().starts_with(&word.to_lowercase()))
+            .filter(|cmd| context.behavior.matches(cmd, &word))
             .collect();
+        if let Some(limit) = context.behavior.max_command_results {
+            matches.truncate(limit);
+        }
 
         if matches.is_empty() {
             Ok(None)
@@ -143,6 +145,52 @@ mod tests {
         if let Some(any_path_cmd) = CommandCompleter::get_path_commands().first() {
             assert!(CommandCompleter::command_exists(any_path_cmd));
         }
+    }
+
+    #[test]
+    fn command_completion_uses_substring_matching_when_configured() {
+        let ctx = CompletionContext::with_behavior(
+            std::path::PathBuf::from("."),
+            "ep".to_string(),
+            2,
+            crate::completion::CompletionBehavior {
+                match_mode: crate::completion::CompletionMatchMode::Substring,
+                ..crate::completion::CompletionBehavior::default()
+            },
+        );
+        let result = CommandCompleter::complete(&ctx).unwrap().unwrap();
+        assert!(result.completions.contains(&"grep".to_string()));
+    }
+
+    #[test]
+    fn command_completion_respects_case_sensitivity_and_result_cap() {
+        let ctx = CompletionContext::with_behavior(
+            std::path::PathBuf::from("."),
+            "GRE".to_string(),
+            3,
+            crate::completion::CompletionBehavior {
+                case_sensitive: true,
+                max_command_results: Some(1),
+                ..crate::completion::CompletionBehavior::default()
+            },
+        );
+        let completions = CommandCompleter::complete(&ctx)
+            .unwrap()
+            .map(|result| result.completions)
+            .unwrap_or_default();
+        assert!(!completions.contains(&"grep".to_string()));
+
+        let limited = CompletionContext::with_behavior(
+            std::path::PathBuf::from("."),
+            "".to_string(),
+            0,
+            crate::completion::CompletionBehavior {
+                max_command_results: Some(1),
+                ..crate::completion::CompletionBehavior::default()
+            },
+        );
+        let result = CommandCompleter::complete(&limited).unwrap().unwrap();
+        assert_eq!(result.completions.len(), 1);
     }
 }
 

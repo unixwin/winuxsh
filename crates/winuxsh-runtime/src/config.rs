@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
+use crate::completion::{CompletionBehavior, CompletionMatchMode};
 use crate::prompt::PromptIndicators;
 
 /// Shell configuration, loaded from `~/.winshrc.toml`.
@@ -399,6 +400,9 @@ struct HistoryToml {
 #[derive(Debug, Deserialize)]
 struct CompletionsToml {
     completion_dirs: Option<Vec<String>>,
+    case_sensitive: Option<bool>,
+    matching: Option<String>,
+    max_command_results: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -483,6 +487,7 @@ pub struct FullConfig {
     pub theme_name: String,
     pub aliases: HashMap<String, String>,
     pub completion_dirs: Vec<PathBuf>,
+    pub completion_behavior: CompletionBehavior,
     pub winuxcmd_path: Option<PathBuf>,
     pub hooks: HookConfig,
     pub zsh: ZshConfig,
@@ -497,6 +502,7 @@ impl Default for FullConfig {
             theme_name: "default".to_string(),
             aliases: HashMap::new(),
             completion_dirs: Vec::new(),
+            completion_behavior: CompletionBehavior::default(),
             winuxcmd_path: None,
             hooks: HookConfig::default(),
             zsh: ZshConfig::default(),
@@ -526,6 +532,12 @@ pub fn load() -> FullConfig {
 }
 
 pub fn default_config_path() -> PathBuf {
+    if let Ok(path) = std::env::var("WINUXSH_CONFIG") {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     home.join(".winshrc.toml")
 }
@@ -533,6 +545,7 @@ pub fn default_config_path() -> PathBuf {
 fn build_config(parsed: WinshrcToml) -> FullConfig {
     let zsh = parsed.zsh.map(build_zsh_config).unwrap_or_default();
     let shell = parsed.shell;
+    let completions = parsed.completions;
     let shell_config = ShellConfig {
         prompt_format: shell.as_ref().and_then(|s| s.prompt_format.clone()),
         right_prompt_format: shell.as_ref().and_then(|s| s.right_prompt_format.clone()),
@@ -557,16 +570,49 @@ fn build_config(parsed: WinshrcToml) -> FullConfig {
             .and_then(|t| t.current_theme)
             .unwrap_or_else(|| "default".to_string()),
         aliases: parsed.aliases.unwrap_or_default(),
-        completion_dirs: parsed
-            .completions
-            .and_then(|c| c.completion_dirs)
+        completion_dirs: completions
+            .as_ref()
+            .and_then(|c| c.completion_dirs.clone())
             .unwrap_or_default()
             .into_iter()
             .map(PathBuf::from)
             .collect(),
+        completion_behavior: completions
+            .as_ref()
+            .map(build_completion_behavior)
+            .unwrap_or_default(),
         winuxcmd_path: parsed.winuxcmd.and_then(|w| w.path).map(PathBuf::from),
         hooks: parsed.hooks.map(build_hook_config).unwrap_or_default(),
         zsh,
+    }
+}
+
+fn build_completion_behavior(parsed: &CompletionsToml) -> CompletionBehavior {
+    let defaults = CompletionBehavior::default();
+    CompletionBehavior {
+        case_sensitive: parsed.case_sensitive.unwrap_or(defaults.case_sensitive),
+        match_mode: parsed
+            .matching
+            .as_deref()
+            .map(completion_match_mode_from_config)
+            .unwrap_or(defaults.match_mode),
+        max_command_results: parsed
+            .max_command_results
+            .filter(|max_results| *max_results > 0),
+    }
+}
+
+fn completion_match_mode_from_config(value: &str) -> CompletionMatchMode {
+    match value.to_ascii_lowercase().as_str() {
+        "prefix" => CompletionMatchMode::Prefix,
+        "substring" => CompletionMatchMode::Substring,
+        other => {
+            log::warn!(
+                "Unknown completions matching '{}', falling back to prefix",
+                other
+            );
+            CompletionMatchMode::Prefix
+        }
     }
 }
 
@@ -789,6 +835,53 @@ max_size = 0
 "#,
         );
         assert_eq!(config.history.max_size, HistoryConfig::default().max_size);
+    }
+
+    #[test]
+    fn defaults_completion_behavior() {
+        let config = parse_config("");
+        assert_eq!(config.completion_behavior, CompletionBehavior::default());
+    }
+
+    #[test]
+    fn parses_completion_behavior_config() {
+        let config = parse_config(
+            r#"
+[completions]
+completion_dirs = ["C:/Users/me/completions"]
+case_sensitive = true
+matching = "substring"
+max_command_results = 25
+"#,
+        );
+
+        assert_eq!(
+            config.completion_dirs,
+            vec![PathBuf::from("C:/Users/me/completions")]
+        );
+        assert!(config.completion_behavior.case_sensitive);
+        assert_eq!(
+            config.completion_behavior.match_mode,
+            CompletionMatchMode::Substring
+        );
+        assert_eq!(config.completion_behavior.max_command_results, Some(25));
+    }
+
+    #[test]
+    fn unknown_completion_matching_falls_back_to_prefix() {
+        let config = parse_config(
+            r#"
+[completions]
+matching = "fuzzy"
+max_command_results = 0
+"#,
+        );
+
+        assert_eq!(
+            config.completion_behavior.match_mode,
+            CompletionMatchMode::Prefix
+        );
+        assert_eq!(config.completion_behavior.max_command_results, None);
     }
 
     #[test]

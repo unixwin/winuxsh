@@ -663,13 +663,13 @@ impl ExternalCompletionPlugin {
 
         for flag in flags {
             if let Some(short) = &flag.short {
-                if short.starts_with(word) {
+                if context.behavior.matches(short, word) {
                     completions.push(short.clone());
                     descriptions.push(flag.description.clone());
                 }
             }
             if let Some(long) = &flag.long {
-                if long.starts_with(word) {
+                if context.behavior.matches(long, word) {
                     completions.push(long.clone());
                     descriptions.push(flag.description.clone());
                 }
@@ -694,7 +694,7 @@ impl ExternalCompletionPlugin {
                 let word = context.get_current_word().unwrap_or_default();
                 let matches: Vec<String> = values
                     .iter()
-                    .filter(|v| v.starts_with(&word))
+                    .filter(|v| context.behavior.matches(v, &word))
                     .cloned()
                     .collect();
                 if matches.is_empty() { None } else { Some(CompletionResult::new(matches)) }
@@ -850,12 +850,12 @@ impl ExternalCompletionPlugin {
         self.filter_values(&values, context)
     }
 
-    /// Filter a value list by the current word prefix.
+    /// Filter a value list by the current word and configured match behavior.
     fn filter_values(&self, values: &[String], context: &CompletionContext) -> Option<CompletionResult> {
         let word = context.get_current_word().unwrap_or_default();
         let matches: Vec<String> = values
             .iter()
-            .filter(|v| v.starts_with(&word))
+            .filter(|v| context.behavior.matches(v, &word))
             .cloned()
             .collect();
         if matches.is_empty() { None } else { Some(CompletionResult::new(matches)) }

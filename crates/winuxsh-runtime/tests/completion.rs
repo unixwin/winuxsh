@@ -9,7 +9,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use winuxsh_runtime::completion::external::{CommandDef, FlagDef};
 use winuxsh_runtime::completion::runtime::{RuntimeCompletionCommand, RuntimeCompletionPlugin};
-use winuxsh_runtime::completion::{CompletionContext, CompletionState};
+use winuxsh_runtime::completion::{
+    CompletionBehavior, CompletionContext, CompletionMatchMode, CompletionState,
+};
 
 #[test]
 fn loads_toml_definitions_from_dir() {
@@ -85,6 +87,26 @@ fn command_completion_handles_empty_and_partial_command_words() {
 
     assert_suggests(&state, "", "ls");
     assert_suggests(&state, "gre", "grep");
+}
+
+#[test]
+fn substring_behavior_applies_to_builtin_flag_definitions() {
+    let state = Arc::new(Mutex::new(CompletionState::new(PathBuf::from("."))));
+    {
+        let mut s = state.lock().unwrap();
+        s.load_completion_dirs(&[]);
+    }
+
+    assert_not_suggests(&state, "grep -case", "--ignore-case");
+    assert_suggests_with_behavior(
+        &state,
+        "grep -case",
+        "--ignore-case",
+        CompletionBehavior {
+            match_mode: CompletionMatchMode::Substring,
+            ..CompletionBehavior::default()
+        },
+    );
 }
 
 #[test]
@@ -247,12 +269,30 @@ echo test
     assert_suggests(&state, "npm run b", "build");
     assert_suggests(&state, "npm run b", "bundle");
     assert_not_suggests(&state, "npm run b", "test");
+    assert_suggests_with_behavior(
+        &state,
+        "npm run und",
+        "bundle",
+        CompletionBehavior {
+            match_mode: CompletionMatchMode::Substring,
+            ..CompletionBehavior::default()
+        },
+    );
 
     let _ = std::fs::remove_dir_all(temp_dir);
 }
 
 fn suggestions_for(state: &Arc<Mutex<CompletionState>>, input: &str) -> Vec<String> {
-    let ctx = CompletionContext::new(PathBuf::from("."), input.to_string(), input.len());
+    suggestions_for_behavior(state, input, CompletionBehavior::default())
+}
+
+fn suggestions_for_behavior(
+    state: &Arc<Mutex<CompletionState>>,
+    input: &str,
+    behavior: CompletionBehavior,
+) -> Vec<String> {
+    let ctx =
+        CompletionContext::with_behavior(PathBuf::from("."), input.to_string(), input.len(), behavior);
     let s = state.lock().unwrap();
     s.plugins
         .iter()
@@ -274,6 +314,20 @@ fn assert_not_suggests(state: &Arc<Mutex<CompletionState>>, input: &str, unexpec
     assert!(
         !suggestions.iter().any(|s| s == unexpected),
         "did not expect {unexpected} for {input:?}, got: {:?}",
+        suggestions
+    );
+}
+
+fn assert_suggests_with_behavior(
+    state: &Arc<Mutex<CompletionState>>,
+    input: &str,
+    expected: &str,
+    behavior: CompletionBehavior,
+) {
+    let suggestions = suggestions_for_behavior(state, input, behavior);
+    assert!(
+        suggestions.iter().any(|s| s == expected),
+        "expected {expected} for {input:?}, got: {:?}",
         suggestions
     );
 }

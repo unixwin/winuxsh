@@ -121,7 +121,7 @@ Nushell's syntax, data pipeline model, plugin ABI, or command semantics.
 | Command discovery | PATH-aware external command discovery | Partial | Keep winuxcmd-first, improve executable suffix discovery carefully |
 | Coreutils | Built-in/internal command set | Provided by winuxcmd | Expand completion/help coverage, not FFI |
 | Completion providers | `_cmd`, `#compdef`, aliases, flags, values, paths | Partial | Import safe zsh completion assets into native TOML/provider model |
-| Completion matching | zstyle matcher-list, grouping, cache, case sensitivity | Prefix-oriented today | Translate useful `zstyle` subset after definitions are broad |
+| Completion matching | zstyle matcher-list, grouping, cache, case sensitivity | Configurable prefix/substring, case sensitivity, command cap | Keep this native surface small; defer fuzzy/zstyle matcher-list translation |
 | External completer bridge | Carapace-like external completion command | Not started | v2.3/v3 candidate, secondary to zsh asset import |
 | History | path, size, sync, ignore-space, SQLite/isolation | Configurable plaintext file | Keep `[history]` small; defer sync/isolation until usage proves it |
 | Edit mode | `bindkey -e/-v`, mode indicators, cursor shape | Emacs/Vi done | Import simple bindkey mode and add prompt/cursor polish |

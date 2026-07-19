@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::completion::{CompletionContext, CompletionResult};
+use crate::completion::{CompletionBehavior, CompletionContext, CompletionResult};
 use anyhow::Result;
 
 /// Path completer
@@ -32,7 +32,7 @@ impl PathCompleter {
             return Ok(None);
         }
 
-        Self::complete_directory(&base_dir, &query, directories_only)
+        Self::complete_directory(&base_dir, &query, directories_only, context.behavior)
     }
 
     /// Complete entries in a directory
@@ -40,6 +40,7 @@ impl PathCompleter {
         base_dir: &Path,
         query: &PathQuery,
         directories_only: bool,
+        behavior: CompletionBehavior,
     ) -> Result<Option<CompletionResult>> {
         let entries = match fs::read_dir(base_dir) {
             Ok(entries) => entries,
@@ -51,11 +52,7 @@ impl PathCompleter {
         for entry in entries.flatten() {
             let file_name = entry.file_name().to_string_lossy().to_string();
 
-            // Check if matches prefix (case-insensitive)
-            if file_name
-                .to_lowercase()
-                .starts_with(&query.prefix.to_lowercase())
-            {
+            if behavior.matches(&file_name, &query.prefix) {
                 let file_type = match entry.file_type() {
                     Ok(ft) => ft,
                     Err(_) => continue,
