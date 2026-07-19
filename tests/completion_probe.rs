@@ -71,11 +71,24 @@ fn blank_argument_position_suggests_paths() {
     let env = ProbeEnv::new("winuxsh-completion-path-argument");
     std::fs::create_dir_all(env.start.join("adir")).unwrap();
     std::fs::write(env.start.join("alpha.txt"), "alpha").unwrap();
+    std::fs::write(env.start.join(".hidden"), "hidden").unwrap();
 
     let suggestions = run_probe("ls ", &env, &[]);
 
     assert_contains(&suggestions, "adir/");
     assert_contains(&suggestions, "alpha.txt");
+    assert_not_contains(&suggestions, ".hidden");
+    assert_before(&suggestions, "adir/", "alpha.txt");
+}
+
+#[test]
+fn dot_prefix_suggests_hidden_paths() {
+    let env = ProbeEnv::new("winuxsh-completion-hidden-prefix");
+    std::fs::write(env.start.join(".hidden"), "hidden").unwrap();
+
+    let suggestions = run_probe("ls .", &env, &[]);
+
+    assert_contains(&suggestions, ".hidden");
 }
 
 #[test]
@@ -88,6 +101,34 @@ fn cd_blank_argument_position_suggests_directories_only() {
 
     assert_contains(&suggestions, "adir/");
     assert_not_contains(&suggestions, "alpha.txt");
+}
+
+#[test]
+fn path_completion_preserves_typed_directory_prefix() {
+    let env = ProbeEnv::new("winuxsh-completion-prefix");
+    let parent = env.start.join("parent");
+    std::fs::create_dir_all(parent.join("adir")).unwrap();
+    std::fs::write(parent.join("child.txt"), "child").unwrap();
+
+    let directory_suggestions = run_probe("ls parent/", &env, &[]);
+    assert_contains(&directory_suggestions, "parent/adir/");
+    assert_contains(&directory_suggestions, "parent/child.txt");
+
+    let partial_suggestions = run_probe("ls parent/ch", &env, &[]);
+    assert_contains(&partial_suggestions, "parent/child.txt");
+}
+
+#[test]
+fn path_completion_escapes_spaces_in_candidates() {
+    let env = ProbeEnv::new("winuxsh-completion-spaces");
+    std::fs::create_dir_all(env.start.join("two dir")).unwrap();
+    std::fs::write(env.start.join("two words.txt"), "two").unwrap();
+
+    let suggestions = run_probe("ls tw", &env, &[]);
+
+    assert_contains(&suggestions, "two\\ dir/");
+    assert_contains(&suggestions, "two\\ words.txt");
+    assert_before(&suggestions, "two\\ dir/", "two\\ words.txt");
 }
 
 #[test]
@@ -176,6 +217,21 @@ fn assert_not_contains(values: &[String], unexpected: &str) {
     assert!(
         !values.iter().any(|value| value == unexpected),
         "did not expect {unexpected:?}, got {values:?}"
+    );
+}
+
+fn assert_before(values: &[String], earlier: &str, later: &str) {
+    let earlier_index = values
+        .iter()
+        .position(|value| value == earlier)
+        .unwrap_or_else(|| panic!("missing {earlier:?} in {values:?}"));
+    let later_index = values
+        .iter()
+        .position(|value| value == later)
+        .unwrap_or_else(|| panic!("missing {later:?} in {values:?}"));
+    assert!(
+        earlier_index < later_index,
+        "expected {earlier:?} before {later:?}, got {values:?}"
     );
 }
 

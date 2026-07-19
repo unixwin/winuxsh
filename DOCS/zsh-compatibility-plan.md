@@ -1148,6 +1148,31 @@ Rules:
 - keep path completion Windows-native and relative to the synchronized host cwd.
 - do not change rubash parsing or command execution.
 
+## Phase 20 - Path Completion Polish
+
+Implementation status: completed on `master`.
+
+This phase closes several path-completion gaps exposed by the non-interactive
+probe. The most important correctness fix is preserving the typed directory
+prefix: completing `src/ma` must produce `src/main.rs`, not `main.rs`.
+
+Coverage target:
+
+- `winuxsh --completion-probe "ls parent/"` keeps the `parent/` prefix in
+  returned candidates.
+- `winuxsh --completion-probe "ls parent/ch"` returns `parent/child.txt`.
+- paths containing spaces are shell-escaped, e.g. `two\ words.txt`.
+- hidden files are not shown for blank `ls `, but are shown when the typed
+  prefix starts with `.`.
+- directory candidates sort before file candidates.
+
+Rules:
+
+- keep candidates shell-visible and slash-style where the user typed slash
+  prefixes.
+- do not introduce PowerShell wildcard behavior.
+- do not change rubash parser/executor semantics.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh
