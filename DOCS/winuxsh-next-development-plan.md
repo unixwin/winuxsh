@@ -173,6 +173,8 @@ Verification:
 
 - Provide a Windows Terminal profile recommendation.
 - Provide a minimal default `.winshrc.toml` optimized for users and agents.
+- Add a native zsh plugin pack manifest and zsh-lite profile planner:
+  `DOCS/winuxsh-native-zsh-plugin-pack-plan.md`.
 - Keep config backward compatible.
 - Add Oh My Zsh layout import before designing any online Oh-My-Winuxsh registry:
   - completion assets
