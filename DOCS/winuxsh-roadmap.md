@@ -130,6 +130,7 @@ status: active
 - [x] Phase 23 history config polish: `[history]` 支持 history path、max size、ignore-space-prefixed，保持默认 `~/.winuxsh_history`
 - [x] Phase 24 completion UX config: `[completions]` 支持 case sensitivity、prefix/substring matching、max command results
 - [x] Phase 25 menu UX config: `[menus]` 支持 completion/history page size 与 max entry lines
+- [x] Phase 26 standard ZLE bindkey subset: 常见 `bindkey KEY zle-widget` 映射到 reedline 原生事件
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证
@@ -144,6 +145,7 @@ status: active
 - [x] Phase 23 history config tests: 覆盖默认 history、`~` 路径展开、max size、ignore-space-prefixed reedline 接入
 - [x] Phase 24 completion UX tests: 覆盖默认 prefix、substring、case-sensitive path、command result cap
 - [x] Phase 25 menu UX tests: 覆盖默认菜单配置、TOML 解析、zero fallback、reedline menu builder 接入
+- [x] Phase 26 standard ZLE bindkey tests: 覆盖标准 widget 映射、import-plan 启用入口、unsupported diagnostics 降噪
 - [ ] 作业控制/内建命令语义优先走 rubash，不在 winuxsh 重复实现
 
 ## 关键架构决策 (锁定)

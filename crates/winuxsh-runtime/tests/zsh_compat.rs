@@ -1526,6 +1526,50 @@ bindkey '^[[B' history-substring-search-down
 }
 
 #[test]
+fn imports_standard_zle_bindkeys_as_native_widgets() {
+    let temp = unique_temp_dir("winuxsh-zsh-standard-bindkeys");
+    std::fs::create_dir_all(&temp).unwrap();
+    std::fs::write(
+        temp.join(".zshrc"),
+        r#"
+bindkey '^A' beginning-of-line
+bindkey '^E' end-of-line
+bindkey '^[b' backward-word
+bindkey '^K' kill-line
+"#,
+    )
+    .unwrap();
+
+    let options = ZshImportOptions {
+        enabled: true,
+        zdotdir: temp.clone(),
+        import_zshrc: true,
+        import_oh_my_zsh: false,
+        plugins: Vec::new(),
+        compat_level: ZshCompatLevel::Safe,
+    };
+    let report = scan(&options);
+
+    assert!(report.native_widgets.iter().any(|widget| {
+        widget.widget == "beginning-of-line" && widget.key.as_deref() == Some("^A")
+    }));
+    assert!(report.native_widgets.iter().any(|widget| {
+        widget.widget == "backward-word" && widget.key.as_deref() == Some("^[b")
+    }));
+    assert!(!report.diagnostics.iter().any(|diag| {
+        diag.severity == DiagnosticSeverity::Unsupported && diag.feature == "bindkey"
+    }));
+
+    let plan = import_plan_toml(&options, &report);
+    toml::from_str::<toml::Value>(&plan).unwrap();
+    assert!(plan.contains("[zsh.native_widgets]"));
+    assert!(plan.contains("enabled = false"));
+    assert!(plan.contains("import_bindkeys = true"));
+    assert!(plan.contains("TODO native keybinding: ^A -> beginning-of-line"));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+#[test]
 fn builds_runtime_completion_commands_from_explicit_allowlist() {
     let report = ZshImportReport {
         dynamic_completion_sources: vec![

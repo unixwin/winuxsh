@@ -125,7 +125,7 @@ Nushell's syntax, data pipeline model, plugin ABI, or command semantics.
 | External completer bridge | Carapace-like external completion command | Not started | v2.3/v3 candidate, secondary to zsh asset import |
 | History | path, size, sync, ignore-space, SQLite/isolation | Configurable plaintext file | Keep `[history]` small; defer sync/isolation until usage proves it |
 | Edit mode | `bindkey -e/-v`, mode indicators, cursor shape | Emacs/Vi done | Import simple bindkey mode and add prompt/cursor polish |
-| Keybindings | ZLE widgets and bindkey maps | Not started | Native subset only; arbitrary ZLE plugin scripts are deferred |
+| Keybindings | ZLE widgets and bindkey maps | Common built-in ZLE widgets mapped to reedline | Keep native subset conservative; arbitrary ZLE plugin scripts are deferred |
 | Menus | Completion/history menu config | Configurable page size and max entry lines | Keep native menu controls small; defer zstyle menu/select/group/order translation |
 | Prompt | `PROMPT`, `RPROMPT`, `%~`, `%F{}`, Git segments | Left prompt template | Translate common zsh prompt/theme forms into native config |
 | Theme | Oh My Zsh themes and native color config | Prompt/status colors only | Add theme translator before online theme market |

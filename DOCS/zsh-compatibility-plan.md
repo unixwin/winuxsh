@@ -1368,6 +1368,66 @@ Verification:
 - `cargo build --locked`
 - `cargo test --test compat --locked -- --ignored`
 
+## Phase 26 - Standard ZLE Bindkey Subset
+
+Implementation status: completed on `master`.
+
+This phase maps a conservative subset of standard zsh ZLE widget names to
+reedline native events when those widgets appear in safe `bindkey KEY WIDGET`
+records. It should make common `.zshrc` key customizations useful without
+executing arbitrary ZLE function bodies or introducing a keybinding DSL.
+
+Target examples:
+
+```zsh
+bindkey '^A' beginning-of-line
+bindkey '^E' end-of-line
+bindkey '^[b' backward-word
+bindkey '^[f' forward-word
+bindkey '^K' kill-line
+bindkey '^L' clear-screen
+```
+
+Coverage target:
+
+- standard built-in ZLE widgets map to reedline edit events.
+- supported standard bindkeys do not emit the old generic unsupported bindkey
+  diagnostic.
+- import-plan emits `[zsh.native_widgets] enabled = false` with
+  `import_bindkeys = true` for standard bindkey-only profiles.
+- custom ZLE widgets remain review-only unless already mapped to a known native
+  winuxsh widget.
+
+Rules:
+
+- do not source zsh functions or implement ZLE scripting.
+- do not override native reedline defaults unless the user explicitly enables
+  `[zsh.native_widgets]`.
+- keep Tab completion and Ctrl+R history search preserved.
+
+Implemented:
+
+- standard ZLE widgets such as `beginning-of-line`, `end-of-line`,
+  `backward-word`, `forward-word`, `kill-line`, `clear-screen`, and
+  `accept-line` map to reedline native events.
+- zsh Esc/Alt key spellings such as `^[b` and `\\ef` are parsed for bindkey
+  import.
+- supported standard bindkeys no longer emit the generic unsupported bindkey
+  diagnostic.
+- standard bindkey-only profiles get a reviewable `[zsh.native_widgets]`
+  import-plan entry with `enabled = false` and `import_bindkeys = true`.
+
+Verification:
+
+- `cargo fmt --check`
+- `cargo test --lib -p winuxsh-runtime --locked`
+- `cargo test -p winuxsh-runtime --test zsh_compat --locked`
+- `cargo test -p winuxsh-runtime --test completion --locked`
+- `cargo test --test completion_probe --locked`
+- `cargo test --test host_contract --locked`
+- `cargo build --locked`
+- `cargo test --test compat --locked -- --ignored`
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh

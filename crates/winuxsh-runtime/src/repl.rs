@@ -212,8 +212,48 @@ fn native_widget_event(widget: &str) -> Option<ReedlineEvent> {
         "autosuggest-partial-accept" => Some(ReedlineEvent::HistoryHintWordComplete),
         "history-substring-search-up" => Some(ReedlineEvent::Up),
         "history-substring-search-down" => Some(ReedlineEvent::Down),
+        "accept-line" => Some(ReedlineEvent::Enter),
+        "beginning-of-line" => Some(edit_event(EditCommand::MoveToLineStart { select: false })),
+        "end-of-line" => Some(edit_event(EditCommand::MoveToLineEnd { select: false })),
+        "beginning-of-buffer-or-history" | "beginning-of-buffer" => {
+            Some(edit_event(EditCommand::MoveToStart { select: false }))
+        }
+        "end-of-buffer-or-history" | "end-of-buffer" => {
+            Some(edit_event(EditCommand::MoveToEnd { select: false }))
+        }
+        "backward-char" => Some(edit_event(EditCommand::MoveLeft { select: false })),
+        "forward-char" => Some(edit_event(EditCommand::MoveRight { select: false })),
+        "backward-word" => Some(edit_event(EditCommand::MoveWordLeft { select: false })),
+        "forward-word" => Some(edit_event(EditCommand::MoveWordRight { select: false })),
+        "backward-delete-char" => Some(edit_event(EditCommand::Backspace)),
+        "delete-char" => Some(edit_event(EditCommand::Delete)),
+        "backward-kill-word" => Some(edit_event(EditCommand::CutWordLeft)),
+        "kill-word" => Some(edit_event(EditCommand::CutWordRight)),
+        "kill-line" => Some(edit_event(EditCommand::CutToLineEnd)),
+        "backward-kill-line" | "unix-line-discard" => Some(edit_event(EditCommand::CutFromLineStart)),
+        "kill-whole-line" => Some(edit_event(EditCommand::CutCurrentLine)),
+        "yank" => Some(edit_event(EditCommand::PasteCutBufferBefore)),
+        "undo" => Some(edit_event(EditCommand::Undo)),
+        "redo" => Some(edit_event(EditCommand::Redo)),
+        "clear-screen" => Some(ReedlineEvent::ClearScreen),
+        "redisplay" => Some(ReedlineEvent::Repaint),
+        "expand-or-complete" | "complete-word" => Some(completion_event()),
+        "history-incremental-search-backward" => Some(ReedlineEvent::SearchHistory),
+        "up-line-or-history" => Some(ReedlineEvent::Up),
+        "down-line-or-history" => Some(ReedlineEvent::Down),
         _ => None,
     }
+}
+
+fn edit_event(command: EditCommand) -> ReedlineEvent {
+    ReedlineEvent::Edit(vec![command])
+}
+
+fn completion_event() -> ReedlineEvent {
+    ReedlineEvent::UntilFound(vec![
+        ReedlineEvent::Menu(COMPLETION_MENU.to_string()),
+        edit_event(EditCommand::Complete),
+    ])
 }
 
 fn parse_zsh_key_sequence(value: &str) -> Option<(KeyModifiers, KeyCode)> {
@@ -223,8 +263,22 @@ fn parse_zsh_key_sequence(value: &str) -> Option<(KeyModifiers, KeyCode)> {
         "^[[C" | "\\e[C" | "\\eOC" => Some((KeyModifiers::NONE, KeyCode::Right)),
         "^[[D" | "\\e[D" | "\\eOD" => Some((KeyModifiers::NONE, KeyCode::Left)),
         "^?" => Some((KeyModifiers::NONE, KeyCode::Backspace)),
-        _ => parse_control_key_sequence(value).or_else(|| parse_plain_key_sequence(value)),
+        _ => parse_alt_key_sequence(value)
+            .or_else(|| parse_control_key_sequence(value))
+            .or_else(|| parse_plain_key_sequence(value)),
     }
+}
+
+fn parse_alt_key_sequence(value: &str) -> Option<(KeyModifiers, KeyCode)> {
+    let rest = value
+        .strip_prefix("^[")
+        .or_else(|| value.strip_prefix("\\e"))?;
+    let mut chars = rest.chars();
+    let ch = chars.next()?;
+    if chars.next().is_some() {
+        return None;
+    }
+    Some((KeyModifiers::ALT, KeyCode::Char(ch.to_ascii_lowercase())))
 }
 
 fn parse_control_key_sequence(value: &str) -> Option<(KeyModifiers, KeyCode)> {
@@ -234,13 +288,17 @@ fn parse_control_key_sequence(value: &str) -> Option<(KeyModifiers, KeyCode)> {
     if chars.next().is_some() {
         return None;
     }
-    let code = match ch {
-        ' ' => KeyCode::Char(' '),
-        '[' => KeyCode::Esc,
-        ch if ch.is_ascii_alphabetic() => KeyCode::Char(ch.to_ascii_lowercase()),
-        ch => KeyCode::Char(ch),
-    };
-    Some((KeyModifiers::CONTROL, code))
+    match ch {
+        'I' | 'i' => Some((KeyModifiers::NONE, KeyCode::Tab)),
+        'J' | 'j' | 'M' | 'm' => Some((KeyModifiers::NONE, KeyCode::Enter)),
+        'H' | 'h' => Some((KeyModifiers::NONE, KeyCode::Backspace)),
+        ' ' => Some((KeyModifiers::CONTROL, KeyCode::Char(' '))),
+        '[' => Some((KeyModifiers::NONE, KeyCode::Esc)),
+        ch if ch.is_ascii_alphabetic() => {
+            Some((KeyModifiers::CONTROL, KeyCode::Char(ch.to_ascii_lowercase())))
+        }
+        ch => Some((KeyModifiers::CONTROL, KeyCode::Char(ch))),
+    }
 }
 
 fn parse_plain_key_sequence(value: &str) -> Option<(KeyModifiers, KeyCode)> {
@@ -458,6 +516,66 @@ mod tests {
             keybindings.find_binding(KeyModifiers::NONE, KeyCode::Down),
             Some(ReedlineEvent::Down)
         );
+    }
+
+    #[test]
+    fn native_widget_maps_standard_zle_widgets_to_reedline_events() {
+        let mut keybindings = default_emacs_keybindings();
+        let config = NativeWidgetConfig {
+            enabled: true,
+            presets: Vec::new(),
+            import_bindkeys: true,
+        };
+        let bindings = vec![
+            native_widget_binding("^A", None, "beginning-of-line"),
+            native_widget_binding("^E", None, "end-of-line"),
+            native_widget_binding("^[b", None, "backward-word"),
+            native_widget_binding("\\ef", None, "forward-word"),
+            native_widget_binding("^K", None, "kill-line"),
+            native_widget_binding("^L", None, "clear-screen"),
+            native_widget_binding("^M", None, "accept-line"),
+            native_widget_binding("^I", None, "expand-or-complete"),
+        ];
+
+        add_native_widget_keybindings(
+            &mut keybindings,
+            NativeKeymapTarget::Emacs,
+            &config,
+            &bindings,
+        );
+
+        assert_eq!(
+            keybindings.find_binding(KeyModifiers::CONTROL, KeyCode::Char('a')),
+            Some(edit_event(EditCommand::MoveToLineStart { select: false }))
+        );
+        assert_eq!(
+            keybindings.find_binding(KeyModifiers::CONTROL, KeyCode::Char('e')),
+            Some(edit_event(EditCommand::MoveToLineEnd { select: false }))
+        );
+        assert_eq!(
+            keybindings.find_binding(KeyModifiers::ALT, KeyCode::Char('b')),
+            Some(edit_event(EditCommand::MoveWordLeft { select: false }))
+        );
+        assert_eq!(
+            keybindings.find_binding(KeyModifiers::ALT, KeyCode::Char('f')),
+            Some(edit_event(EditCommand::MoveWordRight { select: false }))
+        );
+        assert_eq!(
+            keybindings.find_binding(KeyModifiers::CONTROL, KeyCode::Char('k')),
+            Some(edit_event(EditCommand::CutToLineEnd))
+        );
+        assert_eq!(
+            keybindings.find_binding(KeyModifiers::CONTROL, KeyCode::Char('l')),
+            Some(ReedlineEvent::ClearScreen)
+        );
+        assert_eq!(
+            keybindings.find_binding(KeyModifiers::NONE, KeyCode::Enter),
+            Some(ReedlineEvent::Enter)
+        );
+        assert!(matches!(
+            keybindings.find_binding(KeyModifiers::NONE, KeyCode::Tab),
+            Some(ReedlineEvent::UntilFound(_))
+        ));
     }
 
     fn native_widget_binding(

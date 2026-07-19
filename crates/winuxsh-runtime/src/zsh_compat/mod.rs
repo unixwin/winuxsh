@@ -944,10 +944,13 @@ pub fn import_plan_toml(options: &ZshImportOptions, report: &ZshImportReport) ->
         }
         out.push("# Review and translate these into native reedline widgets/keybindings.".to_string());
         out.push("# winuxsh never sources ZLE widget function bodies directly.".to_string());
-        if !native_widget_presets.is_empty() {
+        let has_standard_bindkeys = has_supported_standard_widget_bindkeys(report);
+        if !native_widget_presets.is_empty() || has_standard_bindkeys {
             out.push("[zsh.native_widgets]".to_string());
             out.push("enabled = false".to_string());
-            out.push(format!("presets = {}", toml_array(&native_widget_presets)));
+            if !native_widget_presets.is_empty() {
+                out.push(format!("presets = {}", toml_array(&native_widget_presets)));
+            }
             out.push("import_bindkeys = true".to_string());
         }
         for todo in native_widget_todos_for_import_plan(report) {
@@ -3144,6 +3147,51 @@ fn native_widget_presets_for_import_plan(report: &ZshImportReport) -> Vec<String
     presets
 }
 
+fn has_supported_standard_widget_bindkeys(report: &ZshImportReport) -> bool {
+    report.native_widgets.iter().any(|suggestion| {
+        suggestion.key.is_some() && is_supported_native_widget_name(&suggestion.widget)
+    })
+}
+
+fn is_supported_native_widget_name(widget: &str) -> bool {
+    matches!(
+        widget,
+        "autosuggest-accept"
+            | "autosuggest-execute"
+            | "autosuggest-partial-accept"
+            | "history-substring-search-up"
+            | "history-substring-search-down"
+            | "accept-line"
+            | "beginning-of-line"
+            | "end-of-line"
+            | "beginning-of-buffer-or-history"
+            | "beginning-of-buffer"
+            | "end-of-buffer-or-history"
+            | "end-of-buffer"
+            | "backward-char"
+            | "forward-char"
+            | "backward-word"
+            | "forward-word"
+            | "backward-delete-char"
+            | "delete-char"
+            | "backward-kill-word"
+            | "kill-word"
+            | "kill-line"
+            | "backward-kill-line"
+            | "unix-line-discard"
+            | "kill-whole-line"
+            | "yank"
+            | "undo"
+            | "redo"
+            | "clear-screen"
+            | "redisplay"
+            | "expand-or-complete"
+            | "complete-word"
+            | "history-incremental-search-backward"
+            | "up-line-or-history"
+            | "down-line-or-history"
+    )
+}
 fn native_plugin_presets_for_import_plan(report: &ZshImportReport) -> Vec<String> {
     let mut presets = HashSet::new();
     for plugin in &report.plugins {
@@ -3593,13 +3641,18 @@ fn scan_unsupported(
     } else if line == "bindkey -v" {
         report.edit_mode = Some("vi".to_string());
     } else if line.starts_with("bindkey ") {
-        report.diagnostics.push(ZshCompatDiagnostic {
-            severity: DiagnosticSeverity::Unsupported,
-            feature: "bindkey".to_string(),
-            message: "custom bindkey mappings are not imported yet".to_string(),
-            source_file: source_file.map(Path::to_path_buf),
-            line: Some(line_no),
-        });
+        let supported = parse_bindkey_widget_binding(line)
+            .map(|(_, _, widget)| is_supported_native_widget_name(&widget))
+            .unwrap_or(false);
+        if !supported {
+            report.diagnostics.push(ZshCompatDiagnostic {
+                severity: DiagnosticSeverity::Unsupported,
+                feature: "bindkey".to_string(),
+                message: "custom bindkey mappings are not imported yet".to_string(),
+                source_file: source_file.map(Path::to_path_buf),
+                line: Some(line_no),
+            });
+        }
     }
 }
 
