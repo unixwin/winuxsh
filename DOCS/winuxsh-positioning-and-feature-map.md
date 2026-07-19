@@ -126,7 +126,7 @@ Nushell's syntax, data pipeline model, plugin ABI, or command semantics.
 | History | path, size, sync, ignore-space, SQLite/isolation | Configurable plaintext file | Keep `[history]` small; defer sync/isolation until usage proves it |
 | Edit mode | `bindkey -e/-v`, mode indicators, cursor shape | Emacs/Vi done | Import simple bindkey mode and add prompt/cursor polish |
 | Keybindings | ZLE widgets and bindkey maps | Not started | Native subset only; arbitrary ZLE plugin scripts are deferred |
-| Menus | Completion/history menu config | Basic fixed menus | Add limited style/size config before full DSL |
+| Menus | Completion/history menu config | Configurable page size and max entry lines | Keep native menu controls small; defer zstyle menu/select/group/order translation |
 | Prompt | `PROMPT`, `RPROMPT`, `%~`, `%F{}`, Git segments | Left prompt template | Translate common zsh prompt/theme forms into native config |
 | Theme | Oh My Zsh themes and native color config | Prompt/status colors only | Add theme translator before online theme market |
 | Plugins | Oh My Zsh `plugins=(...)` and `$ZSH_CUSTOM` | Not started | Import completion/alias/theme assets first; native modules for editor UX |

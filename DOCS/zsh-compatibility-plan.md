@@ -1294,6 +1294,8 @@ Rules:
 
 - keep command execution and rubash semantics unchanged.
 - do not implement fuzzy matching or zsh matcher-list in this phase.
+- keep user TOML completion definitions and zsh-imported definitions on the
+  existing priority path.
 
 Implemented:
 
@@ -1315,8 +1317,56 @@ Verification:
 - `cargo test --test host_contract --locked`
 - `cargo build --locked`
 - `cargo test --test compat --locked -- --ignored`
-- keep user TOML completion definitions and zsh-imported definitions on the
-  existing priority path.
+
+## Phase 25 - Reedline Menu UX Config
+
+Implementation status: completed on `master`.
+
+This phase adds a small native menu behavior surface for the fixed completion
+and history menus. It should make daily Tab/Ctrl+R interaction easier to tune
+without introducing a zstyle-compatible menu DSL.
+
+Target config:
+
+```toml
+[menus]
+completion_page_size = 10
+history_page_size = 10
+max_entry_lines = 5
+```
+
+Coverage target:
+
+- omitted fields preserve reedline's current ListMenu defaults.
+- zero values fall back to defaults instead of creating unusable menus.
+- completion and history menus can be sized independently.
+- max entry lines applies to both menus to keep very long suggestions readable.
+
+Rules:
+
+- keep Tab completion and Ctrl+R history search keybindings unchanged.
+- do not implement zstyle menu/select/group/order translation in this phase.
+- do not change command execution, rubash semantics, or completion matching.
+
+Implemented:
+
+- `MenuConfig` stores completion/history page size and max entry line limits.
+- `[menus]` parses `completion_page_size`, `history_page_size`, and
+  `max_entry_lines`.
+- zero or invalid values fall back to reedline-compatible defaults.
+- `repl.rs` applies the config when constructing completion and history
+  `ListMenu` instances.
+
+Verification:
+
+- `cargo fmt --check`
+- `cargo test --lib -p winuxsh-runtime --locked`
+- `cargo test -p winuxsh-runtime --test completion --locked`
+- `cargo test --test completion_probe --locked`
+- `cargo test -p winuxsh-runtime --test zsh_compat --locked`
+- `cargo test --test host_contract --locked`
+- `cargo build --locked`
+- `cargo test --test compat --locked -- --ignored`
 
 ## Non-Goals
 

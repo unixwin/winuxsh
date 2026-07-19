@@ -129,6 +129,7 @@ status: active
 - [x] Phase 22 prompt indicator polish: `[shell]` 支持 emacs/vi/default/multiline/history-search prompt indicators，补齐 zsh-like 模式提示入口
 - [x] Phase 23 history config polish: `[history]` 支持 history path、max size、ignore-space-prefixed，保持默认 `~/.winuxsh_history`
 - [x] Phase 24 completion UX config: `[completions]` 支持 case sensitivity、prefix/substring matching、max command results
+- [x] Phase 25 menu UX config: `[menus]` 支持 completion/history page size 与 max entry lines
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证
@@ -142,6 +143,7 @@ status: active
 - [x] Phase 22 prompt indicator tests: 覆盖 emacs/vi insert/normal、多行提示、Ctrl+R history search passing/failing 模板
 - [x] Phase 23 history config tests: 覆盖默认 history、`~` 路径展开、max size、ignore-space-prefixed reedline 接入
 - [x] Phase 24 completion UX tests: 覆盖默认 prefix、substring、case-sensitive path、command result cap
+- [x] Phase 25 menu UX tests: 覆盖默认菜单配置、TOML 解析、zero fallback、reedline menu builder 接入
 - [ ] 作业控制/内建命令语义优先走 rubash，不在 winuxsh 重复实现
 
 ## 关键架构决策 (锁定)

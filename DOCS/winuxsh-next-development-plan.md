@@ -118,6 +118,10 @@ Verification:
   - case sensitivity
   - prefix vs substring matching
   - max external command results
+- `[menus]` UX config is implemented:
+  - completion menu page size
+  - history menu page size
+  - max entry lines for long suggestions
 - Implement autosuggestions natively in reedline, honoring common
   `ZSH_AUTOSUGGEST_*` settings where practical.
 - Implement syntax highlighting natively with rubash/reedline, honoring a

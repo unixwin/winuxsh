@@ -74,6 +74,23 @@ impl Default for HistoryConfig {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MenuConfig {
+    pub completion_page_size: usize,
+    pub history_page_size: usize,
+    pub max_entry_lines: u16,
+}
+
+impl Default for MenuConfig {
+    fn default() -> Self {
+        Self {
+            completion_page_size: 10,
+            history_page_size: 10,
+            max_entry_lines: 5,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZshCompatLevel {
     Safe,
     Warn,
@@ -360,6 +377,7 @@ struct WinshrcToml {
     theme: Option<ThemeToml>,
     editor: Option<EditorToml>,
     history: Option<HistoryToml>,
+    menus: Option<MenusToml>,
     aliases: Option<HashMap<String, String>>,
     completions: Option<CompletionsToml>,
     winuxcmd: Option<WinuxCmdToml>,
@@ -395,6 +413,13 @@ struct HistoryToml {
     path: Option<String>,
     max_size: Option<usize>,
     ignore_space_prefixed: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MenusToml {
+    completion_page_size: Option<usize>,
+    history_page_size: Option<usize>,
+    max_entry_lines: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -484,6 +509,7 @@ pub struct FullConfig {
     pub shell: ShellConfig,
     pub editor: EditorConfig,
     pub history: HistoryConfig,
+    pub menus: MenuConfig,
     pub theme_name: String,
     pub aliases: HashMap<String, String>,
     pub completion_dirs: Vec<PathBuf>,
@@ -499,6 +525,7 @@ impl Default for FullConfig {
             shell: ShellConfig::default(),
             editor: EditorConfig::default(),
             history: HistoryConfig::default(),
+            menus: MenuConfig::default(),
             theme_name: "default".to_string(),
             aliases: HashMap::new(),
             completion_dirs: Vec::new(),
@@ -565,6 +592,7 @@ fn build_config(parsed: WinshrcToml) -> FullConfig {
                 .unwrap_or_default(),
         },
         history: parsed.history.map(build_history_config).unwrap_or_default(),
+        menus: parsed.menus.map(build_menu_config).unwrap_or_default(),
         theme_name: parsed
             .theme
             .and_then(|t| t.current_theme)
@@ -627,6 +655,25 @@ fn build_history_config(parsed: HistoryToml) -> HistoryConfig {
         ignore_space_prefixed: parsed
             .ignore_space_prefixed
             .unwrap_or(defaults.ignore_space_prefixed),
+    }
+}
+
+fn build_menu_config(parsed: MenusToml) -> MenuConfig {
+    let defaults = MenuConfig::default();
+    MenuConfig {
+        completion_page_size: parsed
+            .completion_page_size
+            .filter(|page_size| *page_size > 0)
+            .unwrap_or(defaults.completion_page_size),
+        history_page_size: parsed
+            .history_page_size
+            .filter(|page_size| *page_size > 0)
+            .unwrap_or(defaults.history_page_size),
+        max_entry_lines: parsed
+            .max_entry_lines
+            .filter(|max_lines| *max_lines > 0 && *max_lines <= u16::MAX as usize)
+            .map(|max_lines| max_lines as u16)
+            .unwrap_or(defaults.max_entry_lines),
     }
 }
 
@@ -835,6 +882,47 @@ max_size = 0
 "#,
         );
         assert_eq!(config.history.max_size, HistoryConfig::default().max_size);
+    }
+
+    #[test]
+    fn defaults_menu_config() {
+        let config = parse_config("");
+        assert_eq!(config.menus, MenuConfig::default());
+    }
+
+    #[test]
+    fn parses_menu_config() {
+        let config = parse_config(
+            r#"
+[menus]
+completion_page_size = 20
+history_page_size = 30
+max_entry_lines = 8
+"#,
+        );
+
+        assert_eq!(
+            config.menus,
+            MenuConfig {
+                completion_page_size: 20,
+                history_page_size: 30,
+                max_entry_lines: 8,
+            }
+        );
+    }
+
+    #[test]
+    fn zero_menu_config_values_fall_back_to_defaults() {
+        let config = parse_config(
+            r#"
+[menus]
+completion_page_size = 0
+history_page_size = 0
+max_entry_lines = 0
+"#,
+        );
+
+        assert_eq!(config.menus, MenuConfig::default());
     }
 
     #[test]

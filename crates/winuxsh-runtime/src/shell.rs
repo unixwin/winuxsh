@@ -18,7 +18,7 @@ use rubash::{executor::Executor, lexer::tokenize, parser::parse, Ast};
 use crate::completion::runtime::RuntimeCompletionPlugin;
 use crate::completion::{CompletionState, WinuxshCompleter};
 use crate::config::{
-    load as load_config, AutosuggestConfig, EditorMode, HookConfig, NativePluginConfig,
+    load as load_config, AutosuggestConfig, EditorMode, HookConfig, MenuConfig, NativePluginConfig,
     NativeWidgetConfig, SyntaxHighlightConfig,
 };
 use crate::prompt::WinuxshPrompt;
@@ -42,6 +42,7 @@ pub struct Shell {
     pub history_path: PathBuf,
     pub history_max_size: usize,
     pub history_ignore_space_prefixed: bool,
+    pub menu_config: MenuConfig,
     pub editor_mode: EditorMode,
     pub autosuggest: AutosuggestConfig,
     pub syntax_highlighting: SyntaxHighlightConfig,
@@ -217,6 +218,7 @@ impl Shell {
             history_path,
             history_max_size: config.history.max_size,
             history_ignore_space_prefixed: config.history.ignore_space_prefixed,
+            menu_config: config.menus,
             editor_mode: config.editor.edit_mode,
             autosuggest: config.zsh.autosuggestions.with_env_overrides(),
             syntax_highlighting: syntax_highlighting.with_env_overrides(),
@@ -2010,6 +2012,7 @@ BACKTICK_VALUE=`whoami`
             history_path: PathBuf::from(".winuxsh_history"),
             history_max_size: 10000,
             history_ignore_space_prefixed: false,
+            menu_config: MenuConfig::default(),
             editor_mode: EditorMode::Emacs,
             autosuggest: AutosuggestConfig::default(),
             syntax_highlighting: SyntaxHighlightConfig::default(),

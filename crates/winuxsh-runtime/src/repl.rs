@@ -8,7 +8,7 @@ use reedline::{
 
 use crate::autosuggest::HistoryAutosuggestHinter;
 use crate::completion::WinuxshCompleter;
-use crate::config::{EditorMode, NativeWidgetConfig};
+use crate::config::{EditorMode, MenuConfig, NativeWidgetConfig};
 use crate::shell::Shell;
 use crate::syntax_highlighting::WinuxshSyntaxHighlighter;
 use crate::zsh_compat::NativeWidgetSuggestion;
@@ -28,13 +28,22 @@ pub fn build_line_editor(shell: &mut Shell) -> anyhow::Result<Reedline> {
         })?;
 
     let completer = WinuxshCompleter::new(shell.completion_state.clone());
+    let menu_config = shell.menu_config;
 
     let completion_menu = ReedlineMenu::WithCompleter {
-        menu: Box::new(ListMenu::default().with_name(COMPLETION_MENU)),
+        menu: Box::new(configured_list_menu(
+            COMPLETION_MENU,
+            menu_config.completion_page_size,
+            menu_config,
+        )),
         completer: Box::new(completer),
     };
     let history_menu = ReedlineMenu::HistoryMenu(Box::new(
-        ListMenu::default().with_name(HISTORY_MENU),
+        configured_list_menu(
+            HISTORY_MENU,
+            menu_config.history_page_size,
+            menu_config,
+        ),
     ));
 
     let mut editor = Reedline::create()
@@ -62,6 +71,13 @@ pub fn build_line_editor(shell: &mut Shell) -> anyhow::Result<Reedline> {
     }
 
     Ok(editor)
+}
+
+fn configured_list_menu(name: &str, page_size: usize, config: MenuConfig) -> ListMenu {
+    ListMenu::default()
+        .with_name(name)
+        .with_page_size(page_size)
+        .with_max_entry_lines(config.max_entry_lines)
 }
 
 fn history_exclusion_prefix(ignore_space_prefixed: bool) -> Option<String> {
@@ -279,6 +295,7 @@ pub fn run_repl(shell: &mut Shell) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reedline::Menu;
 
     #[test]
     fn emacs_keybindings_keep_ctrl_r_history_search_and_tab_completion() {
@@ -298,6 +315,21 @@ mod tests {
     fn history_exclusion_prefix_tracks_ignore_space_config() {
         assert_eq!(history_exclusion_prefix(false), None);
         assert_eq!(history_exclusion_prefix(true), Some(" ".to_string()));
+    }
+
+    #[test]
+    fn configured_list_menu_preserves_menu_name() {
+        let menu = configured_list_menu(
+            "custom_menu",
+            12,
+            MenuConfig {
+                completion_page_size: 12,
+                history_page_size: 7,
+                max_entry_lines: 3,
+            },
+        );
+
+        assert_eq!(menu.name(), "custom_menu");
     }
 
     #[test]
