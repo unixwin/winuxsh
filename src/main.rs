@@ -13,6 +13,8 @@
 //!   winuxsh --zsh-compat-import-status → inspect import block and backups
 //!   winuxsh --zsh-compat-import-rollback-plan → print restore command
 //!   winuxsh --zsh-compat-doctor → summarize zsh compatibility health
+//!   winuxsh --zsh-native-packs → list built-in native zsh plugin packs
+//!   winuxsh --zsh-native-packs-json → list built-in native zsh plugin packs as JSON
 //!   winuxsh --completion-probe "line" [cursor] → print REPL completions
 
 use std::path::PathBuf;
@@ -80,6 +82,14 @@ fn run(args: &[String]) -> anyhow::Result<()> {
             print_zsh_compat_doctor()?;
             Ok(())
         }
+        "--zsh-native-packs" => {
+            print_zsh_native_packs(false)?;
+            Ok(())
+        }
+        "--zsh-native-packs-json" => {
+            print_zsh_native_packs(true)?;
+            Ok(())
+        }
         "--completion-probe" => {
             print_completion_probe(args)?;
             Ok(())
@@ -130,6 +140,8 @@ fn print_usage() {
     println!("  winuxsh --zsh-compat-import-status Inspect import block and backup status");
     println!("  winuxsh --zsh-compat-import-rollback-plan Print latest backup restore command");
     println!("  winuxsh --zsh-compat-doctor Summarize zsh compatibility health");
+    println!("  winuxsh --zsh-native-packs List built-in native zsh plugin packs");
+    println!("  winuxsh --zsh-native-packs-json List built-in native zsh plugin packs as JSON");
     println!("  winuxsh --completion-probe \"line\" [cursor] Print REPL completion candidates");
 }
 
@@ -295,6 +307,15 @@ fn print_zsh_compat_report(json: bool) -> anyhow::Result<()> {
         println!("{}", report.to_json_pretty()?);
     } else {
         println!("{}", report.to_human());
+    }
+    Ok(())
+}
+
+fn print_zsh_native_packs(json: bool) -> anyhow::Result<()> {
+    if json {
+        println!("{}", winuxsh_runtime::zsh_compat::native_zsh_packs_json()?);
+    } else {
+        println!("{}", winuxsh_runtime::zsh_compat::native_zsh_packs_text());
     }
     Ok(())
 }

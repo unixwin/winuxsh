@@ -231,6 +231,12 @@ Goal: opt-in power-user setup.
 
 ### Phase 31 - Native Pack Manifest
 
+Implementation status: completed on master. Winuxsh now exposes a typed
+`NativeZshPack` registry through `winuxsh --zsh-native-packs` and
+`winuxsh --zsh-native-packs-json`. The commands are read-only inventory
+surfaces and do not load user config, execute external commands, or change
+startup behavior.
+
 Create a typed registry of native packs:
 
 - pack name

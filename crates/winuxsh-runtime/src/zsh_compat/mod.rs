@@ -525,6 +525,341 @@ pub enum PluginImportKind {
     Missing,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeZshPackKind {
+    Alias,
+    Widget,
+    Highlighter,
+    Completion,
+    Lifecycle,
+    CommandShim,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeZshPackRiskTier {
+    AlwaysOn,
+    Profile,
+    ToolSpecific,
+    ExplicitTrust,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeZshPackSupportStatus {
+    Implemented,
+    Partial,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct NativeZshPack {
+    pub name: &'static str,
+    pub summary: &'static str,
+    pub kind: NativeZshPackKind,
+    pub risk_tier: NativeZshPackRiskTier,
+    pub startup_default: bool,
+    pub required_binaries: &'static [&'static str],
+    pub aliases_count: usize,
+    pub config_sections: &'static [&'static str],
+    pub recommended_profiles: &'static [&'static str],
+    pub support_status: NativeZshPackSupportStatus,
+    pub support_notes: &'static str,
+}
+
+const PROFILE_ALL: &[&str] = &["agent", "zsh-lite", "full"];
+const PROFILE_ZSH_LITE_FULL: &[&str] = &["zsh-lite", "full"];
+const PROFILE_FULL: &[&str] = &["full"];
+const PROFILE_EXPLICIT: &[&str] = &["explicit opt-in", "full review"];
+
+const NATIVE_ZSH_PACKS: &[NativeZshPack] = &[
+    NativeZshPack {
+        name: "zsh-autosuggestions",
+        summary: "history-based inline suggestions through reedline",
+        kind: NativeZshPackKind::Widget,
+        risk_tier: NativeZshPackRiskTier::AlwaysOn,
+        startup_default: true,
+        required_binaries: &[],
+        aliases_count: 0,
+        config_sections: &["zsh.autosuggestions"],
+        recommended_profiles: PROFILE_ALL,
+        support_status: NativeZshPackSupportStatus::Implemented,
+        support_notes: "native history strategy subset; no zsh plugin sourcing",
+    },
+    NativeZshPack {
+        name: "zsh-syntax-highlighting",
+        summary: "main highlighter subset through native reedline highlighting",
+        kind: NativeZshPackKind::Highlighter,
+        risk_tier: NativeZshPackRiskTier::AlwaysOn,
+        startup_default: true,
+        required_binaries: &[],
+        aliases_count: 0,
+        config_sections: &["zsh.syntax_highlighting"],
+        recommended_profiles: PROFILE_ALL,
+        support_status: NativeZshPackSupportStatus::Implemented,
+        support_notes: "native main highlighter subset; no ZLE region_highlight dependency",
+    },
+    NativeZshPack {
+        name: "zsh-history-substring-search",
+        summary: "history navigation widget preset mapped to reedline events",
+        kind: NativeZshPackKind::Widget,
+        risk_tier: NativeZshPackRiskTier::Profile,
+        startup_default: false,
+        required_binaries: &[],
+        aliases_count: 0,
+        config_sections: &["zsh.native_widgets"],
+        recommended_profiles: PROFILE_ZSH_LITE_FULL,
+        support_status: NativeZshPackSupportStatus::Partial,
+        support_notes: "mapped preset for common history-substring-search widgets",
+    },
+    NativeZshPack {
+        name: "standard-zle-widgets",
+        summary: "common bindkey widget names mapped to reedline edit events",
+        kind: NativeZshPackKind::Widget,
+        risk_tier: NativeZshPackRiskTier::Profile,
+        startup_default: false,
+        required_binaries: &[],
+        aliases_count: 0,
+        config_sections: &["zsh.native_widgets"],
+        recommended_profiles: PROFILE_ZSH_LITE_FULL,
+        support_status: NativeZshPackSupportStatus::Partial,
+        support_notes: "safe built-in ZLE subset only; arbitrary widgets are diagnostics",
+    },
+    NativeZshPack {
+        name: "git",
+        summary: "Oh My Zsh-style git aliases plus prompt/completion polish",
+        kind: NativeZshPackKind::Alias,
+        risk_tier: NativeZshPackRiskTier::Profile,
+        startup_default: false,
+        required_binaries: &["git"],
+        aliases_count: NATIVE_GIT_ALIASES.len(),
+        config_sections: &["zsh", "aliases"],
+        recommended_profiles: PROFILE_ZSH_LITE_FULL,
+        support_status: NativeZshPackSupportStatus::Implemented,
+        support_notes: "native alias pack does not override user aliases",
+    },
+    NativeZshPack {
+        name: "docker",
+        summary: "conservative Docker alias pack and dynamic completion hints",
+        kind: NativeZshPackKind::Alias,
+        risk_tier: NativeZshPackRiskTier::ToolSpecific,
+        startup_default: false,
+        required_binaries: &["docker"],
+        aliases_count: NATIVE_DOCKER_ALIASES.len(),
+        config_sections: &["zsh", "aliases", "zsh.dynamic_completions"],
+        recommended_profiles: PROFILE_FULL,
+        support_status: NativeZshPackSupportStatus::Partial,
+        support_notes: "aliases are native; dynamic completions stay allowlisted",
+    },
+    NativeZshPack {
+        name: "kubectl",
+        summary: "kubectl alias pack plus disabled dynamic completion preset",
+        kind: NativeZshPackKind::Alias,
+        risk_tier: NativeZshPackRiskTier::ToolSpecific,
+        startup_default: false,
+        required_binaries: &["kubectl"],
+        aliases_count: NATIVE_KUBECTL_ALIASES.len(),
+        config_sections: &["zsh", "aliases", "zsh.dynamic_completions"],
+        recommended_profiles: PROFILE_FULL,
+        support_status: NativeZshPackSupportStatus::Partial,
+        support_notes: "aliases are native; completion generator requires explicit allowlist",
+    },
+    NativeZshPack {
+        name: "npm",
+        summary: "npm alias pack and runtime completion shape detection",
+        kind: NativeZshPackKind::Alias,
+        risk_tier: NativeZshPackRiskTier::ToolSpecific,
+        startup_default: false,
+        required_binaries: &["npm"],
+        aliases_count: NATIVE_NPM_ALIASES.len(),
+        config_sections: &["zsh", "aliases", "zsh.runtime_completions"],
+        recommended_profiles: PROFILE_FULL,
+        support_status: NativeZshPackSupportStatus::Partial,
+        support_notes: "aliases are native; runtime completion provider is opt-in",
+    },
+    NativeZshPack {
+        name: "command-not-found",
+        summary: "interactive missing-command hints for native Windows",
+        kind: NativeZshPackKind::CommandShim,
+        risk_tier: NativeZshPackRiskTier::ExplicitTrust,
+        startup_default: false,
+        required_binaries: &[],
+        aliases_count: 0,
+        config_sections: &["zsh.native_plugins"],
+        recommended_profiles: PROFILE_EXPLICIT,
+        support_status: NativeZshPackSupportStatus::Implemented,
+        support_notes: "interactive-only hint surface; disabled unless explicitly enabled",
+    },
+    NativeZshPack {
+        name: "direnv",
+        summary: "native precmd/chpwd hook for direnv export bash",
+        kind: NativeZshPackKind::Lifecycle,
+        risk_tier: NativeZshPackRiskTier::ExplicitTrust,
+        startup_default: false,
+        required_binaries: &["direnv"],
+        aliases_count: 0,
+        config_sections: &["zsh.native_plugins", "hooks"],
+        recommended_profiles: PROFILE_EXPLICIT,
+        support_status: NativeZshPackSupportStatus::Implemented,
+        support_notes: "runs external direnv only after explicit native plugin opt-in",
+    },
+    NativeZshPack {
+        name: "dotenv",
+        summary: "safe .env parser on native precmd/chpwd lifecycle hooks",
+        kind: NativeZshPackKind::Lifecycle,
+        risk_tier: NativeZshPackRiskTier::ExplicitTrust,
+        startup_default: false,
+        required_binaries: &[],
+        aliases_count: 0,
+        config_sections: &["zsh.native_plugins"],
+        recommended_profiles: PROFILE_EXPLICIT,
+        support_status: NativeZshPackSupportStatus::Implemented,
+        support_notes: "reads project .env files only after explicit opt-in",
+    },
+    NativeZshPack {
+        name: "zoxide",
+        summary: "native z command shim plus directory tracking",
+        kind: NativeZshPackKind::CommandShim,
+        risk_tier: NativeZshPackRiskTier::ExplicitTrust,
+        startup_default: false,
+        required_binaries: &["zoxide"],
+        aliases_count: 0,
+        config_sections: &["zsh.native_plugins"],
+        recommended_profiles: PROFILE_EXPLICIT,
+        support_status: NativeZshPackSupportStatus::Implemented,
+        support_notes: "native shim delegates to zoxide after explicit opt-in",
+    },
+    NativeZshPack {
+        name: "thefuck",
+        summary: "native fuck correction shim for the previous interactive command",
+        kind: NativeZshPackKind::CommandShim,
+        risk_tier: NativeZshPackRiskTier::ExplicitTrust,
+        startup_default: false,
+        required_binaries: &["thefuck"],
+        aliases_count: 0,
+        config_sections: &["zsh.native_plugins"],
+        recommended_profiles: PROFILE_EXPLICIT,
+        support_status: NativeZshPackSupportStatus::Implemented,
+        support_notes: "external correction command runs only after explicit opt-in",
+    },
+    NativeZshPack {
+        name: "fzf",
+        summary: "native cdf/fzf-cd selector shim",
+        kind: NativeZshPackKind::CommandShim,
+        risk_tier: NativeZshPackRiskTier::ExplicitTrust,
+        startup_default: false,
+        required_binaries: &["fzf"],
+        aliases_count: 0,
+        config_sections: &["zsh.native_plugins"],
+        recommended_profiles: PROFILE_EXPLICIT,
+        support_status: NativeZshPackSupportStatus::Implemented,
+        support_notes: "interactive selector shim; disabled by default",
+    },
+    NativeZshPack {
+        name: "zsh-interactive-cd",
+        summary: "native directory selector alias surface shared with fzf",
+        kind: NativeZshPackKind::CommandShim,
+        risk_tier: NativeZshPackRiskTier::ExplicitTrust,
+        startup_default: false,
+        required_binaries: &["fzf"],
+        aliases_count: 0,
+        config_sections: &["zsh.native_plugins"],
+        recommended_profiles: PROFILE_EXPLICIT,
+        support_status: NativeZshPackSupportStatus::Implemented,
+        support_notes: "implemented as native cdf/fzf-cd, not zsh widget sourcing",
+    },
+    NativeZshPack {
+        name: "last-working-dir",
+        summary: "native last working directory cache and lwd command",
+        kind: NativeZshPackKind::Lifecycle,
+        risk_tier: NativeZshPackRiskTier::ExplicitTrust,
+        startup_default: false,
+        required_binaries: &[],
+        aliases_count: 0,
+        config_sections: &["zsh.native_plugins"],
+        recommended_profiles: PROFILE_EXPLICIT,
+        support_status: NativeZshPackSupportStatus::Implemented,
+        support_notes: "REPL-only restore is explicit and does not affect -c/scripts",
+    },
+];
+
+pub fn native_zsh_packs() -> &'static [NativeZshPack] {
+    NATIVE_ZSH_PACKS
+}
+
+pub fn native_zsh_packs_json() -> Result<String, serde_json::Error> {
+    serde_json::to_string_pretty(native_zsh_packs())
+}
+
+pub fn native_zsh_packs_text() -> String {
+    let mut out = Vec::new();
+    out.push("Native zsh plugin packs".to_string());
+    out.push(
+        "Preinstalled means native winuxsh support; no Oh My Zsh or zsh plugin source is vendored or sourced."
+            .to_string(),
+    );
+    out.push(String::new());
+    for pack in native_zsh_packs() {
+        let required = if pack.required_binaries.is_empty() {
+            "none".to_string()
+        } else {
+            pack.required_binaries.join(",")
+        };
+        let profiles = if pack.recommended_profiles.is_empty() {
+            "none".to_string()
+        } else {
+            pack.recommended_profiles.join(",")
+        };
+        let sections = if pack.config_sections.is_empty() {
+            "none".to_string()
+        } else {
+            pack.config_sections.join(",")
+        };
+        out.push(format!(
+            "- {} kind={} tier={} default={} aliases={} required={} profiles={} config={} status={}",
+            pack.name,
+            native_zsh_pack_kind_name(pack.kind),
+            native_zsh_pack_risk_tier_name(pack.risk_tier),
+            if pack.startup_default { "on" } else { "off" },
+            pack.aliases_count,
+            required,
+            profiles,
+            sections,
+            native_zsh_pack_support_status_name(pack.support_status)
+        ));
+        out.push(format!("  {}", pack.summary));
+        out.push(format!("  note: {}", pack.support_notes));
+    }
+    out.join("\n")
+}
+
+fn native_zsh_pack_kind_name(kind: NativeZshPackKind) -> &'static str {
+    match kind {
+        NativeZshPackKind::Alias => "alias",
+        NativeZshPackKind::Widget => "widget",
+        NativeZshPackKind::Highlighter => "highlighter",
+        NativeZshPackKind::Completion => "completion",
+        NativeZshPackKind::Lifecycle => "lifecycle",
+        NativeZshPackKind::CommandShim => "command_shim",
+    }
+}
+
+fn native_zsh_pack_risk_tier_name(tier: NativeZshPackRiskTier) -> &'static str {
+    match tier {
+        NativeZshPackRiskTier::AlwaysOn => "always_on",
+        NativeZshPackRiskTier::Profile => "profile",
+        NativeZshPackRiskTier::ToolSpecific => "tool_specific",
+        NativeZshPackRiskTier::ExplicitTrust => "explicit_trust",
+    }
+}
+
+fn native_zsh_pack_support_status_name(status: NativeZshPackSupportStatus) -> &'static str {
+    match status {
+        NativeZshPackSupportStatus::Implemented => "implemented",
+        NativeZshPackSupportStatus::Partial => "partial",
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ImportedZstyle {
     pub context: String,

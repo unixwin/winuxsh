@@ -8,15 +8,64 @@ use winuxsh_runtime::zsh_compat::{
     apply_import_plan_to_config_with_backup_suffix, apply_safe_aliases, apply_safe_env,
     completion_defs_from_report, dynamic_completion_defs_from_report_with_runner,
     dynamic_completion_defs_from_report_with_options, git_prompt_format_from_report,
-    import_plan_toml, inspect_import_config_status, inspect_import_rollback_plan, safe_path_value,
+    import_plan_toml, inspect_import_config_status, inspect_import_rollback_plan,
+    native_zsh_packs, native_zsh_packs_json, native_zsh_packs_text, safe_path_value,
     runtime_completion_commands_from_report, scan, translate_zsh_prompt, CompletionAsset,
-    DiagnosticSeverity, DynamicCompletionRunOptions, DynamicCompletionKind, DynamicCompletionSource,
-    ImportedAlias, ImportedEnv, ImportedPlugin, PluginImportKind, PluginImportTier,
-    ZshCompatDiagnostic,
+    DiagnosticSeverity, DynamicCompletionKind, DynamicCompletionRunOptions, DynamicCompletionSource,
+    ImportedAlias, ImportedEnv, ImportedPlugin, NativeZshPackRiskTier, NativeZshPackSupportStatus,
+    PluginImportKind, PluginImportTier, ZshCompatDiagnostic,
     ZshImportApplyReadiness, ZshImportBlockState, ZshImportConfigStatus, ZshImportOptions,
     ZshImportReport, ZshImportRollbackPlan, ZSH_IMPORT_BLOCK_END, ZSH_IMPORT_BLOCK_START,
     ZshFunctionKind, zsh_compat_doctor_text,
 };
+
+#[test]
+fn native_zsh_pack_registry_lists_preinstalled_packs() {
+    let packs = native_zsh_packs();
+
+    let autosuggestions = native_pack(packs, "zsh-autosuggestions");
+    assert!(autosuggestions.startup_default);
+    assert_eq!(autosuggestions.risk_tier, NativeZshPackRiskTier::AlwaysOn);
+    assert_eq!(
+        autosuggestions.support_status,
+        NativeZshPackSupportStatus::Implemented
+    );
+
+    let git = native_pack(packs, "git");
+    assert!(!git.startup_default);
+    assert_eq!(git.risk_tier, NativeZshPackRiskTier::Profile);
+    assert!(git.required_binaries.iter().any(|binary| *binary == "git"));
+    assert!(git.aliases_count >= 20);
+    assert!(git
+        .recommended_profiles
+        .iter()
+        .any(|profile| *profile == "zsh-lite"));
+
+    let direnv = native_pack(packs, "direnv");
+    assert_eq!(direnv.risk_tier, NativeZshPackRiskTier::ExplicitTrust);
+    assert!(!direnv.startup_default);
+    assert!(direnv.required_binaries.iter().any(|binary| *binary == "direnv"));
+}
+
+#[test]
+fn native_zsh_pack_text_output_is_operator_readable() {
+    let text = native_zsh_packs_text();
+
+    assert!(text.contains("Native zsh plugin packs"));
+    assert!(text.contains("no Oh My Zsh or zsh plugin source is vendored or sourced"));
+    assert!(text.contains("- git kind=alias tier=profile default=off"));
+    assert!(text.contains("- zsh-autosuggestions kind=widget tier=always_on default=on"));
+    assert!(text.contains("- direnv kind=lifecycle tier=explicit_trust default=off"));
+}
+
+#[test]
+fn native_zsh_pack_json_output_is_stable() {
+    let json = native_zsh_packs_json().unwrap();
+
+    assert!(json.contains(r#""name": "git""#));
+    assert!(json.contains(r#""risk_tier": "profile""#));
+    assert!(json.contains(r#""startup_default": true"#));
+}
 
 #[test]
 fn scans_zshrc_and_oh_my_zsh_plugin_assets() {
@@ -2464,6 +2513,16 @@ fn plugin<'a>(
         .iter()
         .find(|plugin| plugin.name == name)
         .unwrap_or_else(|| panic!("expected plugin {name}, got {:?}", report.plugins))
+}
+
+fn native_pack<'a>(
+    packs: &'a [winuxsh_runtime::zsh_compat::NativeZshPack],
+    name: &str,
+) -> &'a winuxsh_runtime::zsh_compat::NativeZshPack {
+    packs
+        .iter()
+        .find(|pack| pack.name == name)
+        .unwrap_or_else(|| panic!("expected native pack {name}, got {:?}", packs))
 }
 
 fn env_lock() -> &'static Mutex<()> {

@@ -135,9 +135,10 @@ status: active
 - [x] Phase 28 interactive multiline collector: REPL 识别未完成的 `if/for/while/case/function` 等复合命令块，显示 PS2/continuation prompt，完整后一次性交给 rubash script execution
 - [x] Phase 29 bash smoke fixture: 将用户手工 20 段 bash/zsh-like smoke 脚本整理为可持续 compat fixture，优先覆盖条件判断、循环、函数、重定向、路径与 exit status
 - [x] Phase 30 rubash AND/OR status semantics: 修复 `false && a || b` / `[ ... ] && a || b` 这类 AND/OR list 跳过语义，保持 shell 语义在 rubash，不在 winuxsh 重建执行器
-- [ ] Phase 31 native zsh plugin pack manifest: 列出内置 git/docker/kubectl/npm/widget/lifecycle packs，并提供只读 CLI inventory
+- [x] Phase 31 native zsh plugin pack manifest: 列出内置 git/docker/kubectl/npm/widget/lifecycle packs，并提供只读 CLI inventory (`--zsh-native-packs` / `--zsh-native-packs-json`)
 - [ ] Phase 32 zsh-lite profile plan: 基于现有 `[zsh]` / `[zsh.native_widgets]` / `[zsh.native_plugins]` 生成可审阅默认 zsh-like 配置块
 - [ ] Phase 33 Git daily-use polish: 内置 git completion + alias pack 测试 + prompt 文档，让 git 插件成为第一等 daily shell 能力
+- [x] README / tutorial documentation baseline: README.md / README-zh.md 重写为用户入口，新增 `DOCS/zsh-migration-guide.md` 迁移教程
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证
@@ -157,7 +158,7 @@ status: active
 - [x] Phase 28 multiline REPL tests: 覆盖 pending buffer 对 `if/fi`、`for/done`、函数体、引号、管道续行、反斜杠续行和注释行的完整性判断
 - [x] Phase 29 bash smoke tests: 增加聚合 smoke fixture，并确保失败用例先拆成小回归修复后再纳入 smoke
 - [x] Phase 30 AND/OR tests: 覆盖 `true &&`, `false &&`, `true ||`, `false ||`, 以及 `[ 1 -eq 2 ] && yes || no`
-- [ ] Phase 31 native pack inventory tests: 覆盖 pack registry text/json 输出，不改变启动行为
+- [x] Phase 31 native pack inventory tests: 覆盖 pack registry text/json 输出，不改变启动行为
 - [ ] Phase 32 profile plan tests: 覆盖 `agent` / `zsh-lite` 生成 TOML 与 managed-block apply/status/rollback 兼容性
 - [ ] Phase 33 git pack tests: 覆盖 `git <Tab>`、常见子命令/flag 补全与用户 alias override
 - [ ] 作业控制/内建命令语义优先走 rubash，不在 winuxsh 重复实现
@@ -175,4 +176,4 @@ status: active
 
 ---
 
-参见: architecture.md | v2-plan.md | rubash-pr-windows-path.md | winuxsh-v2.2-reference-plan.md | winuxsh-v3-plan.md | winuxsh-positioning-and-feature-map.md | winuxsh-next-development-plan.md | zsh-reference-audit.md | zsh-compatibility-plan.md | zsh-compatibility-interface-audit.md | winuxsh-native-zsh-plugin-pack-plan.md
+参见: architecture.md | v2-plan.md | rubash-pr-windows-path.md | winuxsh-v2.2-reference-plan.md | winuxsh-v3-plan.md | winuxsh-positioning-and-feature-map.md | winuxsh-next-development-plan.md | zsh-reference-audit.md | zsh-compatibility-plan.md | zsh-compatibility-interface-audit.md | winuxsh-native-zsh-plugin-pack-plan.md | zsh-migration-guide.md
