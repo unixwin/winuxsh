@@ -1,8 +1,9 @@
 // Path completion for WinSH
 // Provides Tab completion for files and directories
 
-use std::path::{Path, PathBuf};
 use std::fs;
+use std::path::{Path, PathBuf};
+
 use crate::completion::{CompletionContext, CompletionResult};
 use anyhow::Result;
 
@@ -12,21 +13,23 @@ pub struct PathCompleter;
 impl PathCompleter {
     /// Complete a path
     pub fn complete(context: &CompletionContext) -> Result<Option<CompletionResult>> {
-        let word = match context.get_current_word() {
-            Some(w) => w,
-            None => return Ok(None),
-        };
+        let word = context.get_current_word().unwrap_or_default();
+        let directories_only = context
+            .get_command_name()
+            .as_deref()
+            .is_some_and(is_directory_only_command);
 
         // Handle empty word (just complete current directory)
         if word.is_empty() {
-            return Self::complete_directory(&context.current_dir, "", false);
+            return Self::complete_directory(&context.current_dir, "", false, directories_only);
         }
 
         // Determine base directory and prefix
-        let (base_dir, prefix, add_trailing_slash) = if word.starts_with('/') || word.starts_with('\\') {
+        let (base_dir, prefix, add_trailing_slash) =
+            if word.starts_with('/') || word.starts_with('\\') {
             // Absolute path
             let word_clone = word.clone();
-            let path = if word.starts_with('\\') { 
+            let path = if word.starts_with('\\') {
                 // Windows UNC path
                 PathBuf::from(&word_clone)
             } else {
@@ -67,17 +70,22 @@ impl PathCompleter {
 
         // Normalize base path
         let base_dir = Self::normalize_path(&base_dir);
-        
+
         // Check if base directory exists
         if !base_dir.exists() || !base_dir.is_dir() {
             return Ok(None);
         }
 
-        Self::complete_directory(&base_dir, &prefix, add_trailing_slash)
+        Self::complete_directory(&base_dir, &prefix, add_trailing_slash, directories_only)
     }
 
     /// Complete entries in a directory
-    fn complete_directory(base_dir: &Path, prefix: &str, _add_trailing_slash: bool) -> Result<Option<CompletionResult>> {
+    fn complete_directory(
+        base_dir: &Path,
+        prefix: &str,
+        _add_trailing_slash: bool,
+        directories_only: bool,
+    ) -> Result<Option<CompletionResult>> {
         let entries = match fs::read_dir(base_dir) {
             Ok(entries) => entries,
             Err(_) => return Ok(None),
@@ -94,6 +102,9 @@ impl PathCompleter {
                     Ok(ft) => ft,
                     Err(_) => continue,
                 };
+                if directories_only && !file_type.is_dir() {
+                    continue;
+                }
 
                 // Add separator for directories
                 let completion = if file_type.is_dir() {
@@ -117,10 +128,14 @@ impl PathCompleter {
     /// Normalize path for Windows/Unix compatibility
     fn normalize_path(path: &Path) -> PathBuf {
         let path_str = path.to_string_lossy().to_string();
-        
+
         // Convert Unix paths to Windows paths
         let normalized = path_str.replace('/', "\\");
         PathBuf::from(normalized)
     }
+}
+
+fn is_directory_only_command(command: &str) -> bool {
+    matches!(command, "cd" | "pushd")
 }
 

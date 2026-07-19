@@ -1123,6 +1123,31 @@ Rules:
 - do not change rubash execution semantics.
 - keep completion providers ordered the same way as interactive REPL startup.
 
+## Phase 19 - Blank Argument Path Completion
+
+Implementation status: completed on `master`.
+
+This phase fixes a basic zsh-like completion behavior uncovered by the Phase 18
+probe: `cd <Tab>` and `ls <Tab>` should offer current-directory path
+candidates even when the user has not typed the first character of the
+argument. Empty command position should still offer commands, not paths.
+
+Coverage target:
+
+- `winuxsh --completion-probe "ls "` suggests files and directories from the
+  current directory.
+- `winuxsh --completion-probe "cd "` suggests current-directory path
+  candidates, with directories marked using a trailing slash.
+- `winuxsh --completion-probe "ls | "` stays in command-position completion.
+- `winuxsh --completion-probe "echo gre"` still must not suggest `grep` as a
+  command argument.
+
+Rules:
+
+- do not special-case PowerShell wildcard behavior.
+- keep path completion Windows-native and relative to the synchronized host cwd.
+- do not change rubash parsing or command execution.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh

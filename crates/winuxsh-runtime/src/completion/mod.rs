@@ -77,23 +77,23 @@ impl CompletionContext {
 
     /// Check if current word is a path (contains / or \ or starts with .)
     pub fn is_path_completion(&self) -> bool {
-        if let Some(word) = self.get_current_word() {
-            // Flag prefixes are never path completions
-            if word.starts_with('-') {
-                return false;
-            }
-            // Explicit path indicators
-            if word.contains('/') || word.contains('\\') || word.starts_with('.') {
-                return true;
-            }
-            // If not at command position, treat as path
-            if !self.is_command_position() {
-                return true;
-            }
-            false
-        } else {
-            false
+        let Some(word) = self.get_current_word() else {
+            return !self.is_command_position();
+        };
+
+        // Flag prefixes are never path completions.
+        if word.starts_with('-') {
+            return false;
         }
+        // Explicit path indicators.
+        if word.contains('/') || word.contains('\\') || word.starts_with('.') {
+            return true;
+        }
+        // If not at command position, treat as path.
+        if !self.is_command_position() {
+            return true;
+        }
+        false
     }
 
     /// Check if current word is a variable (starts with $)
@@ -248,6 +248,18 @@ mod tests {
             12,
         );
         assert!(ctx.is_path_completion());
+    }
+
+    #[test]
+    fn test_blank_argument_position_is_path_completion() {
+        let arg =
+            CompletionContext::new(PathBuf::from("/home/user"), "ls ".to_string(), 3);
+        assert!(arg.is_path_completion());
+
+        let after_pipe =
+            CompletionContext::new(PathBuf::from("/home/user"), "ls | ".to_string(), 5);
+        assert!(!after_pipe.is_path_completion());
+        assert!(after_pipe.is_command_position());
     }
 
     #[test]

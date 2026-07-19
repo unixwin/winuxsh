@@ -67,11 +67,44 @@ fn path_command_is_suggested_by_prefix() {
 }
 
 #[test]
+fn blank_argument_position_suggests_paths() {
+    let env = ProbeEnv::new("winuxsh-completion-path-argument");
+    std::fs::create_dir_all(env.start.join("adir")).unwrap();
+    std::fs::write(env.start.join("alpha.txt"), "alpha").unwrap();
+
+    let suggestions = run_probe("ls ", &env, &[]);
+
+    assert_contains(&suggestions, "adir/");
+    assert_contains(&suggestions, "alpha.txt");
+}
+
+#[test]
+fn cd_blank_argument_position_suggests_directories_only() {
+    let env = ProbeEnv::new("winuxsh-completion-cd-argument");
+    std::fs::create_dir_all(env.start.join("adir")).unwrap();
+    std::fs::write(env.start.join("alpha.txt"), "alpha").unwrap();
+
+    let suggestions = run_probe("cd ", &env, &[]);
+
+    assert_contains(&suggestions, "adir/");
+    assert_not_contains(&suggestions, "alpha.txt");
+}
+
+#[test]
 fn command_position_after_pipe_suggests_command() {
     let env = ProbeEnv::new("winuxsh-completion-pipe");
     let suggestions = run_probe("ls | gre", &env, &[]);
 
     assert_contains(&suggestions, "grep");
+}
+
+#[test]
+fn blank_command_position_after_pipe_suggests_commands() {
+    let env = ProbeEnv::new("winuxsh-completion-pipe-empty");
+    let suggestions = run_probe("ls | ", &env, &[]);
+
+    assert_contains(&suggestions, "grep");
+    assert_contains(&suggestions, "ls");
 }
 
 #[test]
