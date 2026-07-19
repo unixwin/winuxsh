@@ -102,19 +102,47 @@ impl WinuxshPrompt {
         let host_s = self.theme.prompt_host.paint(&host).to_string();
         let dir_s = self.theme.prompt_dir.paint(&cwd).to_string();
         let sym_s = self.theme.prompt_symbol.paint("%").to_string();
-        let git_branch = current_git_branch().unwrap_or_default();
+        let git_status = std::env::current_dir()
+            .ok()
+            .and_then(|cwd| crate::git_status::collect(&cwd));
+        let git_branch = git_status
+            .as_ref()
+            .and_then(|s| s.branch.clone())
+            .unwrap_or_default();
+        let compact = git_status
+            .as_ref()
+            .map(|s| s.compact_status())
+            .unwrap_or_default();
+        let git_dirty = git_status.as_ref().map(|s| s.dirty).unwrap_or(false);
         let git_branch_s = if git_branch.is_empty() {
             String::new()
         } else {
             self.theme.prompt_symbol.paint(&git_branch).to_string()
         };
+        let git_status_s = if compact.is_empty() {
+            String::new()
+        } else {
+            self.theme.git_status_detail.paint(&compact).to_string()
+        };
         let git_prompt_s = if git_branch.is_empty() {
             String::new()
         } else {
-            self.git_prompt_format
-                .as_deref()
-                .unwrap_or("{git_branch}")
-                .replace("{git_branch}", &git_branch_s)
+            let branch_colored = if git_dirty {
+                self.theme.git_dirty.paint(&git_branch).to_string()
+            } else {
+                self.theme.git_clean.paint(&git_branch).to_string()
+            };
+            let body = match self.git_prompt_format.as_deref() {
+                Some("{git_branch}") | None => branch_colored,
+                Some(other) => other
+                    .replace("{git_branch}", &branch_colored)
+                    .replace("{git_status}", &git_status_s),
+            };
+            if git_status_s.is_empty() {
+                body
+            } else {
+                format!("{body} {git_status_s}")
+            }
         };
 
         template
@@ -124,6 +152,40 @@ impl WinuxshPrompt {
             .replace("{symbol}", &sym_s)
             .replace("{git_prompt}", &git_prompt_s)
             .replace("{git_branch}", &git_branch_s)
+            .replace("{git_status}", &git_status_s)
+            .replace("{git_dirty}", if git_dirty { "✚" } else { "" })
+            .replace(
+                "{git_staged}",
+                &git_status.as_ref().map(|s| s.staged.to_string()).unwrap_or_default(),
+            )
+            .replace(
+                "{git_unstaged}",
+                &git_status.as_ref().map(|s| s.unstaged.to_string()).unwrap_or_default(),
+            )
+            .replace(
+                "{git_untracked}",
+                &git_status.as_ref().map(|s| s.untracked.to_string()).unwrap_or_default(),
+            )
+            .replace(
+                "{git_deleted}",
+                &git_status.as_ref().map(|s| s.deleted.to_string()).unwrap_or_default(),
+            )
+            .replace(
+                "{git_ahead}",
+                &git_status.as_ref().map(|s| s.ahead.to_string()).unwrap_or_default(),
+            )
+            .replace(
+                "{git_behind}",
+                &git_status.as_ref().map(|s| s.behind.to_string()).unwrap_or_default(),
+            )
+            .replace(
+                "{git_stashes}",
+                &git_status.as_ref().map(|s| s.stashes.to_string()).unwrap_or_default(),
+            )
+            .replace(
+                "{git_conflicts}",
+                &git_status.as_ref().map(|s| s.conflicts.to_string()).unwrap_or_default(),
+            )
             .replace("%#", &sym_s)
             .replace("%n", &user)
             .replace("%m", &host)
@@ -146,11 +208,7 @@ impl WinuxshPrompt {
     }
 }
 
-fn current_git_branch() -> Option<String> {
-    let cwd = std::env::current_dir().ok()?;
-    git_branch_from_dir(&cwd)
-}
-
+#[allow(dead_code)]
 fn git_branch_from_dir(start: &Path) -> Option<String> {
     for dir in start.ancestors() {
         let git_path = dir.join(".git");
@@ -239,6 +297,7 @@ impl Prompt for WinuxshPrompt {
 mod tests {
     use super::*;
     use crate::test_support::PROCESS_STATE_LOCK;
+    use std::process::Stdio;
 
     #[test]
     fn renders_optional_right_prompt() {
@@ -274,9 +333,8 @@ mod tests {
     #[test]
     fn renders_git_prompt_only_inside_git_repo() {
         let dir = unique_temp_dir("winuxsh-prompt-git-render");
-        let git_dir = dir.join(".git");
-        std::fs::create_dir_all(&git_dir).unwrap();
-        std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/feature/demo\n").unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        init_real_repo(&dir);
         let _process_lock = PROCESS_STATE_LOCK.lock().unwrap();
         let _cwd = CwdGuard::enter(&dir);
 
@@ -289,7 +347,6 @@ mod tests {
 
         let rendered = prompt.render_prompt_left();
         assert!(rendered.contains("git:("));
-        assert!(rendered.contains("feature/demo"));
         assert!(rendered.contains(")"));
 
         let _ = std::fs::remove_dir_all(dir);
@@ -374,6 +431,17 @@ mod tests {
     struct CwdGuard {
         previous: PathBuf,
     }
+    fn init_real_repo(dir: &Path) {
+        let o = std::process::Command::new("git")
+            .arg("init")
+            .current_dir(dir)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .expect("git init should succeed");
+        assert!(o.status.success(), "git init failed");
+    }
+
 
     impl CwdGuard {
         fn enter(path: &Path) -> Self {

@@ -265,6 +265,7 @@ const DEFAULT_COMPLETION_DEFS: &[(&str, &str)] = &[
     ("mv", include_str!("../../completions/defaults/mv.toml")),
     ("rm", include_str!("../../completions/defaults/rm.toml")),
     ("touch", include_str!("../../completions/defaults/touch.toml")),
+    ("git", include_str!("../../completions/defaults/git.toml")),
 ];
 
 /// Completion plugin that reads per-command completion definitions from a

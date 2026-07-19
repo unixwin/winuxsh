@@ -8,6 +8,7 @@ pub mod autosuggest;
 pub mod completion;
 pub mod config;
 pub mod ctrl_c;
+pub mod git_status;
 pub mod prompt;
 pub mod repl;
 pub mod shell;

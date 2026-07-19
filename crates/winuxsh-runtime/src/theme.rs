@@ -18,6 +18,9 @@ pub struct Theme {
     pub error: Style,
     pub warning: Style,
     pub success: Style,
+    pub git_clean: Style,
+    pub git_dirty: Style,
+    pub git_status_detail: Style,
 }
 
 impl Theme {
@@ -31,6 +34,9 @@ impl Theme {
             error: Style::new().fg(Color::Red),
             warning: Style::new().fg(Color::Yellow),
             success: Style::new().fg(Color::Green),
+            git_clean: Style::new().fg(Color::Green),
+            git_dirty: Style::new().fg(Color::Yellow),
+            git_status_detail: Style::new().fg(Color::Cyan),
         }
     }
 
@@ -44,6 +50,9 @@ impl Theme {
             error: Style::new().fg(Color::Red),
             warning: Style::new().fg(Color::Yellow),
             success: Style::new().fg(Color::Green),
+            git_clean: Style::new().fg(Color::Green),
+            git_dirty: Style::new().fg(Color::Yellow),
+            git_status_detail: Style::new().fg(Color::Cyan),
         }
     }
 
@@ -57,6 +66,9 @@ impl Theme {
             error: Style::new().fg(Color::Red),
             warning: Style::new().fg(Color::Yellow),
             success: Style::new().fg(Color::Green),
+            git_clean: Style::new().fg(Color::Green),
+            git_dirty: Style::new().fg(Color::Yellow),
+            git_status_detail: Style::new().fg(Color::Cyan),
         }
     }
 
@@ -70,6 +82,9 @@ impl Theme {
             error: Style::new().bold().fg(Color::Red),
             warning: Style::new().bold().fg(Color::Yellow),
             success: Style::new().bold().fg(Color::Green),
+            git_clean: Style::new().bold().fg(Color::Green),
+            git_dirty: Style::new().bold().fg(Color::Yellow),
+            git_status_detail: Style::new().bold().fg(Color::Cyan),
         }
     }
 }
@@ -159,6 +174,9 @@ struct UserThemeToml {
     error: Option<UserStyleToml>,
     warning: Option<UserStyleToml>,
     success: Option<UserStyleToml>,
+    git_clean: Option<UserStyleToml>,
+    git_dirty: Option<UserStyleToml>,
+    git_status_detail: Option<UserStyleToml>,
 }
 
 impl UserThemeToml {
@@ -186,6 +204,15 @@ impl UserThemeToml {
         }
         if let Some(style) = self.success {
             theme.success = style.apply_to(theme.success)?;
+        }
+        if let Some(style) = self.git_clean {
+            theme.git_clean = style.apply_to(theme.git_clean)?;
+        }
+        if let Some(style) = self.git_dirty {
+            theme.git_dirty = style.apply_to(theme.git_dirty)?;
+        }
+        if let Some(style) = self.git_status_detail {
+            theme.git_status_detail = style.apply_to(theme.git_status_detail)?;
         }
 
         Some(theme)
