@@ -146,6 +146,10 @@ Verification:
 - Status: Phase 30 complete. `rubash` pinned to
   `f451e16937437d49a2575fbc197345a498d68576`, which executes structured
   AND/OR lists left-to-right with normal shell short-circuit semantics.
+- Status: Phase 29 complete. Added a deterministic `bash_smoke` compat fixture
+  distilled from the user's manual transcript. Keep dynamic `date` output and
+  external `bash -c` out of the smoke path so the test remains Windows-native
+  and stable.
 - Add a repeatable bash smoke fixture from the user's manual terminal script,
   but only after failures are split into focused regressions.
 - Cover conditionals, loops, functions, pipelines, redirection, command
@@ -160,6 +164,7 @@ Verification:
 Verification:
 
 - focused AND/OR regression tests.
+- `bash_smoke` compat fixture.
 - `cargo test --lib -p winuxsh-runtime --locked`
 - `cargo test --test compat --locked -- --ignored`
 - `cargo build --locked`

@@ -1,0 +1,51 @@
+[1] vars command-substitution
+hello:winuxsh sub:inner
+[2] arithmetic
+sum:8 pow:1024
+[3] arrays
+first:a all:a b c d e len:5
+[4] assoc arrays
+key1:value1 keys:key1 key2
+[5] logic
+eq-true
+neq-false
+[6] for list
+n:1
+n:2
+n:3
+[7] for c
+ci:0
+ci:1
+ci:2
+[8] while
+wi:0
+wi:1
+wi:2
+[9] until
+ui:3
+ui:2
+ui:1
+[10] function
+hello:Alice
+[11] if
+ok200
+[12] case
+two
+[13] pipeline
+banana
+[14] redirect
+test content
+[15] special vars
+argc:0 args: prev:0
+[16] array slice
+orig:1 2 3 4 5 slice:2 3 4
+[17] string ops
+str:hello world len:11 sub:hello
+[18] file tests
+target-dir
+temp-missing
+[19] export
+child:123
+[20] exit status
+false-branch
+true-branch
