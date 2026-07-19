@@ -1450,6 +1450,8 @@ Implemented:
   native command shims.
 - Ctrl+C clears pending input; Ctrl+D at PS2 cancels the pending block and
   returns to the primary prompt.
+- Follow-up: shell comments are ignored by the completeness scanner, so pasted
+  headings such as `# 11. 条件判断 (if)` do not start a phantom `if` block.
 
 Coverage target:
 

@@ -541,6 +541,9 @@ fn scan_repl_input(input: &str) -> ReplInputScan {
         }
 
         match ch {
+            '#' if word.is_empty() => {
+                index = skip_repl_comment(&chars, index);
+            }
             '\'' | '"' | '`' => {
                 quote = Some(ch);
                 word.push(ch);
@@ -600,6 +603,13 @@ fn flush_repl_word(tokens: &mut Vec<ReplToken>, word: &mut String) {
         return;
     }
     tokens.push(ReplToken::Word(std::mem::take(word)));
+}
+
+fn skip_repl_comment(chars: &[char], mut index: usize) -> usize {
+    while index < chars.len() && chars[index] != '\n' {
+        index += 1;
+    }
+    index
 }
 
 fn is_function_header(tokens: &[ReplToken], index: usize) -> bool {
@@ -787,6 +797,21 @@ mod tests {
         assert!(is_repl_input_complete("echo one |\n  grep one"));
         assert!(!is_repl_input_complete("echo one \\"));
         assert!(is_repl_input_complete("echo one \\\n  two"));
+    }
+
+    #[test]
+    fn repl_input_complete_ignores_shell_comments() {
+        assert!(is_repl_input_complete("# 11. 条件判断 (if)"));
+        assert!(is_repl_input_complete("# case/esac/function() are comments"));
+        assert!(is_repl_input_complete(
+            "# 11. 条件判断 (if)\nprintf \"ok\\n\""
+        ));
+        assert!(is_repl_input_complete("echo foo#bar"));
+        assert!(is_repl_input_complete("echo foo # if (comment)"));
+        assert!(!is_repl_input_complete("if true; then\n  # fi in comment"));
+        assert!(is_repl_input_complete(
+            "if true; then\n  # fi in comment\n  echo ok\nfi"
+        ));
     }
 
     #[test]
