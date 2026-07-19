@@ -141,6 +141,29 @@ Verification:
 - Runtime unit tests for config parsing.
 - REPL keybinding tests preserve Tab completion and Ctrl+R.
 
+## Phase 4.5 - Execution Contract Smoke
+
+- Status: Phase 30 complete. `rubash` pinned to
+  `f451e16937437d49a2575fbc197345a498d68576`, which executes structured
+  AND/OR lists left-to-right with normal shell short-circuit semantics.
+- Add a repeatable bash smoke fixture from the user's manual terminal script,
+  but only after failures are split into focused regressions.
+- Cover conditionals, loops, functions, pipelines, redirection, command
+  substitution, Windows-native paths, and exit status.
+- Fix the current AND/OR list semantics gap: `false && a || b` and
+  `[ 1 -eq 2 ] && a || b` must skip the true branch and run the fallback.
+- `$?` is verified correct when `winuxsh -c` is invoked from fixture files or
+  PowerShell single quotes; avoid PowerShell double-quoted `$?` in tests.
+- Prefer a rubash fix and pinned rev update; do not reimplement AND/OR
+  execution in winuxsh.
+
+Verification:
+
+- focused AND/OR regression tests.
+- `cargo test --lib -p winuxsh-runtime --locked`
+- `cargo test --test compat --locked -- --ignored`
+- `cargo build --locked`
+
 ## Phase 5 - Packaging and Defaults
 
 - Provide a Windows Terminal profile recommendation.

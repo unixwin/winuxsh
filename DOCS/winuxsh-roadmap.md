@@ -133,6 +133,8 @@ status: active
 - [x] Phase 26 standard ZLE bindkey subset: 常见 `bindkey KEY zle-widget` 映射到 reedline 原生事件
 - [x] Phase 27 native Windows path literals: 裸 `C:\...` 输入在 rubash tokenization 前规范化为 `C:/...`，避免反斜杠被 bash 词法当作转义符吞掉
 - [x] Phase 28 interactive multiline collector: REPL 识别未完成的 `if/for/while/case/function` 等复合命令块，显示 PS2/continuation prompt，完整后一次性交给 rubash script execution
+- [ ] Phase 29 bash smoke fixture: 将用户手工 20 段 bash/zsh-like smoke 脚本整理为可持续 compat fixture，优先覆盖条件判断、循环、函数、重定向、路径与 exit status
+- [x] Phase 30 rubash AND/OR status semantics: 修复 `false && a || b` / `[ ... ] && a || b` 这类 AND/OR list 跳过语义，保持 shell 语义在 rubash，不在 winuxsh 重建执行器
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证
@@ -150,6 +152,8 @@ status: active
 - [x] Phase 26 standard ZLE bindkey tests: 覆盖标准 widget 映射、import-plan 启用入口、unsupported diagnostics 降噪
 - [x] Phase 27 native Windows path tests: 覆盖 `ls C:\...` 与 `cd C:\...; pwd` 的二进制级 host contract
 - [x] Phase 28 multiline REPL tests: 覆盖 pending buffer 对 `if/fi`、`for/done`、函数体、引号、管道续行、反斜杠续行和注释行的完整性判断
+- [ ] Phase 29 bash smoke tests: 增加聚合 smoke fixture，并确保失败用例先拆成小回归修复后再纳入 smoke
+- [x] Phase 30 AND/OR tests: 覆盖 `true &&`, `false &&`, `true ||`, `false ||`, 以及 `[ 1 -eq 2 ] && yes || no`
 - [ ] 作业控制/内建命令语义优先走 rubash，不在 winuxsh 重复实现
 
 ## 关键架构决策 (锁定)
@@ -160,7 +164,7 @@ status: active
 - 配置文件: .winshrc.toml (保留向后兼容)
 - 历史文件: .winuxsh_history
 - rust-version: 1.70 (minimum)
-- rubash 锁定版本: f08d6d68e4901332c0003be549f9f80f6251ae2 (PR #5 合入点)
+- rubash 锁定版本: f451e16937437d49a2575fbc197345a498d68576 (AND/OR list 左结合短路修复)
 - 插件框架 + Oh-My-Winuxsh: v1 排除,plan for v2/v3
 
 ---

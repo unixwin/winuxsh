@@ -124,3 +124,4 @@ compat_test!(heredoc, "heredoc");
 compat_test!(continuation, "continuation");
 compat_test!(multiline_if, "multiline_if");
 compat_test!(multiline_for, "multiline_for");
+compat_test!(and_or_status, "and_or_status");
