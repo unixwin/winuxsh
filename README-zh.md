@@ -56,8 +56,9 @@ Winuxsh 的产品契约是：
 - `~/.winuxsh/themes/*.toml` 用户主题
 - 安全 `.zshrc` / Oh My Zsh scanner、report、import plan、显式 apply、status、rollback plan、doctor
 - Git、Docker、kubectl、npm、autosuggestions、syntax highlighting、history widgets、direnv、dotenv、zoxide、thefuck、command-not-found、fzf、interactive-cd、last-working-dir 等原生 zsh-style packs
+- `agent` 和 `zsh-lite` 的只读 native zsh profile plan
 
-`--zsh-profile-plan zsh-lite` 这类 profile 命令还在规划中，当前请使用下面已经实现的兼容命令。
+profile apply 命令仍在后续规划中。现在可以先用 `--zsh-profile-plan` 输出并审阅 TOML，再有意识地合并/应用。
 
 ## 快速开始
 
@@ -127,6 +128,18 @@ winuxsh --zsh-compat-import-rollback-plan
 ```
 
 详细教程见：[Zsh 迁移教程](DOCS/zsh-migration-guide.md)。
+
+低风险 zsh-like 日常 profile：
+
+```pwsh
+winuxsh --zsh-profile-plan zsh-lite
+```
+
+确定性的 agent profile：
+
+```pwsh
+winuxsh --zsh-profile-plan agent
+```
 
 ## 原生 Zsh Packs
 

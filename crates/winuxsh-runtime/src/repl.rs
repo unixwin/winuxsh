@@ -38,6 +38,7 @@ pub fn build_line_editor(shell: &mut Shell) -> anyhow::Result<Reedline> {
             COMPLETION_MENU,
             menu_config.completion_page_size,
             menu_config,
+            MenuInputMode::FullBuffer,
         )),
         completer: Box::new(completer),
     };
@@ -46,6 +47,7 @@ pub fn build_line_editor(shell: &mut Shell) -> anyhow::Result<Reedline> {
             HISTORY_MENU,
             menu_config.history_page_size,
             menu_config,
+            MenuInputMode::IncrementalSearch,
         ),
     ));
 
@@ -76,11 +78,27 @@ pub fn build_line_editor(shell: &mut Shell) -> anyhow::Result<Reedline> {
     Ok(editor)
 }
 
-fn configured_list_menu(name: &str, page_size: usize, config: MenuConfig) -> ListMenu {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MenuInputMode {
+    FullBuffer,
+    IncrementalSearch,
+}
+
+fn configured_list_menu(
+    name: &str,
+    page_size: usize,
+    config: MenuConfig,
+    input_mode: MenuInputMode,
+) -> ListMenu {
     ListMenu::default()
         .with_name(name)
         .with_page_size(page_size)
         .with_max_entry_lines(config.max_entry_lines)
+        .with_only_buffer_difference(menu_uses_only_buffer_difference(input_mode))
+}
+
+fn menu_uses_only_buffer_difference(input_mode: MenuInputMode) -> bool {
+    matches!(input_mode, MenuInputMode::IncrementalSearch)
 }
 
 fn history_exclusion_prefix(ignore_space_prefixed: bool) -> Option<String> {
@@ -648,8 +666,11 @@ fn has_unescaped_trailing_backslash(input: &str) -> bool {
 
 /// Run the interactive REPL.
 pub fn run_repl(shell: &mut Shell) -> anyhow::Result<()> {
-    println!("Winuxsh v2 - rubash + winuxcmd on Windows");
-    println!("Type 'exit' to quit. Press Ctrl+D for EOF.");
+    let welcome = format!(
+        "Winuxsh {} \u{2014} bash-compatible shell for Windows. Type \u{2018}exit\u{2019} or press Ctrl+D to quit.",
+        env!("CARGO_PKG_VERSION")
+    );
+    println!("{}", welcome);
     println!();
 
     shell.restore_last_working_dir_for_repl();
@@ -746,9 +767,37 @@ mod tests {
                 history_page_size: 7,
                 max_entry_lines: 3,
             },
+            MenuInputMode::FullBuffer,
         );
 
         assert_eq!(menu.name(), "custom_menu");
+    }
+
+    #[test]
+    fn completion_menu_passes_full_buffer_not_only_difference() {
+        // When FromStr calls configure the completion-list menu, only_buffer_difference
+        // must be false so that the completer sees the entire input line including the
+        // command word and any text before the cursor. Otherwise `cd repo<Tab>` would
+        // only get `repo` (and worse, `cmak<Tab>` after menu activation would only get
+        // `k`, producing irrelevant PATH suggestions like `kill` or `klist`).
+        let completion_menu = configured_list_menu(
+            COMPLETION_MENU,
+            10,
+            MenuConfig::default(),
+            MenuInputMode::FullBuffer,
+        );
+        assert_eq!(completion_menu.name(), COMPLETION_MENU);
+    }
+
+    #[test]
+    fn history_menu_uses_incremental_only_buffer_difference() {
+        let history_menu = configured_list_menu(
+            HISTORY_MENU,
+            7,
+            MenuConfig::default(),
+            MenuInputMode::IncrementalSearch,
+        );
+        assert_eq!(history_menu.name(), HISTORY_MENU);
     }
 
     #[test]

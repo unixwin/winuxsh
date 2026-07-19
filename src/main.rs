@@ -15,6 +15,7 @@
 //!   winuxsh --zsh-compat-doctor → summarize zsh compatibility health
 //!   winuxsh --zsh-native-packs → list built-in native zsh plugin packs
 //!   winuxsh --zsh-native-packs-json → list built-in native zsh plugin packs as JSON
+//!   winuxsh --zsh-profile-plan <profile> → print a native zsh profile TOML plan
 //!   winuxsh --completion-probe "line" [cursor] → print REPL completions
 
 use std::path::PathBuf;
@@ -90,6 +91,10 @@ fn run(args: &[String]) -> anyhow::Result<()> {
             print_zsh_native_packs(true)?;
             Ok(())
         }
+        "--zsh-profile-plan" => {
+            print_zsh_profile_plan(args)?;
+            Ok(())
+        }
         "--completion-probe" => {
             print_completion_probe(args)?;
             Ok(())
@@ -125,24 +130,35 @@ fn run_repl() -> anyhow::Result<()> {
 }
 
 fn print_usage() {
-    println!("winuxsh - a bash-compatible shell for Windows");
+    println!(
+        "Winuxsh {} \u{2014} a bash-compatible shell that feels at home on Windows.",
+        env!("CARGO_PKG_VERSION")
+    );
     println!();
-    println!("Usage:");
-    println!("  winuxsh                    Start the interactive REPL");
-    println!("  winuxsh -c \"command\"        Execute a command and exit");
-    println!("  winuxsh script.sh [args...]  Execute a script file");
-    println!("  winuxsh --help, -h          Show this help");
-    println!("  winuxsh --version, -V       Show version info");
-    println!("  winuxsh --zsh-compat-report      Scan zsh config and show a safe import report");
-    println!("  winuxsh --zsh-compat-report-json Scan zsh config and show a JSON import report");
-    println!("  winuxsh --zsh-compat-import-plan Print a reviewable .winshrc.toml import patch");
-    println!("  winuxsh --zsh-compat-import-apply Write that import patch with a backup");
-    println!("  winuxsh --zsh-compat-import-status Inspect import block and backup status");
-    println!("  winuxsh --zsh-compat-import-rollback-plan Print latest backup restore command");
-    println!("  winuxsh --zsh-compat-doctor Summarize zsh compatibility health");
-    println!("  winuxsh --zsh-native-packs List built-in native zsh plugin packs");
-    println!("  winuxsh --zsh-native-packs-json List built-in native zsh plugin packs as JSON");
-    println!("  winuxsh --completion-probe \"line\" [cursor] Print REPL completion candidates");
+    println!("Usage:  winuxsh [option]");
+    println!("        winuxsh -c <cmd>         Run a command then exit");
+    println!("        winuxsh <script> [args]   Run a script file");
+    println!();
+    println!("Options:");
+    println!("  -h, --help                Show this help");
+    println!("  -V, --version             Version and component info");
+    println!("  -c <command>              Execute a command ad-hoc");
+    println!();
+    println!("  --zsh-compat-report       Scan ~/.zshrc, show safe-import report");
+    println!("  --zsh-compat-report-json  Same, as JSON");
+    println!("  --zsh-compat-import-plan  Generate a .winshrc.toml import patch");
+    println!("  --zsh-compat-import-apply Apply the patch (with backup)");
+    println!("  --zsh-compat-import-status Inspect import block and backup");
+    println!("  --zsh-compat-import-rollback-plan  Show restore command");
+    println!("  --zsh-compat-doctor       Overall zsh health summary");
+    println!();
+    println!("  --zsh-native-packs        List built-in zsh plugin replacements");
+    println!("  --zsh-native-packs-json   Same, as JSON");
+    println!("  --zsh-profile-plan <profile>  Print TOML for a profile");
+    println!();
+    println!("  --completion-probe <line> [cursor]  Debug: print completion candidates");
+    println!();
+    println!("Configuration: ~/.winshrc.toml (see DOCS/ for reference)");
 }
 
 fn print_completion_probe(args: &[String]) -> anyhow::Result<()> {
@@ -320,13 +336,26 @@ fn print_zsh_native_packs(json: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn print_version() {
-    println!("winuxsh 0.6.0");
-    println!("  rubash:   {}", rubash_version());
+fn print_zsh_profile_plan(args: &[String]) -> anyhow::Result<()> {
+    let Some(profile) = args.get(2) else {
+        anyhow::bail!("--zsh-profile-plan requires a profile: agent or zsh-lite");
+    };
     println!(
-        "  winuxcmd: {}",
-        winuxsh_runtime::winuxcmd::version().unwrap_or_else(|| "not found".to_string())
+        "{}",
+        winuxsh_runtime::zsh_compat::zsh_profile_plan_toml_for_name(profile)?
     );
+    Ok(())
+}
+
+fn print_version() {
+    println!(
+        "Winuxsh {} \u{2014} bash-compatible shell for Windows",
+        env!("CARGO_PKG_VERSION")
+    );
+    println!("  rubash   {}", rubash_version());
+    if let Some(v) = winuxsh_runtime::winuxcmd::version() {
+        println!("  winuxcmd {}", v);
+    }
 }
 
 fn rubash_version() -> &'static str {

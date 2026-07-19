@@ -165,7 +165,7 @@ Default-on safe UI packs:
 - `zsh-autosuggestions`
 - `zsh-syntax-highlighting`
 
-Recommended low-risk daily profile, planned as `zsh-lite`:
+Recommended low-risk daily profile, available as `zsh-lite`:
 
 - `git`
 - `zsh-autosuggestions`
@@ -185,8 +185,20 @@ Explicit-trust packs stay opt-in:
 
 ## Step 5: Configure Daily Zsh-Like UX
 
-Until the planned `--zsh-profile-plan zsh-lite` command exists, configure the
-same pieces through TOML.
+Generate a reviewable low-risk daily profile:
+
+```pwsh
+winuxsh --zsh-profile-plan zsh-lite
+```
+
+For a deterministic profile suited to agents and non-interactive work:
+
+```pwsh
+winuxsh --zsh-profile-plan agent
+```
+
+`--zsh-profile-plan` prints TOML only. Review it before merging it into
+`~/.winshrc.toml`; automatic `--zsh-profile-apply` is still a later phase.
 
 Example starting point:
 
@@ -343,7 +355,7 @@ a host contract bug.
 Near-term zsh onboarding work:
 
 1. Native pack manifest and CLI inventory: implemented.
-2. `zsh-lite` profile planner: planned.
+2. `zsh-lite` / `agent` profile planner: implemented.
 3. Git daily-use polish: planned.
 4. Widget pack polish: planned.
 5. Tool pack expansion for `gh`, `cargo`, `pnpm`, `python`, and related CLIs:

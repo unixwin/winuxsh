@@ -63,9 +63,10 @@ Current `master` is the rubash-backed rewrite with:
 - native zsh-style packs for Git, Docker, kubectl, npm, autosuggestions,
   syntax highlighting, history widgets, direnv, dotenv, zoxide, thefuck,
   command-not-found, fzf, interactive-cd, and last-working-dir
+- read-only native zsh profile plans for `agent` and `zsh-lite`
 
-Some profile commands, such as `--zsh-profile-plan zsh-lite`, are planned but
-not implemented yet. Use the current compatibility commands below for now.
+Profile apply commands are still planned. For now, review profile output with
+`--zsh-profile-plan` and merge/apply TOML intentionally.
 
 ## Quick Start
 
@@ -138,6 +139,18 @@ winuxsh --zsh-compat-import-rollback-plan
 ```
 
 See the detailed guide: [Zsh Migration Guide](DOCS/zsh-migration-guide.md).
+
+For a low-risk native zsh-like starter profile:
+
+```pwsh
+winuxsh --zsh-profile-plan zsh-lite
+```
+
+For deterministic agent defaults without alias surprises:
+
+```pwsh
+winuxsh --zsh-profile-plan agent
+```
 
 ## Native Zsh Packs
 

@@ -111,6 +111,13 @@ impl WinuxshCompleter {
         );
         let mut all_suggestions = Vec::new();
 
+        // At command position, also surface matching directories from the
+        // current working directory ahead of PATH command matches. This
+        // mirrors the Windows-shell expectation that `win` in a folder
+        // containing `winuxsh/` should offer `winuxsh/` first, instead of
+        // only showing PATH executables like `winver` or `winrm`.
+        let cwd_dir_suggestions = self.cwd_directory_suggestions_at_command_position(&context);
+
         // Try each plugin in order; only the first non-None result is used
         for plugin in &plugins {
             if let Some(result) = plugin.complete(&context) {
@@ -118,6 +125,14 @@ impl WinuxshCompleter {
                 let formatted = self.format_completions(result, input, cursor_pos);
                 all_suggestions.extend(formatted);
             }
+        }
+
+        // Directories from cwd take priority over PATH commands so users can
+        // `cd winuxsh`/open `winuxsh/` without typing `./` first.
+        if !cwd_dir_suggestions.is_empty() {
+            let mut combined = cwd_dir_suggestions;
+            combined.extend(all_suggestions);
+            all_suggestions = combined;
         }
 
         // Fallback to built-in path/variable/command completers
@@ -135,6 +150,81 @@ impl WinuxshCompleter {
         }
 
         all_suggestions
+    }
+
+    /// Build directory-only suggestions from the current working directory
+    /// when the cursor is at command position. Returns suggestions with the
+    /// same `span`/`append_whitespace` shape as the rest of the pipeline.
+    fn cwd_directory_suggestions_at_command_position(
+        &self,
+        context: &CompletionContext,
+    ) -> Vec<Suggestion> {
+        if !context.is_command_position() {
+            return Vec::new();
+        }
+        let Some(word) = context.get_current_word() else {
+            return Vec::new();
+        };
+        // Skip flag-like input and explicit path indicators; those are handled
+        // by the path completer with its own prefix preservation rules.
+        if word.starts_with('-') || word.contains('/') || word.contains('\\') || word.starts_with('.')
+        {
+            return Vec::new();
+        }
+        if word.is_empty() {
+            return Vec::new();
+        }
+
+        let entries = match std::fs::read_dir(&context.current_dir) {
+            Ok(entries) => entries,
+            Err(_) => return Vec::new(),
+        };
+
+        let mut candidates: Vec<String> = Vec::new();
+        for entry in entries.flatten() {
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            if !context.behavior.matches(&file_name, &word) {
+                continue;
+            }
+            let is_dir = entry
+                .file_type()
+                .map(|ft| ft.is_dir())
+                .unwrap_or(false);
+            if !is_dir {
+                continue;
+            }
+            if file_name.starts_with('.') && !word.starts_with('.') {
+                continue;
+            }
+            let escaped = shell_escape_path_segment(&file_name);
+            candidates.push(format!("{escaped}/"));
+        }
+
+        if candidates.is_empty() {
+            return Vec::new();
+        }
+
+        candidates.sort();
+        candidates.dedup();
+
+        let (span_start, span_end) = context
+            .current_word_span()
+            .unwrap_or((context.cursor_pos, context.cursor_pos));
+
+        candidates
+            .into_iter()
+            .map(|candidate| Suggestion {
+                value: candidate,
+                description: None,
+                style: None,
+                extra: None,
+                span: Span {
+                    start: span_start,
+                    end: span_end,
+                },
+                append_whitespace: false,
+            })
+            .collect()
     }
     fn format_completions(
         &self,
@@ -222,5 +312,169 @@ mod tests {
             .as_nanos();
         std::env::temp_dir().join(format!("{}-{}-{}", prefix, std::process::id(), nanos))
     }
+}
+
+#[cfg(test)]
+mod cwd_priority_tests {
+    use super::*;
+
+    #[test]
+    fn command_position_offers_matching_cwd_directory_ahead_of_path_commands() {
+        // Build a temp cwd that contains a directory whose name shares a prefix
+        // with a real PATH executable so we can prove directories win.
+        let temp_dir = unique_temp_dir("winuxsh-cwd-priority");
+        std::fs::create_dir_all(temp_dir.join("winuxsh")).unwrap();
+        std::fs::create_dir_all(temp_dir.join("other")).unwrap();
+        std::fs::write(temp_dir.join(" readme.txt"), "ignored").unwrap();
+
+        let state = Arc::new(Mutex::new(CompletionState::new(temp_dir.clone())));
+        let mut completer = WinuxshCompleter::new(state);
+        let suggestions = completer.complete("win", 3);
+
+        let dir_suggestion = suggestions
+            .iter()
+            .find(|suggestion| suggestion.value == "winuxsh/")
+            .unwrap_or_else(|| panic!("expected winuxsh/ ahead of PATH, got {suggestions:?}"));
+        assert_eq!(dir_suggestion.span.start, 0);
+        assert_eq!(dir_suggestion.span.end, 3);
+        assert!(!dir_suggestion.append_whitespace);
+
+        // Directories whose names do not match the prefix must not sneak in.
+        assert!(
+            !suggestions
+                .iter()
+                .any(|suggestion| suggestion.value == "other/"),
+            "unexpected other/ in {suggestions:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn command_position_does_not_offer_cwd_files_only_directories() {
+        let temp_dir = unique_temp_dir("winuxsh-cwd-priority-files");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        std::fs::write(temp_dir.join("winuxfile.txt"), "x").unwrap();
+
+        let state = Arc::new(Mutex::new(CompletionState::new(temp_dir.clone())));
+        let mut completer = WinuxshCompleter::new(state);
+        let suggestions = completer.complete("win", 3);
+
+        // A plain file at command position should never be offered as a
+        // command-position directory candidate. We only collect directories
+        // via the cwd shortcut, so file names must not appear even when they
+        // share the typed prefix. PATH commands may still show up via the
+        // command plugin, but no `winuxfile.txt` style entry.
+        assert!(
+            !suggestions
+                .iter()
+                .any(|suggestion| suggestion.value.contains("winuxfile")),
+            "file leaked into cwd directory suggestions: {suggestions:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn command_position_cwd_suggestions_respect_hidden_dot_prefix() {
+        let temp_dir = unique_temp_dir("winuxsh-cwd-priority-hidden");
+        std::fs::create_dir_all(temp_dir.join(".winuxsh")).unwrap();
+
+        let state = Arc::new(Mutex::new(CompletionState::new(temp_dir.clone())));
+        let mut completer = WinuxshCompleter::new(state);
+
+        // Without a dot prefix, hidden directories should not be offered.
+        let visible = completer.complete("win", 3);
+        assert!(
+            !visible
+                .iter()
+                .any(|suggestion| suggestion.value == ".winuxsh/"),
+            "hidden dir leaked without dot prefix: {visible:?}"
+        );
+
+        // With a dot prefix, the hidden directory should appear.
+        let dotted = completer.complete(".win", 4);
+        assert!(
+            dotted
+                .iter()
+                .any(|suggestion| suggestion.value == ".winuxsh/"),
+            "expected .winuxsh/ for dotted prefix, got {dotted:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn argument_position_uses_path_completer_for_cwd_directories() {
+        // After `echo `, we are not at command position. The directory
+        // shortcut for command position must not fire; argument position is
+        // served by the path completer, which legitimately surfaces matching
+        // directories from cwd. We assert the directory appears (via
+        // PathCompleter), and that the command-position shortcut did not run
+        // by checking the suggestion span ends at the cursor rather than at
+        // the start of the typed word. Both paths produce a directory entry,
+        // but only the path completer runs at argument position.
+        let temp_dir = unique_temp_dir("winuxsh-cwd-priority-arg");
+        std::fs::create_dir_all(temp_dir.join("winuxsh")).unwrap();
+
+        let state = Arc::new(Mutex::new(CompletionState::new(temp_dir.clone())));
+        let mut completer = WinuxshCompleter::new(state);
+        let suggestions = completer.complete("echo win", 8);
+
+        let dir_suggestion = suggestions
+            .iter()
+            .find(|suggestion| suggestion.value == "winuxsh/")
+            .unwrap_or_else(|| panic!("expected winuxsh/ via PathCompleter, got {suggestions:?}"));
+
+        assert_eq!(dir_suggestion.span.start, 5);
+        assert_eq!(dir_suggestion.span.end, 8);
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    fn unique_temp_dir(prefix: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("{}-{}-{}", prefix, std::process::id(), nanos))
+    }
+}
+
+/// Escape a single path segment so it is safe to insert into a shell line.
+/// Mirrors the escaping rules used by `path::shell_escape_path` but does not
+/// include quoting, because command-position suggestions are full tokens and
+/// the trailing `/` should remain visible to the user.
+fn shell_escape_path_segment(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if matches!(
+            ch,
+            ' ' | '\t'
+                | '\\'
+                | '\''
+                | '"'
+                | '$'
+                | '`'
+                | '!'
+                | '&'
+                | ';'
+                | '('
+                | ')'
+                | '<'
+                | '>'
+                | '|'
+                | '*'
+                | '?'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+        ) {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
 }
 

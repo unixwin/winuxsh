@@ -260,6 +260,11 @@ Verification:
 
 ### Phase 32 - Zsh-Lite Profile Plan
 
+Implementation status: completed on master. Winuxsh now exposes read-only
+`winuxsh --zsh-profile-plan <profile>` for `agent` and `zsh-lite`. It generates
+a reviewable TOML patch only; it does not write `~/.winshrc.toml` or enable
+lifecycle/external-command packs automatically.
+
 Add a profile planner that generates a managed TOML block for `zsh-lite` using
 existing config fields.
 
@@ -275,6 +280,17 @@ Verification:
 - profile plan snapshot tests
 - apply/status/rollback mechanics reuse existing import block code
 - existing compat and zsh_compat tests remain green
+
+Output rules:
+
+- `agent`: enable safe zsh compatibility and native UI defaults, but keep
+  aliases, native widgets, native plugins, dynamic completions, and runtime
+  completions disabled for deterministic non-interactive use.
+- `zsh-lite`: enable safe zsh compatibility, include `git`,
+  `zsh-autosuggestions`, and `zsh-history-substring-search`, enable native
+  widgets with `autosuggestions` and `history_substring_search`, import standard
+  bindkeys, and keep native plugins / dynamic completions disabled.
+- unknown profile names fail before printing a partial plan.
 
 ### Phase 33 - Git Daily-Use Polish
 
