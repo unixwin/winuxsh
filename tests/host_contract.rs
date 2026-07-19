@@ -89,6 +89,44 @@ fn slash_drive_paths_are_compat_input_not_default_output() {
 }
 
 #[test]
+fn native_backslash_drive_paths_work_for_winuxcmd_and_cd() {
+    if !cfg!(windows) {
+        return;
+    }
+
+    let temp = unique_temp_dir("winuxsh-host-native-path");
+    let home = temp.join("home");
+    let start = temp.join("start");
+    let target = temp.join("target");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&start).unwrap();
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("marker.txt"), "ok").unwrap();
+
+    let target_native_path = native_path(&target);
+    let output = run_winuxsh(&format!("ls {}", target_native_path), &start, &home, &[]);
+    assert_success(&output, "native backslash path ls");
+    let stdout = stdout_lines(&output);
+    assert!(
+        stdout.iter().any(|line| line.contains("marker.txt")),
+        "ls output did not include marker.txt: {stdout:?}"
+    );
+
+    let output = run_winuxsh(
+        &format!("cd {}; pwd", target_native_path),
+        &start,
+        &home,
+        &[],
+    );
+    assert_success(&output, "native backslash path cd");
+    let stdout = stdout_lines(&output);
+    assert_eq!(stdout.len(), 1, "stdout was {stdout:?}");
+    assert_same_path(&stdout[0], &shell_path(&target));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
 fn path_lookup_finds_windows_pathextext_commands() {
     if !cfg!(windows) {
         return;

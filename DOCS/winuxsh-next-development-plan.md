@@ -82,6 +82,9 @@ Verification:
   - optional nearest winuxcmd/PATH suggestion
 - Ensure external command failures preserve the command's stderr.
 - Avoid extra friendly text in non-interactive mode unless explicitly requested.
+- Normalize obvious native Windows drive literals before rubash tokenization so
+  `C:\Users\...` user input remains a usable Windows path instead of becoming
+  `C:Users...`.
 - Add docs for agent usage patterns:
   - `winuxsh -c`
   - script execution

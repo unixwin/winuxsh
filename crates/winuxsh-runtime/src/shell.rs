@@ -246,7 +246,8 @@ impl Shell {
             return Ok(0);
         }
 
-        let tokens = tokenize(line);
+        let line = normalize_native_windows_path_literals(line);
+        let tokens = tokenize(&line);
         if tokens.is_empty() {
             return Ok(0);
         }
@@ -710,7 +711,8 @@ impl Shell {
             return;
         }
 
-        let tokens = tokenize(line);
+        let line = normalize_native_windows_path_literals(line);
+        let tokens = tokenize(&line);
         if tokens.is_empty() {
             return;
         }
@@ -885,7 +887,8 @@ impl Shell {
             return Ok(0);
         }
 
-        let tokens = tokenize(script);
+        let script = normalize_native_windows_path_literals(script);
+        let tokens = tokenize(&script);
         if tokens.is_empty() {
             return Ok(0);
         }
@@ -1148,8 +1151,80 @@ fn strip_rubash_alias_quote_marker(value: &str) -> &str {
     value.strip_prefix('\x1c').unwrap_or(value)
 }
 
+fn normalize_native_windows_path_literals(input: &str) -> String {
+    if !cfg!(windows) {
+        return input.to_string();
+    }
+
+    let chars: Vec<char> = input.chars().collect();
+    let mut output = String::with_capacity(input.len());
+    let mut changed = false;
+    let mut quote: Option<char> = None;
+    let mut index = 0;
+
+    while index < chars.len() {
+        let ch = chars[index];
+
+        if let Some(quote_char) = quote {
+            output.push(ch);
+            if ch == quote_char {
+                quote = None;
+            }
+            index += 1;
+            continue;
+        }
+
+        if ch == '\'' || ch == '"' {
+            quote = Some(ch);
+            output.push(ch);
+            index += 1;
+            continue;
+        }
+
+        if is_native_windows_path_literal_start(&chars, index) {
+            while index < chars.len() && !is_shell_word_boundary(chars[index]) {
+                let path_ch = chars[index];
+                if path_ch == '\\' {
+                    output.push('/');
+                    changed = true;
+                } else {
+                    output.push(path_ch);
+                }
+                index += 1;
+            }
+            continue;
+        }
+
+        output.push(ch);
+        index += 1;
+    }
+
+    if changed {
+        output
+    } else {
+        input.to_string()
+    }
+}
+
+fn is_native_windows_path_literal_start(chars: &[char], index: usize) -> bool {
+    index + 2 < chars.len()
+        && chars[index].is_ascii_alphabetic()
+        && chars[index + 1] == ':'
+        && chars[index + 2] == '\\'
+        && (index == 0 || is_windows_path_literal_boundary(chars[index - 1]))
+}
+
+fn is_windows_path_literal_boundary(ch: char) -> bool {
+    ch.is_ascii_whitespace() || matches!(ch, '=' | '(' | '[' | '{' | ',' | ';' | '|' | '&' | '<' | '>')
+}
+
+fn is_shell_word_boundary(ch: char) -> bool {
+    ch.is_ascii_whitespace() || matches!(ch, ';' | '|' | '&' | '<' | '>' | '(' | ')' | '\'' | '"')
+}
+
 fn first_command_word(line: &str) -> Option<String> {
-    let tokens = tokenize(line);
+    let line = normalize_native_windows_path_literals(line);
+    let tokens = tokenize(&line);
     if tokens.is_empty() {
         return None;
     }
@@ -1613,6 +1688,53 @@ mod tests {
         } else {
             assert_eq!(host_path_to_shell_path("/home/me/project"), "/home/me/project");
         }
+    }
+
+    #[test]
+    fn native_windows_path_literals_are_normalized_before_tokenize() {
+        if cfg!(windows) {
+            assert_eq!(
+                normalize_native_windows_path_literals(r"ls C:\Users\me"),
+                "ls C:/Users/me"
+            );
+            assert_eq!(
+                normalize_native_windows_path_literals(r"ls --root=C:\Users\me"),
+                "ls --root=C:/Users/me"
+            );
+            assert_eq!(
+                normalize_native_windows_path_literals(r"echo foo\ bar C:\Users\me"),
+                r"echo foo\ bar C:/Users/me"
+            );
+            assert_eq!(
+                normalize_native_windows_path_literals(r"echo 'C:\Users\me'"),
+                r"echo 'C:\Users\me'"
+            );
+            assert_eq!(
+                normalize_native_windows_path_literals(r"echo http:\example"),
+                r"echo http:\example"
+            );
+        } else {
+            assert_eq!(
+                normalize_native_windows_path_literals(r"ls C:\Users\me"),
+                r"ls C:\Users\me"
+            );
+        }
+    }
+
+    #[test]
+    fn native_windows_path_literals_survive_rubash_tokenize() {
+        if !cfg!(windows) {
+            return;
+        }
+
+        let line = normalize_native_windows_path_literals(r"ls C:\Users\me; echo C:\Users\me");
+        let tokens = tokenize(&line);
+        let mut ast = parse(&tokens);
+        normalize_cd_windows_drive_args(&mut ast);
+        normalize_winuxcmd_slash_drive_args(&mut ast);
+
+        assert_eq!(ast.commands[0].words[1], "C:/Users/me");
+        assert_eq!(ast.commands[1].words[1], "C:/Users/me");
     }
 
     #[test]

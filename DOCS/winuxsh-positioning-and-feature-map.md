@@ -120,6 +120,7 @@ Nushell's syntax, data pipeline model, plugin ABI, or command semantics.
 | Script execution | Whole-script parse/execute | Done | Keep expanding compat fixtures |
 | Command discovery | PATH-aware external command discovery | Partial | Keep winuxcmd-first, improve executable suffix discovery carefully |
 | Coreutils | Built-in/internal command set | Provided by winuxcmd | Expand completion/help coverage, not FFI |
+| Windows path input | Native drive paths in commands | `C:/...` and obvious `C:\...` inputs work | Accept native Windows drive literals at host boundary without adopting MSYS path authority |
 | Completion providers | `_cmd`, `#compdef`, aliases, flags, values, paths | Partial | Import safe zsh completion assets into native TOML/provider model |
 | Completion matching | zstyle matcher-list, grouping, cache, case sensitivity | Configurable prefix/substring, case sensitivity, command cap | Keep this native surface small; defer fuzzy/zstyle matcher-list translation |
 | External completer bridge | Carapace-like external completion command | Not started | v2.3/v3 candidate, secondary to zsh asset import |

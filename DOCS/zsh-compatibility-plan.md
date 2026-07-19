@@ -1060,6 +1060,10 @@ contract:
 - REPL single-line command sequences now reuse the same host-synced execution
   wrapper, so `cd target; native-child` updates process cwd before the native
   child runs.
+- Phase 27 is complete: naked Windows drive paths such as `C:\Users\me` are
+  recognized before rubash tokenization and normalized to `C:/Users/me`, so
+  the bash lexer does not consume backslashes as escapes. This is a
+  Windows-host input contract, not a zsh syntax extension.
 
 ## Phase 17 - Host Contract Test Matrix
 
