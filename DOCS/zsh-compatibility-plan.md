@@ -1432,6 +1432,42 @@ Verification:
 - `cargo build --locked`
 - `cargo test --test compat --locked -- --ignored`
 
+## Phase 28 - Interactive Multiline Collector
+
+Implementation status: completed on `master`.
+
+This phase closes the REPL gap where pasted or manually entered compound
+commands were executed one physical line at a time. Script files and `-c`
+already use whole-script execution; the missing piece is an interactive
+frontend buffer that waits until the user has entered a complete shell block.
+
+Implemented:
+
+- REPL now keeps a pending input buffer across physical lines.
+- pending input uses the configured multiline indicator as a PS2-style prompt.
+- complete multi-line input is executed once through `execute_script`, while
+  single-line commands continue through the existing `execute_line` path for
+  native command shims.
+- Ctrl+C clears pending input; Ctrl+D at PS2 cancels the pending block and
+  returns to the primary prompt.
+
+Coverage target:
+
+- `if ... then` waits for `fi` and executes the full block once.
+- `for` / `while` / `until` / `select` wait for `done`.
+- `case` waits for `esac`.
+- simple function definitions and brace groups wait for `}`.
+- trailing `|`, `&&`, `||`, unclosed quotes, and backslash-newline keep the
+  continuation prompt active.
+- pending input uses the configured `[shell].multiline_indicator` / PS2-style
+  prompt instead of the primary prompt.
+
+Rules:
+
+- keep rubash as the only parser/executor for the completed script.
+- do not reintroduce the old winsh parser/core/ast.
+- do not change non-interactive `-c` or script file execution behavior.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh

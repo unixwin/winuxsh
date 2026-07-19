@@ -132,6 +132,7 @@ status: active
 - [x] Phase 25 menu UX config: `[menus]` 支持 completion/history page size 与 max entry lines
 - [x] Phase 26 standard ZLE bindkey subset: 常见 `bindkey KEY zle-widget` 映射到 reedline 原生事件
 - [x] Phase 27 native Windows path literals: 裸 `C:\...` 输入在 rubash tokenization 前规范化为 `C:/...`，避免反斜杠被 bash 词法当作转义符吞掉
+- [x] Phase 28 interactive multiline collector: REPL 识别未完成的 `if/for/while/case/function` 等复合命令块，显示 PS2/continuation prompt，完整后一次性交给 rubash script execution
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证
@@ -148,6 +149,7 @@ status: active
 - [x] Phase 25 menu UX tests: 覆盖默认菜单配置、TOML 解析、zero fallback、reedline menu builder 接入
 - [x] Phase 26 standard ZLE bindkey tests: 覆盖标准 widget 映射、import-plan 启用入口、unsupported diagnostics 降噪
 - [x] Phase 27 native Windows path tests: 覆盖 `ls C:\...` 与 `cd C:\...; pwd` 的二进制级 host contract
+- [x] Phase 28 multiline REPL tests: 覆盖 pending buffer 对 `if/fi`、`for/done`、函数体、引号、管道续行和反斜杠续行的完整性判断
 - [ ] 作业控制/内建命令语义优先走 rubash，不在 winuxsh 重复实现
 
 ## 关键架构决策 (锁定)

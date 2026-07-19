@@ -1,9 +1,12 @@
 //! Reedline REPL loop
 
+use std::borrow::Cow;
+
 use reedline::{
     default_emacs_keybindings, default_vi_insert_keybindings, default_vi_normal_keybindings,
     EditCommand, EditMode, Emacs, FileBackedHistory, KeyCode, KeyModifiers, Keybindings, ListMenu,
-    MenuBuilder, Reedline, ReedlineEvent, ReedlineMenu, Signal, Vi,
+    MenuBuilder, Prompt, PromptEditMode, PromptHistorySearch, Reedline, ReedlineEvent,
+    ReedlineMenu, Signal, Vi,
 };
 
 use crate::autosuggest::HistoryAutosuggestHinter;
@@ -310,6 +313,329 @@ fn parse_plain_key_sequence(value: &str) -> Option<(KeyModifiers, KeyCode)> {
     Some((KeyModifiers::NONE, KeyCode::Char(ch)))
 }
 
+#[derive(Debug, Default)]
+struct PendingReplInput {
+    lines: Vec<String>,
+}
+
+impl PendingReplInput {
+    fn is_empty(&self) -> bool {
+        self.lines.is_empty()
+    }
+
+    fn push(&mut self, line: &str) {
+        self.lines.push(line.to_string());
+    }
+
+    fn clear(&mut self) {
+        self.lines.clear();
+    }
+
+    fn take(&mut self) -> String {
+        let script = self.script();
+        self.clear();
+        script
+    }
+
+    fn script(&self) -> String {
+        self.lines.join("\n")
+    }
+
+    fn is_complete(&self) -> bool {
+        is_repl_input_complete(&self.script())
+    }
+
+    fn is_multiline(&self) -> bool {
+        self.lines.len() > 1
+    }
+}
+
+struct ContinuationPrompt {
+    indicator: String,
+}
+
+impl ContinuationPrompt {
+    fn new(prompt: &dyn Prompt) -> Self {
+        Self {
+            indicator: prompt.render_prompt_multiline_indicator().into_owned(),
+        }
+    }
+}
+
+impl Prompt for ContinuationPrompt {
+    fn render_prompt_left(&self) -> Cow<'_, str> {
+        Cow::Owned(self.indicator.clone())
+    }
+
+    fn render_prompt_right(&self) -> Cow<'_, str> {
+        Cow::Borrowed("")
+    }
+
+    fn render_prompt_indicator(&self, _prompt_mode: PromptEditMode) -> Cow<'_, str> {
+        Cow::Borrowed("")
+    }
+
+    fn render_prompt_multiline_indicator(&self) -> Cow<'_, str> {
+        Cow::Owned(self.indicator.clone())
+    }
+
+    fn render_prompt_history_search_indicator(
+        &self,
+        _history_search: PromptHistorySearch,
+    ) -> Cow<'_, str> {
+        Cow::Borrowed("(history search) ")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ReplToken {
+    Word(String),
+    Operator(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlockClose {
+    Fi,
+    Done,
+    Esac,
+    Brace,
+    Paren,
+    FunctionBody,
+}
+
+#[derive(Debug, Default)]
+struct ReplInputScan {
+    tokens: Vec<ReplToken>,
+    open_quote: Option<char>,
+    trailing_backslash: bool,
+}
+
+fn is_repl_input_complete(input: &str) -> bool {
+    let scan = scan_repl_input(input);
+    if scan.open_quote.is_some() || scan.trailing_backslash {
+        return false;
+    }
+
+    let mut stack = Vec::new();
+    let mut command_position = true;
+    let mut trailing_list_operator = false;
+    let mut index = 0;
+
+    while index < scan.tokens.len() {
+        match &scan.tokens[index] {
+            ReplToken::Operator(operator) => {
+                match operator.as_str() {
+                    ";" | "\n" => {
+                        command_position = true;
+                        trailing_list_operator = false;
+                    }
+                    "|" | "&&" | "||" => {
+                        command_position = true;
+                        trailing_list_operator = true;
+                    }
+                    "(" => {
+                        stack.push(BlockClose::Paren);
+                        command_position = true;
+                        trailing_list_operator = false;
+                    }
+                    ")" => {
+                        pop_if_matches(&mut stack, BlockClose::Paren);
+                        command_position = false;
+                        trailing_list_operator = false;
+                    }
+                    _ => {}
+                }
+                index += 1;
+            }
+            ReplToken::Word(word) => {
+                trailing_list_operator = false;
+
+                if command_position && is_function_header(&scan.tokens, index) {
+                    stack.push(BlockClose::FunctionBody);
+                    command_position = false;
+                    index += 3;
+                    continue;
+                }
+
+                match word.as_str() {
+                    "if" if command_position => {
+                        stack.push(BlockClose::Fi);
+                        command_position = false;
+                    }
+                    "for" | "while" | "until" | "select" if command_position => {
+                        stack.push(BlockClose::Done);
+                        command_position = false;
+                    }
+                    "case" if command_position => {
+                        stack.push(BlockClose::Esac);
+                        command_position = false;
+                    }
+                    "fi" if command_position => {
+                        pop_if_matches(&mut stack, BlockClose::Fi);
+                        command_position = false;
+                    }
+                    "done" if command_position => {
+                        pop_if_matches(&mut stack, BlockClose::Done);
+                        command_position = false;
+                    }
+                    "esac" if command_position => {
+                        pop_if_matches(&mut stack, BlockClose::Esac);
+                        command_position = false;
+                    }
+                    "{" => {
+                        if stack.last() == Some(&BlockClose::FunctionBody) {
+                            stack.pop();
+                        }
+                        stack.push(BlockClose::Brace);
+                        command_position = true;
+                    }
+                    "}" => {
+                        pop_if_matches(&mut stack, BlockClose::Brace);
+                        command_position = false;
+                    }
+                    "then" | "do" | "else" => {
+                        command_position = true;
+                    }
+                    "elif" => {
+                        command_position = false;
+                    }
+                    _ => {
+                        command_position = false;
+                    }
+                }
+                index += 1;
+            }
+        }
+    }
+
+    stack.is_empty() && !trailing_list_operator
+}
+
+fn scan_repl_input(input: &str) -> ReplInputScan {
+    let chars: Vec<char> = input.chars().collect();
+    let mut scan = ReplInputScan {
+        trailing_backslash: has_unescaped_trailing_backslash(input),
+        ..ReplInputScan::default()
+    };
+    let mut word = String::new();
+    let mut quote = None;
+    let mut index = 0;
+
+    while index < chars.len() {
+        let ch = chars[index];
+
+        if let Some(quote_char) = quote {
+            word.push(ch);
+            if ch == '\\' && quote_char != '\'' {
+                if let Some(next) = chars.get(index + 1) {
+                    word.push(*next);
+                    index += 2;
+                    continue;
+                }
+            }
+            if ch == quote_char {
+                quote = None;
+            }
+            index += 1;
+            continue;
+        }
+
+        match ch {
+            '\'' | '"' | '`' => {
+                quote = Some(ch);
+                word.push(ch);
+                index += 1;
+            }
+            '\\' => {
+                word.push(ch);
+                if let Some(next) = chars.get(index + 1) {
+                    word.push(*next);
+                    index += 2;
+                } else {
+                    index += 1;
+                }
+            }
+            '\r' => {
+                flush_repl_word(&mut scan.tokens, &mut word);
+                index += 1;
+            }
+            '\n' => {
+                flush_repl_word(&mut scan.tokens, &mut word);
+                scan.tokens.push(ReplToken::Operator("\n".to_string()));
+                index += 1;
+            }
+            ch if ch.is_ascii_whitespace() => {
+                flush_repl_word(&mut scan.tokens, &mut word);
+                index += 1;
+            }
+            ';' | '(' | ')' => {
+                flush_repl_word(&mut scan.tokens, &mut word);
+                scan.tokens.push(ReplToken::Operator(ch.to_string()));
+                index += 1;
+            }
+            '|' | '&' => {
+                flush_repl_word(&mut scan.tokens, &mut word);
+                if chars.get(index + 1) == Some(&ch) {
+                    scan.tokens.push(ReplToken::Operator(format!("{ch}{ch}")));
+                    index += 2;
+                } else {
+                    scan.tokens.push(ReplToken::Operator(ch.to_string()));
+                    index += 1;
+                }
+            }
+            _ => {
+                word.push(ch);
+                index += 1;
+            }
+        }
+    }
+
+    flush_repl_word(&mut scan.tokens, &mut word);
+    scan.open_quote = quote;
+    scan
+}
+
+fn flush_repl_word(tokens: &mut Vec<ReplToken>, word: &mut String) {
+    if word.is_empty() {
+        return;
+    }
+    tokens.push(ReplToken::Word(std::mem::take(word)));
+}
+
+fn is_function_header(tokens: &[ReplToken], index: usize) -> bool {
+    let Some(ReplToken::Word(name)) = tokens.get(index) else {
+        return false;
+    };
+    is_shell_identifier(name)
+        && matches!(tokens.get(index + 1), Some(ReplToken::Operator(op)) if op == "(")
+        && matches!(tokens.get(index + 2), Some(ReplToken::Operator(op)) if op == ")")
+}
+
+fn is_shell_identifier(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn pop_if_matches(stack: &mut Vec<BlockClose>, expected: BlockClose) {
+    if stack.last() == Some(&expected) {
+        stack.pop();
+    }
+}
+
+fn has_unescaped_trailing_backslash(input: &str) -> bool {
+    let last_line = input
+        .trim_end_matches(['\r', '\n'])
+        .rsplit_once('\n')
+        .map(|(_, line)| line)
+        .unwrap_or_else(|| input.trim_end_matches(['\r', '\n']));
+    let count = last_line.chars().rev().take_while(|ch| *ch == '\\').count();
+    count % 2 == 1
+}
+
 /// Run the interactive REPL.
 pub fn run_repl(shell: &mut Shell) -> anyhow::Result<()> {
     println!("Winuxsh v2 - rubash + winuxcmd on Windows");
@@ -318,26 +644,51 @@ pub fn run_repl(shell: &mut Shell) -> anyhow::Result<()> {
 
     shell.restore_last_working_dir_for_repl();
     let mut line_editor = build_line_editor(shell)?;
+    let mut pending = PendingReplInput::default();
 
     loop {
-        shell.run_precmd_hooks();
-        match line_editor.read_line(&shell.prompt) {
+        let signal = if pending.is_empty() {
+            shell.run_precmd_hooks();
+            line_editor.read_line(&shell.prompt)
+        } else {
+            let prompt = ContinuationPrompt::new(&shell.prompt);
+            line_editor.read_line(&prompt)
+        };
+
+        match signal {
             Ok(Signal::Success(buffer)) => {
-                let line = buffer.trim();
-                if line.is_empty() {
+                let line = buffer.trim_end_matches(['\r', '\n']);
+                if pending.is_empty() && line.trim().is_empty() {
                     continue;
                 }
-                if line == "exit" || line == "logout" {
+                if pending.is_empty() && matches!(line.trim(), "exit" | "logout") {
                     break;
                 }
-                let _ = shell.execute_interactive_line(line);
+
+                pending.push(line);
+                if !pending.is_complete() {
+                    continue;
+                }
+
+                let is_multiline = pending.is_multiline();
+                let script = pending.take();
+                if is_multiline {
+                    let _ = shell.execute_interactive_script(&script);
+                } else {
+                    let _ = shell.execute_interactive_line(script.trim());
+                }
             }
             Ok(Signal::CtrlD) => {
                 println!();
+                if !pending.is_empty() {
+                    pending.clear();
+                    continue;
+                }
                 break;
             }
             Ok(Signal::CtrlC) => {
                 println!();
+                pending.clear();
                 continue;
             }
             Err(e) => {
@@ -388,6 +739,54 @@ mod tests {
         );
 
         assert_eq!(menu.name(), "custom_menu");
+    }
+
+    #[test]
+    fn repl_input_complete_tracks_if_blocks() {
+        assert!(!is_repl_input_complete("if [ $HTTP_CODE -eq 200 ]; then"));
+        assert!(!is_repl_input_complete(
+            "if [ $HTTP_CODE -eq 200 ]; then\n  echo OK"
+        ));
+        assert!(is_repl_input_complete(
+            "if [ $HTTP_CODE -eq 200 ]; then\n  echo OK\nfi"
+        ));
+        assert!(is_repl_input_complete(
+            "if [ $HTTP_CODE -eq 200 ]; then echo OK; fi"
+        ));
+    }
+
+    #[test]
+    fn repl_input_complete_tracks_loop_and_case_blocks() {
+        assert!(!is_repl_input_complete("for item in a b; do"));
+        assert!(is_repl_input_complete(
+            "for item in a b; do\n  echo $item\ndone"
+        ));
+
+        assert!(!is_repl_input_complete("while true; do"));
+        assert!(is_repl_input_complete("while true; do\n  break\ndone"));
+
+        assert!(!is_repl_input_complete("case $x in"));
+        assert!(is_repl_input_complete(
+            "case $x in\n  a) echo A ;;\n  *) echo other ;;\nesac"
+        ));
+    }
+
+    #[test]
+    fn repl_input_complete_tracks_functions_and_brace_groups() {
+        assert!(!is_repl_input_complete("hello()"));
+        assert!(!is_repl_input_complete("hello() {"));
+        assert!(is_repl_input_complete("hello() {\n  echo hi\n}"));
+        assert!(is_repl_input_complete("{ echo hi; }"));
+    }
+
+    #[test]
+    fn repl_input_complete_tracks_quotes_and_list_continuations() {
+        assert!(!is_repl_input_complete("echo \"unterminated"));
+        assert!(is_repl_input_complete("echo \"terminated\""));
+        assert!(!is_repl_input_complete("echo one |"));
+        assert!(is_repl_input_complete("echo one |\n  grep one"));
+        assert!(!is_repl_input_complete("echo one \\"));
+        assert!(is_repl_input_complete("echo one \\\n  two"));
     }
 
     #[test]

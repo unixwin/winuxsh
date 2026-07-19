@@ -85,6 +85,8 @@ Verification:
 - Normalize obvious native Windows drive literals before rubash tokenization so
   `C:\Users\...` user input remains a usable Windows path instead of becoming
   `C:Users...`.
+- Add a REPL multiline collector so pasted `if` / `for` / `while` / function
+  blocks show the continuation prompt and execute as one rubash script.
 - Add docs for agent usage patterns:
   - `winuxsh -c`
   - script execution

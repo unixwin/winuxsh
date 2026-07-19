@@ -347,6 +347,22 @@ impl Shell {
         Ok(code)
     }
 
+    /// Execute a complete multi-line interactive input block via rubash script
+    /// execution while preserving REPL lifecycle hooks.
+    pub fn execute_interactive_script(&mut self, script: &str) -> anyhow::Result<i32> {
+        let old_pwd = self.executor.get_env("PWD").map(str::to_owned);
+        self.run_preexec_hooks(script);
+        let code = self.execute_script(script)?;
+        self.sync_alias_mirror_from_line(script, code);
+        self.remember_interactive_command(script, code);
+        let new_pwd = self.executor.get_env("PWD").map(str::to_owned);
+        if let (Some(old_pwd), Some(new_pwd)) = (old_pwd, new_pwd) {
+            self.run_chpwd_hooks_if_changed(&old_pwd, &new_pwd);
+        }
+        self.update_completion_state();
+        Ok(code)
+    }
+
     /// Restore the last working directory once for interactive REPL startup.
     ///
     /// This mirrors Oh My Zsh's last-working-dir guard: only jump when the
@@ -1662,6 +1678,23 @@ mod tests {
 
         shell.execute_interactive_line("unalias gst").unwrap();
         assert!(shell.native_alias_finder_matches("git status").is_empty());
+    }
+
+    #[test]
+    fn execute_interactive_script_runs_multiline_compound_blocks() {
+        let _env_lock = PROCESS_STATE_LOCK.lock().unwrap();
+        let _cwd_guard = CwdGuard::capture();
+        let mut shell = test_shell(HookConfig::default());
+
+        shell.execute_interactive_line("HTTP_CODE=200").unwrap();
+        let code = shell
+            .execute_interactive_script(
+                "if [ $HTTP_CODE -eq 200 ]; then\n  RESULT=OK\nfi",
+            )
+            .unwrap();
+
+        assert_eq!(code, 0);
+        assert_eq!(shell.executor.get_env("RESULT"), Some("OK"));
     }
 
     #[test]
