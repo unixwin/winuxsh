@@ -121,11 +121,13 @@ status: active
 - [x] Phase 16g native state plugin preset: `last-working-dir` 通过显式 `[zsh.native_plugins]` opt-in，提供 native `lwd` 与交互 REPL 启动目录恢复
 - [x] Phase 16h native env plugin preset: `dotenv` 通过显式 `[zsh.native_plugins]` opt-in，安全解析当前目录 `.env` 并写入 rubash env
 - [x] Windows-native host contract stabilization: `cd` 后同步 rubash `PWD` 与 process cwd，`pwd` 默认显示 `C:/...`，winuxcmd 路径参数兼容旧 `/c/...` 输入，空输入/前缀命令补全恢复
+- [x] Phase 18 completion probe: 新增非交互 `--completion-probe` 入口，覆盖空 Tab、前缀命令、PATH/PATHEXT、管道后命令位与参数位不误补全
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证
 - [ ] 梳理 rubash 已通过的 bash 上游测试能力矩阵
 - [x] Phase 17 host contract matrix: 为 winuxsh host 层补充 PATH/env/cwd/home/stdout/stderr/exit-code 二进制级集成测试
+- [x] Phase 18 completion probe tests: 通过 `winuxsh --completion-probe` 验证真实 Shell 初始化后的 REPL 补全候选
 - [ ] 作业控制/内建命令语义优先走 rubash，不在 winuxsh 重复实现
 
 ## 关键架构决策 (锁定)

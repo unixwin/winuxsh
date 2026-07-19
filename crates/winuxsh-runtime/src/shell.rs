@@ -12,11 +12,11 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use reedline::Reedline;
+use reedline::{Completer, Reedline};
 use rubash::{executor::Executor, lexer::tokenize, parser::parse, Ast};
 
 use crate::completion::runtime::RuntimeCompletionPlugin;
-use crate::completion::CompletionState;
+use crate::completion::{CompletionState, WinuxshCompleter};
 use crate::config::{
     load as load_config, AutosuggestConfig, EditorMode, HookConfig, NativePluginConfig,
     NativeWidgetConfig, SyntaxHighlightConfig,
@@ -787,6 +787,21 @@ impl Shell {
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
         }
+    }
+
+    /// Return completion candidates using the same completer state as the REPL.
+    ///
+    /// This is primarily a deterministic probe surface for binary tests and
+    /// agent diagnostics; it avoids trying to drive reedline through a TTY.
+    pub fn completion_probe(&self, input: &str, cursor_pos: usize) -> Vec<String> {
+        self.update_completion_state();
+        let mut completer = WinuxshCompleter::new(self.completion_state.clone());
+        let cursor_pos = cursor_pos.min(input.len());
+        completer
+            .complete(input, cursor_pos)
+            .into_iter()
+            .map(|suggestion| suggestion.value)
+            .collect()
     }
 
     fn executor_pwd_host_path(&self) -> Option<PathBuf> {

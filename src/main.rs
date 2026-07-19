@@ -13,6 +13,7 @@
 //!   winuxsh --zsh-compat-import-status → inspect import block and backups
 //!   winuxsh --zsh-compat-import-rollback-plan → print restore command
 //!   winuxsh --zsh-compat-doctor → summarize zsh compatibility health
+//!   winuxsh --completion-probe "line" [cursor] → print REPL completions
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -79,6 +80,10 @@ fn run(args: &[String]) -> anyhow::Result<()> {
             print_zsh_compat_doctor()?;
             Ok(())
         }
+        "--completion-probe" => {
+            print_completion_probe(args)?;
+            Ok(())
+        }
         "-c" => {
             if args.len() < 3 {
                 anyhow::bail!("-c requires an argument");
@@ -125,6 +130,25 @@ fn print_usage() {
     println!("  winuxsh --zsh-compat-import-status Inspect import block and backup status");
     println!("  winuxsh --zsh-compat-import-rollback-plan Print latest backup restore command");
     println!("  winuxsh --zsh-compat-doctor Summarize zsh compatibility health");
+    println!("  winuxsh --completion-probe \"line\" [cursor] Print REPL completion candidates");
+}
+
+fn print_completion_probe(args: &[String]) -> anyhow::Result<()> {
+    if args.len() < 3 {
+        anyhow::bail!("--completion-probe requires an input line");
+    }
+    let line = &args[2];
+    let cursor_pos = if let Some(raw) = args.get(3) {
+        raw.parse::<usize>()
+            .map_err(|_| anyhow::anyhow!("invalid cursor position '{}'", raw))?
+    } else {
+        line.len()
+    };
+    let shell = winuxsh_runtime::Shell::new()?;
+    for suggestion in shell.completion_probe(line, cursor_pos) {
+        println!("{}", suggestion);
+    }
+    Ok(())
 }
 
 fn print_zsh_compat_import_plan() -> anyhow::Result<()> {

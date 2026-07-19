@@ -1092,6 +1092,37 @@ Rules:
 - keep `/c/...` as compatibility input only; default visible paths stay
   Windows-native `C:/...`.
 
+## Phase 18 - REPL Completion Probe
+
+Implementation status: completed on `master`.
+
+This phase makes the interactive completion surface testable without a TTY. The
+goal is to catch regressions like blank Tab returning zero rows or `gre<Tab>`
+not suggesting `grep`, while still exercising the same `Shell::new()`
+initialization path that the REPL uses.
+
+Implemented interface:
+
+- `winuxsh --completion-probe <line> [cursor]`.
+- builds a real `Shell`, syncs completion state, runs the native completer, and
+  print one completion value per line.
+- keeps the command deterministic and non-interactive so agents and CI can use
+  it.
+
+Coverage target:
+
+- empty command line suggests builtins / winuxcmd commands such as `ls`.
+- partial command words such as `gre` suggest `grep`.
+- commands discovered through Windows `PATH` / `PATHEXT` are suggested.
+- command position after a pipe such as `ls | gre` suggests `grep`.
+- argument position such as `echo gre` does not suggest command names.
+
+Rules:
+
+- do not rely on piping into reedline for tests.
+- do not change rubash execution semantics.
+- keep completion providers ordered the same way as interactive REPL startup.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh
