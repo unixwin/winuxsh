@@ -126,6 +126,7 @@ status: active
 - [x] Phase 20 path completion polish: 保留目录前缀、转义空格路径、隐藏文件按 `.` 前缀显示、目录优先排序
 - [x] Phase 21 shell-word-aware completion: 补全切词理解反斜杠转义和简单引号，修复 `two\ w` / `"two w` 这类路径补全
 - [x] Windows cwd authority regression: 启动时以真实 process cwd 初始化 rubash `PWD`，且 `cd target; native-child` 同一交互行中同步 process cwd，避免 prompt/ls 与 `PWD` 分裂
+- [x] Phase 22 prompt indicator polish: `[shell]` 支持 emacs/vi/default/multiline/history-search prompt indicators，补齐 zsh-like 模式提示入口
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证
@@ -136,6 +137,7 @@ status: active
 - [x] Phase 20 path polish tests: 覆盖 `src/ma` 不丢前缀、空格文件名转义、隐藏文件过滤和目录优先排序
 - [x] Phase 21 shell word tests: 覆盖转义空格匹配、引号内路径匹配、补全替换 span 不截断 token
 - [x] REPL cwd sequence tests: 覆盖 `execute_line("cd target; cwdprobe")` 中 Windows `.cmd` 子进程 cwd 与 `PWD` 一致
+- [x] Phase 22 prompt indicator tests: 覆盖 emacs/vi insert/normal、多行提示、Ctrl+R history search passing/failing 模板
 - [ ] 作业控制/内建命令语义优先走 rubash，不在 winuxsh 重复实现
 
 ## 关键架构决策 (锁定)

@@ -5,6 +5,8 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
+use crate::prompt::PromptIndicators;
+
 /// Shell configuration, loaded from `~/.winshrc.toml`.
 #[derive(Debug, Clone, Default)]
 pub struct ShellConfig {
@@ -12,6 +14,8 @@ pub struct ShellConfig {
     pub prompt_format: Option<String>,
     /// Optional right-side prompt template.
     pub right_prompt_format: Option<String>,
+    /// Optional mode-specific prompt indicators.
+    pub prompt_indicators: PromptIndicators,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -348,6 +352,13 @@ struct WinshrcToml {
 struct ShellToml {
     prompt_format: Option<String>,
     right_prompt_format: Option<String>,
+    prompt_indicator: Option<String>,
+    emacs_indicator: Option<String>,
+    vi_insert_indicator: Option<String>,
+    vi_normal_indicator: Option<String>,
+    multiline_indicator: Option<String>,
+    history_search_indicator: Option<String>,
+    history_search_fail_indicator: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -495,12 +506,17 @@ pub fn default_config_path() -> PathBuf {
 fn build_config(parsed: WinshrcToml) -> FullConfig {
     let zsh = parsed.zsh.map(build_zsh_config).unwrap_or_default();
     let shell = parsed.shell;
+    let shell_config = ShellConfig {
+        prompt_format: shell.as_ref().and_then(|s| s.prompt_format.clone()),
+        right_prompt_format: shell.as_ref().and_then(|s| s.right_prompt_format.clone()),
+        prompt_indicators: shell
+            .as_ref()
+            .map(build_prompt_indicators)
+            .unwrap_or_default(),
+    };
 
     FullConfig {
-        shell: ShellConfig {
-            prompt_format: shell.as_ref().and_then(|s| s.prompt_format.clone()),
-            right_prompt_format: shell.and_then(|s| s.right_prompt_format),
-        },
+        shell: shell_config,
         editor: EditorConfig {
             edit_mode: parsed
                 .editor
@@ -526,6 +542,38 @@ fn build_config(parsed: WinshrcToml) -> FullConfig {
     }
 }
 
+fn build_prompt_indicators(parsed: &ShellToml) -> PromptIndicators {
+    let defaults = PromptIndicators::default();
+    let prompt_indicator = parsed.prompt_indicator.clone().unwrap_or_default();
+    PromptIndicators {
+        default: prompt_indicator.clone(),
+        emacs: parsed
+            .emacs_indicator
+            .clone()
+            .unwrap_or_else(|| prompt_indicator.clone()),
+        vi_insert: parsed
+            .vi_insert_indicator
+            .clone()
+            .unwrap_or_else(|| prompt_indicator.clone()),
+        vi_normal: parsed
+            .vi_normal_indicator
+            .clone()
+            .unwrap_or_else(|| prompt_indicator.clone()),
+        multiline: parsed
+            .multiline_indicator
+            .clone()
+            .unwrap_or(defaults.multiline),
+        history_search: parsed
+            .history_search_indicator
+            .clone()
+            .unwrap_or(defaults.history_search),
+        history_search_fail: parsed
+            .history_search_fail_indicator
+            .clone()
+            .or_else(|| parsed.history_search_indicator.clone())
+            .unwrap_or(defaults.history_search_fail),
+    }
+}
 fn build_hook_config(parsed: HooksToml) -> HookConfig {
     HookConfig {
         precmd: parsed.precmd.unwrap_or_default(),
@@ -672,6 +720,56 @@ right_prompt_format = "{user}@{host}"
         );
     }
 
+    #[test]
+    fn parses_prompt_indicators() {
+        let config = parse_config(
+            r#"
+[shell]
+prompt_indicator = "D "
+emacs_indicator = "E "
+vi_insert_indicator = "I "
+vi_normal_indicator = "N "
+multiline_indicator = "M "
+history_search_indicator = "search:{term}:{status} "
+history_search_fail_indicator = "fail:{term}:{status} "
+"#,
+        );
+
+        assert_eq!(config.shell.prompt_indicators.default, "D ");
+        assert_eq!(config.shell.prompt_indicators.emacs, "E ");
+        assert_eq!(config.shell.prompt_indicators.vi_insert, "I ");
+        assert_eq!(config.shell.prompt_indicators.vi_normal, "N ");
+        assert_eq!(config.shell.prompt_indicators.multiline, "M ");
+        assert_eq!(
+            config.shell.prompt_indicators.history_search,
+            "search:{term}:{status} "
+        );
+        assert_eq!(
+            config.shell.prompt_indicators.history_search_fail,
+            "fail:{term}:{status} "
+        );
+    }
+
+    #[test]
+    fn prompt_indicator_falls_back_to_editor_modes() {
+        let config = parse_config(
+            r#"
+[shell]
+prompt_indicator = "$ "
+history_search_indicator = "history:{term} "
+"#,
+        );
+
+        assert_eq!(config.shell.prompt_indicators.default, "$ ");
+        assert_eq!(config.shell.prompt_indicators.emacs, "$ ");
+        assert_eq!(config.shell.prompt_indicators.vi_insert, "$ ");
+        assert_eq!(config.shell.prompt_indicators.vi_normal, "$ ");
+        assert_eq!(config.shell.prompt_indicators.history_search, "history:{term} ");
+        assert_eq!(
+            config.shell.prompt_indicators.history_search_fail,
+            "history:{term} "
+        );
+    }
     #[test]
     fn unknown_edit_mode_falls_back_to_emacs() {
         let config = parse_config(

@@ -7,13 +7,46 @@ use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use crate::theme::{by_name, Theme};
-use reedline::{Prompt, PromptEditMode, PromptHistorySearch};
+use reedline::{
+    Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus, PromptViMode,
+};
+
+/// Prompt indicators rendered by reedline after the left prompt.
+///
+/// Defaults preserve the historical winuxsh behavior: the main prompt template
+/// carries the visible symbol, while multiline and history search keep their
+/// original built-in text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptIndicators {
+    pub default: String,
+    pub emacs: String,
+    pub vi_insert: String,
+    pub vi_normal: String,
+    pub multiline: String,
+    pub history_search: String,
+    pub history_search_fail: String,
+}
+
+impl Default for PromptIndicators {
+    fn default() -> Self {
+        Self {
+            default: String::new(),
+            emacs: String::new(),
+            vi_insert: String::new(),
+            vi_normal: String::new(),
+            multiline: "> ".to_string(),
+            history_search: "(history search) ".to_string(),
+            history_search_fail: "(history search) ".to_string(),
+        }
+    }
+}
 
 /// A prompt that renders the configured template with theme-aware ANSI colours.
 pub struct WinuxshPrompt {
     template: String,
     right_template: Option<String>,
     git_prompt_format: Option<String>,
+    indicators: PromptIndicators,
     theme: Theme,
 }
 
@@ -24,11 +57,28 @@ impl WinuxshPrompt {
         git_prompt_format: Option<String>,
         theme_name: &str,
     ) -> Self {
+        Self::new_with_indicators(
+            template,
+            right_template,
+            git_prompt_format,
+            PromptIndicators::default(),
+            theme_name,
+        )
+    }
+
+    pub fn new_with_indicators(
+        template: Option<String>,
+        right_template: Option<String>,
+        git_prompt_format: Option<String>,
+        indicators: PromptIndicators,
+        theme_name: &str,
+    ) -> Self {
         let t = template.unwrap_or_else(|| "{user}@{host} {cwd} %# ".to_string());
         Self {
             template: t,
             right_template,
             git_prompt_format,
+            indicators,
             theme: by_name(theme_name),
         }
     }
@@ -78,6 +128,21 @@ impl WinuxshPrompt {
             .replace("%n", &user)
             .replace("%m", &host)
             .replace("%~", &cwd)
+    }
+
+    fn render_indicator_template(&self, template: &str, mode: &str) -> String {
+        self.render_template(template).replace("{mode}", mode)
+    }
+
+    fn render_history_search_template(
+        &self,
+        template: &str,
+        status: &str,
+        term: &str,
+    ) -> String {
+        self.render_template(template)
+            .replace("{status}", status)
+            .replace("{term}", term)
     }
 }
 
@@ -139,19 +204,34 @@ impl Prompt for WinuxshPrompt {
         }
     }
 
-    fn render_prompt_indicator(&self, _mode: PromptEditMode) -> Cow<'_, str> {
-        Cow::Borrowed("")
+    fn render_prompt_indicator(&self, mode: PromptEditMode) -> Cow<'_, str> {
+        let (template, mode_name): (&String, Cow<'_, str>) = match mode {
+            PromptEditMode::Default => (&self.indicators.default, Cow::Borrowed("default")),
+            PromptEditMode::Emacs => (&self.indicators.emacs, Cow::Borrowed("emacs")),
+            PromptEditMode::Vi(PromptViMode::Insert) => {
+                (&self.indicators.vi_insert, Cow::Borrowed("vi_insert"))
+            }
+            PromptEditMode::Vi(PromptViMode::Normal) => {
+                (&self.indicators.vi_normal, Cow::Borrowed("vi_normal"))
+            }
+            PromptEditMode::Custom(mode) => (&self.indicators.default, Cow::Owned(mode)),
+        };
+        Cow::Owned(self.render_indicator_template(template, &mode_name))
     }
 
     fn render_prompt_multiline_indicator(&self) -> Cow<'_, str> {
-        Cow::Borrowed("> ")
+        Cow::Owned(self.render_template(&self.indicators.multiline))
     }
 
     fn render_prompt_history_search_indicator(
         &self,
-        _search: PromptHistorySearch,
+        search: PromptHistorySearch,
     ) -> Cow<'_, str> {
-        Cow::Borrowed("(history search) ")
+        let (template, status) = match search.status {
+            PromptHistorySearchStatus::Passing => (&self.indicators.history_search, "passing"),
+            PromptHistorySearchStatus::Failing => (&self.indicators.history_search_fail, "failing"),
+        };
+        Cow::Owned(self.render_history_search_template(template, status, &search.term))
     }
 }
 
@@ -215,6 +295,74 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    #[test]
+    fn default_indicators_preserve_existing_behavior() {
+        let prompt = WinuxshPrompt::new(Some("left> ".to_string()), None, None, "default");
+
+        assert_eq!(prompt.render_prompt_indicator(PromptEditMode::Default), "");
+        assert_eq!(prompt.render_prompt_indicator(PromptEditMode::Emacs), "");
+        assert_eq!(
+            prompt.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Insert)),
+            ""
+        );
+        assert_eq!(
+            prompt.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Normal)),
+            ""
+        );
+        assert_eq!(prompt.render_prompt_multiline_indicator(), "> ");
+        assert_eq!(
+            prompt.render_prompt_history_search_indicator(PromptHistorySearch::new(
+                PromptHistorySearchStatus::Passing,
+                "git".to_string(),
+            )),
+            "(history search) "
+        );
+    }
+
+    #[test]
+    fn renders_configured_prompt_indicators() {
+        let prompt = WinuxshPrompt::new_with_indicators(
+            Some("left> ".to_string()),
+            None,
+            None,
+            PromptIndicators {
+                default: "[{mode}] ".to_string(),
+                emacs: "E ".to_string(),
+                vi_insert: "I ".to_string(),
+                vi_normal: "N ".to_string(),
+                multiline: "M ".to_string(),
+                history_search: "search:{term}:{status} ".to_string(),
+                history_search_fail: "fail:{term}:{status} ".to_string(),
+            },
+            "default",
+        );
+
+        assert_eq!(prompt.render_prompt_indicator(PromptEditMode::Default), "[default] ");
+        assert_eq!(prompt.render_prompt_indicator(PromptEditMode::Emacs), "E ");
+        assert_eq!(
+            prompt.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Insert)),
+            "I "
+        );
+        assert_eq!(
+            prompt.render_prompt_indicator(PromptEditMode::Vi(PromptViMode::Normal)),
+            "N "
+        );
+        assert_eq!(prompt.render_prompt_multiline_indicator(), "M ");
+        assert_eq!(
+            prompt.render_prompt_history_search_indicator(PromptHistorySearch::new(
+                PromptHistorySearchStatus::Passing,
+                "git".to_string(),
+            )),
+            "search:git:passing "
+        );
+        assert_eq!(
+            prompt.render_prompt_history_search_indicator(PromptHistorySearch::new(
+                PromptHistorySearchStatus::Failing,
+                "oops".to_string(),
+            )),
+            "fail:oops:failing "
+        );
+    }
     fn unique_temp_dir(prefix: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

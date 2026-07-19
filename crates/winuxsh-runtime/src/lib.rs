@@ -31,3 +31,4 @@ pub use config::{
 pub use theme::Theme;
 pub use completion::WinuxshCompleter;
 pub use completion::CompletionState;
+pub use prompt::PromptIndicators;

@@ -1204,6 +1204,31 @@ Rules:
 - do not implement zsh-specific syntax.
 - do not change rubash parser/executor semantics.
 
+## Phase 22 - Prompt Indicator Polish
+
+Implementation status: completed on `master`.
+
+This phase adds a small native prompt indicator surface for zsh-like editor
+feedback without changing shell semantics. It is intentionally a prompt/config
+feature: `.zshrc` import can later target these fields, but winuxsh still does
+not source zsh prompt code or ZLE widgets.
+
+Coverage target:
+
+- `[shell] prompt_indicator` configures the default / emacs indicator.
+- `[shell] emacs_indicator`, `vi_insert_indicator`, and
+  `vi_normal_indicator` can override editor-mode-specific indicators.
+- `[shell] multiline_indicator` configures continuation prompts.
+- `[shell] history_search_indicator` and `history_search_fail_indicator`
+  configure Ctrl+R prompt text and can include `{term}` / `{status}`.
+- omitted indicator fields preserve current behavior.
+
+Rules:
+
+- keep indicators as native reedline prompt rendering.
+- do not execute zsh prompt functions or ZLE widgets.
+- do not change rubash parser/executor semantics.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh
