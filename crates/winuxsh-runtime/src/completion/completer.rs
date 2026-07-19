@@ -122,22 +122,18 @@ impl WinuxshCompleter {
 
         all_suggestions
     }
-fn format_completions(&self, result: CompletionResult, input: &str, cursor_pos: usize) -> Vec<Suggestion> {
+    fn format_completions(
+        &self,
+        result: CompletionResult,
+        input: &str,
+        cursor_pos: usize,
+    ) -> Vec<Suggestion> {
         let mut suggestions = Vec::new();
-
-        // Compute word_len = length of the word being completed at cursor_pos.
-        let pos = cursor_pos.min(input.len());
-        let input_bytes = input.as_bytes();
-        let mut start = pos;
-        while start > 0 {
-            let c = input_bytes[start - 1];
-            if c == b' ' || c == b'\t' || c == b'$' || c == b'(' {
-                break;
-            }
-            start -= 1;
-        }
-        let _word_len = if start <= pos { pos - start } else { 0 };
-        let word_len = if start <= pos { pos - start } else { 0 };
+        let span_context =
+            CompletionContext::new(PathBuf::new(), input.to_string(), cursor_pos);
+        let (span_start, span_end) = span_context
+            .current_word_span()
+            .unwrap_or((cursor_pos, cursor_pos));
 
         for (i, completion) in result.completions.iter().enumerate() {
             let description = result.descriptions.get(i).and_then(|d| d.as_deref());
@@ -148,8 +144,8 @@ fn format_completions(&self, result: CompletionResult, input: &str, cursor_pos: 
                 style: None,
                 extra: None,
                 span: Span {
-                    start: cursor_pos.saturating_sub(word_len),
-                    end: cursor_pos,
+                    start: span_start,
+                    end: span_end,
                 },
                 append_whitespace: true,
             });
@@ -182,6 +178,35 @@ mod tests {
         state.load_completion_dirs(&[]);
         // Should have registered at least the command plugin
         assert!(state.plugins.iter().any(|p| p.name() == "command-completion"));
+    }
+
+    #[test]
+    fn completer_span_covers_escaped_shell_word() {
+        let temp_dir = unique_temp_dir("winuxsh-completer-span");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        std::fs::write(temp_dir.join("two words.txt"), "two").unwrap();
+
+        let state = Arc::new(Mutex::new(CompletionState::new(temp_dir.clone())));
+        let mut completer = WinuxshCompleter::new(state);
+        let input = "ls two\\ w";
+        let suggestions = completer.complete(input, input.len());
+
+        let suggestion = suggestions
+            .iter()
+            .find(|suggestion| suggestion.value == "two\\ words.txt")
+            .unwrap_or_else(|| panic!("missing suggestion, got {suggestions:?}"));
+        assert_eq!(suggestion.span.start, 3);
+        assert_eq!(suggestion.span.end, input.len());
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    fn unique_temp_dir(prefix: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("{}-{}-{}", prefix, std::process::id(), nanos))
     }
 }
 

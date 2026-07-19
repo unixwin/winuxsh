@@ -16,6 +16,13 @@ pub mod theme;
 pub mod winuxcmd;
 pub mod zsh_compat;
 
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::sync::Mutex;
+
+    pub(crate) static PROCESS_STATE_LOCK: Mutex<()> = Mutex::new(());
+}
+
 pub use shell::Shell;
 pub use config::{
     AutosuggestConfig, EditorConfig, EditorMode, ShellConfig, SyntaxHighlightConfig,

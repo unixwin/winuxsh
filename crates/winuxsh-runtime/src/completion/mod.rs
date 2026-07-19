@@ -23,6 +23,16 @@ pub struct CompletionContext {
     pub cursor_pos: usize,
 }
 
+/// Shell word under the cursor, parsed only for completion purposes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellWord {
+    pub start: usize,
+    pub end: usize,
+    pub raw: String,
+    pub value: String,
+    pub quote: Option<char>,
+}
+
 impl CompletionContext {
     pub fn new(current_dir: PathBuf, input: String, cursor_pos: usize) -> Self {
         Self {
@@ -34,45 +44,33 @@ impl CompletionContext {
 
     /// Get the word under cursor
     pub fn get_current_word(&self) -> Option<String> {
-        // Clamp cursor_pos to a valid char boundary
-        let pos = self.cursor_pos.min(self.input.len());
-        let pos = floor_char_boundary(&self.input, pos);
-        let before_cursor = &self.input[..pos];
+        self.get_current_shell_word().map(|word| word.value)
+    }
 
-        // Find the start of the current word
-        let word_start = before_cursor
-            .rfind(|c: char| c.is_whitespace() || c == ';' || c == '|' || c == '&')
-            .map(|p| ceil_char_boundary(before_cursor, p + 1))
-            .unwrap_or(0);
-
-        if word_start < before_cursor.len() {
-            Some(before_cursor[word_start..].to_string())
-        } else {
-            None
+    /// Get the shell word under cursor, including raw span and unescaped value.
+    pub fn get_current_shell_word(&self) -> Option<ShellWord> {
+        let (segment_start, segment) = self.current_segment_before_cursor();
+        if segment_ends_with_unescaped_whitespace(segment) {
+            return None;
         }
+        shell_words_in_segment(segment, segment_start).pop()
+    }
+
+    /// Get the replacement span for the current shell word.
+    pub fn current_word_span(&self) -> Option<(usize, usize)> {
+        self.get_current_shell_word()
+            .map(|word| (word.start, word.end))
     }
 
     /// Check if cursor is at command position (first word or after separator)
     pub fn is_command_position(&self) -> bool {
-        let pos = self.cursor_pos.min(self.input.len());
-        let pos = floor_char_boundary(&self.input, pos);
-        let before_cursor = &self.input[..pos];
-
-        if before_cursor.trim().is_empty() {
+        let (_, segment) = self.current_segment_before_cursor();
+        if segment.trim().is_empty() {
             return true;
         }
 
-        let last_sep = before_cursor
-            .rfind(|c: char| c == ';' || c == '|' || c == '&' || c == '\n');
-
-        if let Some(p) = last_sep {
-            let skip = ceil_char_boundary(before_cursor, p + 1);
-            let segment = before_cursor[skip..].trim_start();
-            segment.is_empty() || !segment.chars().any(char::is_whitespace)
-        } else {
-            let segment = before_cursor.trim_start();
-            segment.is_empty() || !segment.chars().any(char::is_whitespace)
-        }
+        let words = shell_words_in_segment(segment, 0);
+        words.is_empty() || (words.len() == 1 && !segment_ends_with_unescaped_whitespace(segment))
     }
 
     /// Check if current word is a path (contains / or \ or starts with .)
@@ -107,34 +105,36 @@ impl CompletionContext {
 
     /// Get the command name at the start of the current input line segment
     pub fn get_command_name(&self) -> Option<String> {
-        let pos = self.cursor_pos.min(self.input.len());
-        let pos = floor_char_boundary(&self.input, pos);
-        let before_cursor = &self.input[..pos];
-
-        let cmd_start = before_cursor
-            .rfind(|c: char| c == ';' || c == '|' || c == '&')
-            .map(|p| ceil_char_boundary(before_cursor, p + 1))
-            .unwrap_or(0);
-
-        let segment = before_cursor[cmd_start..].trim_start();
-        segment.split_whitespace().next().map(|s| s.to_string())
+        let (segment_start, segment) = self.current_segment_before_cursor();
+        shell_words_in_segment(segment, segment_start)
+            .first()
+            .map(|word| word.value.clone())
     }
 
     /// Get the token immediately before the current word (the previous token)
     pub fn get_prev_token(&self) -> Option<String> {
+        let (segment_start, segment) = self.current_segment_before_cursor();
+        let words = shell_words_in_segment(segment, segment_start);
+        if words.is_empty() {
+            return None;
+        }
+        if segment_ends_with_unescaped_whitespace(segment) {
+            return words.last().map(|word| word.value.clone());
+        }
+        if words.len() >= 2 {
+            return words.get(words.len() - 2).map(|word| word.value.clone());
+        }
+        None
+    }
+
+    fn current_segment_before_cursor(&self) -> (usize, &str) {
         let pos = self.cursor_pos.min(self.input.len());
         let pos = floor_char_boundary(&self.input, pos);
         let before_cursor = &self.input[..pos];
-
-        // Find the start of the current word
-        let word_start = before_cursor
-            .rfind(|c: char| c.is_whitespace() || c == ';' || c == '|' || c == '&')
-            .map(|p| ceil_char_boundary(before_cursor, p + 1))
+        let segment_start = last_command_separator(before_cursor)
+            .map(|idx| ceil_char_boundary(before_cursor, idx + 1))
             .unwrap_or(0);
-
-        // Everything before the current word
-        let before_word = before_cursor[..word_start].trim_end();
-        before_word.split_whitespace().last().map(|s| s.to_string())
+        (segment_start, &before_cursor[segment_start..])
     }
 }
 
@@ -224,6 +224,29 @@ mod tests {
     }
 
     #[test]
+    fn test_get_current_word_handles_escapes_and_quotes() {
+        let escaped = CompletionContext::new(
+            PathBuf::from("/home/user"),
+            "ls two\\ w".to_string(),
+            9,
+        );
+        let escaped_word = escaped.get_current_shell_word().unwrap();
+        assert_eq!(escaped_word.value, "two w");
+        assert_eq!(escaped_word.start, 3);
+        assert_eq!(escaped.current_word_span(), Some((3, 9)));
+
+        let quoted = CompletionContext::new(
+            PathBuf::from("/home/user"),
+            "ls \"two w".to_string(),
+            9,
+        );
+        let quoted_word = quoted.get_current_shell_word().unwrap();
+        assert_eq!(quoted_word.value, "two w");
+        assert_eq!(quoted_word.quote, Some('"'));
+        assert_eq!(quoted_word.start, 3);
+    }
+
+    #[test]
     fn test_is_command_position_for_partial_and_empty_commands() {
         let empty = CompletionContext::new(PathBuf::from("/home/user"), "".to_string(), 0);
         assert!(empty.is_command_position());
@@ -238,6 +261,14 @@ mod tests {
 
         let arg = CompletionContext::new(PathBuf::from("/home/user"), "echo gre".to_string(), 8);
         assert!(!arg.is_command_position());
+
+        let escaped_arg =
+            CompletionContext::new(PathBuf::from("/home/user"), "echo two\\ w".to_string(), 11);
+        assert!(!escaped_arg.is_command_position());
+
+        let quoted_pipe =
+            CompletionContext::new(PathBuf::from("/home/user"), "echo \"|\" | gre".to_string(), 14);
+        assert!(quoted_pipe.is_command_position());
     }
 
     #[test]
@@ -271,6 +302,23 @@ mod tests {
         );
         assert!(ctx.is_variable_completion());
     }
+
+    #[test]
+    fn test_prev_token_handles_escaped_values() {
+        let value = CompletionContext::new(
+            PathBuf::from("/home/user"),
+            "cmd --flag two\\ w".to_string(),
+            17,
+        );
+        assert_eq!(value.get_prev_token(), Some("--flag".to_string()));
+
+        let blank = CompletionContext::new(
+            PathBuf::from("/home/user"),
+            "cmd --flag ".to_string(),
+            11,
+        );
+        assert_eq!(blank.get_prev_token(), Some("--flag".to_string()));
+    }
 }
 
 // ─── Char-boundary helpers ────────────────────────────────────────────────────
@@ -300,4 +348,167 @@ fn ceil_char_boundary(s: &str, pos: usize) -> usize {
         p += 1;
     }
     p
+}
+
+fn last_command_separator(input: &str) -> Option<usize> {
+    let mut quote = None;
+    let mut escaped = false;
+    let mut last = None;
+
+    for (idx, ch) in input.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && quote != Some('\'') {
+            escaped = true;
+            continue;
+        }
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        if ch == '\'' || ch == '"' {
+            quote = Some(ch);
+            continue;
+        }
+        if matches!(ch, ';' | '|' | '&' | '\n') {
+            last = Some(idx);
+        }
+    }
+
+    last
+}
+
+fn shell_words_in_segment(segment: &str, offset: usize) -> Vec<ShellWord> {
+    let mut words = Vec::new();
+    let mut start = None;
+    let mut quote = None;
+    let mut escaped = false;
+
+    for (idx, ch) in segment.char_indices() {
+        if start.is_none() {
+            if ch.is_whitespace() {
+                continue;
+            }
+            start = Some(idx);
+        }
+
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && quote != Some('\'') {
+            escaped = true;
+            continue;
+        }
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        if ch == '\'' || ch == '"' {
+            quote = Some(ch);
+            continue;
+        }
+        if ch.is_whitespace() {
+            if let Some(start_idx) = start.take() {
+                words.push(make_shell_word(segment, offset, start_idx, idx));
+            }
+        }
+    }
+
+    if let Some(start_idx) = start {
+        words.push(make_shell_word(segment, offset, start_idx, segment.len()));
+    }
+
+    words
+}
+
+fn make_shell_word(segment: &str, offset: usize, start: usize, end: usize) -> ShellWord {
+    let raw = segment[start..end].to_string();
+    let quote = raw
+        .chars()
+        .next()
+        .filter(|ch| *ch == '\'' || *ch == '"');
+    ShellWord {
+        start: offset + start,
+        end: offset + end,
+        value: unescape_shell_word(&raw),
+        raw,
+        quote,
+    }
+}
+
+fn unescape_shell_word(raw: &str) -> String {
+    let mut value = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+
+    for ch in raw.chars() {
+        if escaped {
+            value.push(ch);
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && quote != Some('\'') {
+            escaped = true;
+            continue;
+        }
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            } else {
+                value.push(ch);
+            }
+            continue;
+        }
+        if ch == '\'' || ch == '"' {
+            quote = Some(ch);
+            continue;
+        }
+        value.push(ch);
+    }
+
+    if escaped {
+        value.push('\\');
+    }
+    value
+}
+
+fn segment_ends_with_unescaped_whitespace(segment: &str) -> bool {
+    let mut quote = None;
+    let mut escaped = false;
+    let mut ends_with_whitespace = false;
+
+    for ch in segment.chars() {
+        if escaped {
+            escaped = false;
+            ends_with_whitespace = false;
+            continue;
+        }
+        if ch == '\\' && quote != Some('\'') {
+            escaped = true;
+            ends_with_whitespace = false;
+            continue;
+        }
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+            ends_with_whitespace = false;
+            continue;
+        }
+        if ch == '\'' || ch == '"' {
+            quote = Some(ch);
+            ends_with_whitespace = false;
+            continue;
+        }
+        ends_with_whitespace = ch.is_whitespace();
+    }
+
+    ends_with_whitespace
 }

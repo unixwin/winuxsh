@@ -1057,6 +1057,9 @@ contract:
   is Windows-native.
 - command completion treats empty command position and partial command words
   correctly, so blank Tab lists commands and `gre<Tab>` can suggest `grep`.
+- REPL single-line command sequences now reuse the same host-synced execution
+  wrapper, so `cd target; native-child` updates process cwd before the native
+  child runs.
 
 ## Phase 17 - Host Contract Test Matrix
 
@@ -1171,6 +1174,34 @@ Rules:
 - keep candidates shell-visible and slash-style where the user typed slash
   prefixes.
 - do not introduce PowerShell wildcard behavior.
+- do not change rubash parser/executor semantics.
+
+## Phase 21 - Shell-Word-Aware Completion
+
+Implementation status: completed on `master`.
+
+This phase makes the completion frontend understand the shell word currently
+under the cursor instead of splitting only on raw whitespace. It is still a
+completion-layer parser only; rubash remains the sole shell parser/executor.
+
+Coverage target:
+
+- `winuxsh --completion-probe "ls two\ w"` matches a file named
+  `two words.txt`.
+- `winuxsh --completion-probe "ls \"two w"` matches and returns a quoted
+  candidate such as `"two words.txt"`.
+- `winuxsh --completion-probe "ls parent\ dir/ch"` preserves the escaped
+  parent directory prefix.
+- suggestion spans replace the full shell word, not only the suffix after an
+  escaped space.
+- command-position and previous-token detection continue to work for unquoted
+  commands and flags.
+
+Rules:
+
+- support only practical shell-word parsing needed by completion: backslash
+  escapes, single quotes, double quotes, and command separators outside quotes.
+- do not implement zsh-specific syntax.
 - do not change rubash parser/executor semantics.
 
 ## Non-Goals

@@ -221,7 +221,7 @@ impl Shell {
             last_interactive_exit_code: None,
             line_editor: None,
         };
-        shell.sync_process_cwd_from_executor_pwd();
+        shell.sync_executor_pwd_from_process_cwd();
         shell.update_completion_state();
         Ok(shell)
     }
@@ -275,6 +275,24 @@ impl Shell {
                 .is_some_and(|command| command == "lwd")
         {
             self.execute_native_last_working_dir()?
+        } else if let Some(execution) = self.execute_host_synced_simple_ast(&ast) {
+            match execution {
+                Ok(code) => code,
+                Err(rubash::executor::ExecuteError::ExitCode(code)) => code,
+                Err(rubash::executor::ExecuteError::Return(code)) => code,
+                Err(rubash::executor::ExecuteError::CommandNotFound(cmd)) => {
+                    if self.native_plugin_enabled("command-not-found") {
+                        self.print_native_command_not_found(&cmd);
+                    } else {
+                        eprintln!("winuxsh: {}: command not found", cmd);
+                    }
+                    127
+                }
+                Err(e) => {
+                    eprintln!("winuxsh: {}", e);
+                    1
+                }
+            }
         } else {
             match self.executor.execute_ast(&ast) {
                 Ok(()) => self.executor.last_exit_code(),
@@ -810,6 +828,13 @@ impl Shell {
         host_path.is_dir().then_some(host_path)
     }
 
+    fn sync_executor_pwd_from_process_cwd(&mut self) {
+        let Ok(cwd) = std::env::current_dir() else {
+            return;
+        };
+        let normalized_pwd = host_path_to_shell_path(&cwd.to_string_lossy());
+        self.executor.set_env("PWD", &normalized_pwd);
+    }
     fn sync_process_cwd_from_executor_pwd(&mut self) {
         let Some(pwd) = self.executor.get_env("PWD").map(str::to_owned) else {
             return;
@@ -1447,13 +1472,14 @@ fn normalize_shell_visible_path(value: &str) -> String {
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use std::sync::Mutex;
+    use crate::test_support::PROCESS_STATE_LOCK;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn native_lifecycle_hooks_run_for_interactive_commands() {
+        let _env_lock = PROCESS_STATE_LOCK.lock().unwrap();
+        let _cwd_guard = CwdGuard::capture();
         let temp = unique_temp_dir("winuxsh-native-hooks");
         let next_dir = temp.join("next");
         std::fs::create_dir_all(&next_dir).unwrap();
@@ -1486,6 +1512,8 @@ mod tests {
 
     #[test]
     fn native_direnv_export_script_applies_to_executor_env() {
+        let _env_lock = PROCESS_STATE_LOCK.lock().unwrap();
+        let _cwd_guard = CwdGuard::capture();
         let mut shell = test_shell(HookConfig::default());
 
         shell.apply_direnv_export_script("export DIRENV_TEST_VALUE=active\n");
@@ -1495,6 +1523,8 @@ mod tests {
 
     #[test]
     fn native_alias_finder_matches_known_alias_values() {
+        let _env_lock = PROCESS_STATE_LOCK.lock().unwrap();
+        let _cwd_guard = CwdGuard::capture();
         let mut shell = test_shell(HookConfig::default());
         shell.native_plugins.enabled = true;
         shell.native_plugins.presets = vec!["alias-finder".to_string()];
@@ -1531,6 +1561,8 @@ mod tests {
 
     #[test]
     fn alias_mirror_tracks_successful_interactive_alias_commands() {
+        let _env_lock = PROCESS_STATE_LOCK.lock().unwrap();
+        let _cwd_guard = CwdGuard::capture();
         let mut shell = test_shell(HookConfig::default());
 
         shell.execute_interactive_line("alias gst='git status'").unwrap();
@@ -1587,7 +1619,7 @@ mod tests {
 
     #[test]
     fn interactive_cd_syncs_process_cwd_and_normalizes_pwd() {
-        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _env_lock = PROCESS_STATE_LOCK.lock().unwrap();
         let _cwd_guard = CwdGuard::capture();
         let temp = unique_temp_dir("winuxsh-cwd-sync");
         let target = temp.join("target");
@@ -1638,8 +1670,55 @@ mod tests {
     }
 
     #[test]
+    fn execute_line_syncs_cd_before_following_windows_child_command() {
+        if !cfg!(windows) {
+            return;
+        }
+
+        let _env_lock = PROCESS_STATE_LOCK.lock().unwrap();
+        let _cwd_guard = CwdGuard::capture();
+        let temp = unique_temp_dir("winuxsh-cwd-sequence");
+        let start = temp.join("start");
+        let target = start.join("target");
+        let bin = temp.join("bin");
+        let log = temp.join("cwdprobe.txt");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
+        write_fake_cwd_probe(&bin, &host_display_path(&log));
+
+        let old_path = prepend_path_for_test(&bin);
+        let old_pathext = std::env::var_os("PATHEXT");
+        std::env::set_var("PATHEXT", ".COM;.EXE;.BAT;.CMD");
+        std::env::set_current_dir(&start).unwrap();
+
+        let mut shell = test_shell(HookConfig::default());
+        let code = shell.execute_line("cd target; cwdprobe").unwrap();
+
+        assert_eq!(code, 0);
+        let observed = std::fs::read_to_string(&log).unwrap();
+        let observed = host_path_to_shell_path(observed.trim());
+        let expected = shell_display_path(&target);
+        assert!(
+            same_shell_dir(&observed, &expected),
+            "native child cwd mismatch: observed={observed:?}, expected={expected:?}"
+        );
+        assert!(
+            same_shell_dir(shell.executor.get_env("PWD").unwrap_or_default(), &expected),
+            "executor PWD mismatch: {:?}, expected={expected:?}",
+            shell.executor.get_env("PWD")
+        );
+
+        restore_path_for_test(old_path);
+        match old_pathext {
+            Some(value) => std::env::set_var("PATHEXT", value),
+            None => std::env::remove_var("PATHEXT"),
+        }
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn native_dotenv_precmd_applies_safe_assignments() {
-        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _env_lock = PROCESS_STATE_LOCK.lock().unwrap();
         let _cwd_guard = CwdGuard::capture();
         let temp = unique_temp_dir("winuxsh-native-dotenv-precmd");
         std::fs::create_dir_all(&temp).unwrap();
@@ -1680,7 +1759,7 @@ BACKTICK_VALUE=`whoami`
 
     #[test]
     fn native_dotenv_chpwd_applies_project_env() {
-        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _env_lock = PROCESS_STATE_LOCK.lock().unwrap();
         let _cwd_guard = CwdGuard::capture();
         let temp = unique_temp_dir("winuxsh-native-dotenv-chpwd");
         let project = temp.join("project");
@@ -1702,7 +1781,8 @@ BACKTICK_VALUE=`whoami`
 
     #[test]
     fn native_zoxide_command_changes_directory_and_tracks_pwd() {
-        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _env_lock = PROCESS_STATE_LOCK.lock().unwrap();
+        let _cwd_guard = CwdGuard::capture();
         let temp = unique_temp_dir("winuxsh-native-zoxide");
         let bin = temp.join("bin");
         let target = temp.join("target");
@@ -1740,7 +1820,8 @@ BACKTICK_VALUE=`whoami`
 
     #[test]
     fn native_thefuck_command_corrects_previous_interactive_command() {
-        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _env_lock = PROCESS_STATE_LOCK.lock().unwrap();
+        let _cwd_guard = CwdGuard::capture();
         let temp = unique_temp_dir("winuxsh-native-thefuck");
         let bin = temp.join("bin");
         let target = temp.join("target");
@@ -1778,7 +1859,8 @@ BACKTICK_VALUE=`whoami`
 
     #[test]
     fn native_fzf_cd_command_changes_directory_to_selected_path() {
-        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _env_lock = PROCESS_STATE_LOCK.lock().unwrap();
+        let _cwd_guard = CwdGuard::capture();
         let temp = unique_temp_dir("winuxsh-native-fzf-cd");
         let bin = temp.join("bin");
         let parent = temp.join("parent");
@@ -1814,6 +1896,8 @@ BACKTICK_VALUE=`whoami`
 
     #[test]
     fn native_last_working_dir_command_and_repl_restore_use_cache() {
+        let _env_lock = PROCESS_STATE_LOCK.lock().unwrap();
+        let _cwd_guard = CwdGuard::capture();
         let temp = unique_temp_dir("winuxsh-native-last-working-dir");
         let home = temp.join("home");
         let target = temp.join("target");
@@ -1880,6 +1964,8 @@ BACKTICK_VALUE=`whoami`
 
     #[test]
     fn native_last_working_dir_chpwd_writes_cache() {
+        let _env_lock = PROCESS_STATE_LOCK.lock().unwrap();
+        let _cwd_guard = CwdGuard::capture();
         let temp = unique_temp_dir("winuxsh-native-last-working-dir-chpwd");
         let home = temp.join("home");
         let target = temp.join("target");
@@ -1905,7 +1991,7 @@ BACKTICK_VALUE=`whoami`
     }
 
     fn test_shell(hooks: HookConfig) -> Shell {
-        Shell {
+        let mut shell = Shell {
             executor: Executor::new(),
             completion_state: Arc::new(Mutex::new(CompletionState::new(PathBuf::from(".")))),
             prompt: WinuxshPrompt::new(None, None, None, "default"),
@@ -1925,7 +2011,9 @@ BACKTICK_VALUE=`whoami`
             last_interactive_command: None,
             last_interactive_exit_code: None,
             line_editor: None,
-        }
+        };
+        shell.sync_executor_pwd_from_process_cwd();
+        shell
     }
 
     fn unique_temp_dir(prefix: &str) -> PathBuf {
@@ -2042,5 +2130,10 @@ BACKTICK_VALUE=`whoami`
             permissions.set_mode(0o755);
             std::fs::set_permissions(&exe, permissions).unwrap();
         }
+    }
+
+    fn write_fake_cwd_probe(bin: &std::path::Path, log_path: &str) {
+        let script = format!("@echo off\r\n>\"{}\" echo %CD%\r\nexit /b 0\r\n", log_path);
+        std::fs::write(bin.join("cwdprobe.cmd"), script).unwrap();
     }
 }

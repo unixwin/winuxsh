@@ -124,6 +124,8 @@ status: active
 - [x] Phase 18 completion probe: 新增非交互 `--completion-probe` 入口，覆盖空 Tab、前缀命令、PATH/PATHEXT、管道后命令位与参数位不误补全
 - [x] Phase 19 blank argument path completion: 修复 `cd <Tab>` / `ls <Tab>` 这类空参数位不返回当前目录候选的问题
 - [x] Phase 20 path completion polish: 保留目录前缀、转义空格路径、隐藏文件按 `.` 前缀显示、目录优先排序
+- [x] Phase 21 shell-word-aware completion: 补全切词理解反斜杠转义和简单引号，修复 `two\ w` / `"two w` 这类路径补全
+- [x] Windows cwd authority regression: 启动时以真实 process cwd 初始化 rubash `PWD`，且 `cd target; native-child` 同一交互行中同步 process cwd，避免 prompt/ls 与 `PWD` 分裂
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
 ### Rubash 能力验证
@@ -132,6 +134,8 @@ status: active
 - [x] Phase 18 completion probe tests: 通过 `winuxsh --completion-probe` 验证真实 Shell 初始化后的 REPL 补全候选
 - [x] Phase 19 path completion tests: 覆盖空参数位路径补全，并保持管道后空命令位仍补命令
 - [x] Phase 20 path polish tests: 覆盖 `src/ma` 不丢前缀、空格文件名转义、隐藏文件过滤和目录优先排序
+- [x] Phase 21 shell word tests: 覆盖转义空格匹配、引号内路径匹配、补全替换 span 不截断 token
+- [x] REPL cwd sequence tests: 覆盖 `execute_line("cd target; cwdprobe")` 中 Windows `.cmd` 子进程 cwd 与 `PWD` 一致
 - [ ] 作业控制/内建命令语义优先走 rubash，不在 winuxsh 重复实现
 
 ## 关键架构决策 (锁定)

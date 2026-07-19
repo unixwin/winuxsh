@@ -132,6 +132,31 @@ fn path_completion_escapes_spaces_in_candidates() {
 }
 
 #[test]
+fn path_completion_matches_escaped_spaces_in_input() {
+    let env = ProbeEnv::new("winuxsh-completion-escaped-input");
+    let parent = env.start.join("parent dir");
+    std::fs::create_dir_all(&parent).unwrap();
+    std::fs::write(env.start.join("two words.txt"), "two").unwrap();
+    std::fs::write(parent.join("child.txt"), "child").unwrap();
+
+    let file_suggestions = run_probe("ls two\\ w", &env, &[]);
+    assert_contains(&file_suggestions, "two\\ words.txt");
+
+    let nested_suggestions = run_probe("ls parent\\ dir/ch", &env, &[]);
+    assert_contains(&nested_suggestions, "parent\\ dir/child.txt");
+}
+
+#[test]
+fn path_completion_matches_double_quoted_input() {
+    let env = ProbeEnv::new("winuxsh-completion-quoted-input");
+    std::fs::write(env.start.join("two words.txt"), "two").unwrap();
+
+    let suggestions = run_probe("ls \"two w", &env, &[]);
+
+    assert_contains(&suggestions, "\"two words.txt\"");
+}
+
+#[test]
 fn command_position_after_pipe_suggests_command() {
     let env = ProbeEnv::new("winuxsh-completion-pipe");
     let suggestions = run_probe("ls | gre", &env, &[]);

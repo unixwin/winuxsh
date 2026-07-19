@@ -14,12 +14,17 @@ pub struct PathCompleter;
 impl PathCompleter {
     /// Complete a path
     pub fn complete(context: &CompletionContext) -> Result<Option<CompletionResult>> {
-        let word = context.get_current_word().unwrap_or_default();
+        let shell_word = context.get_current_shell_word();
+        let word = shell_word
+            .as_ref()
+            .map(|word| word.value.as_str())
+            .unwrap_or_default();
+        let quote = shell_word.as_ref().and_then(|word| word.quote);
         let directories_only = context
             .get_command_name()
             .as_deref()
             .is_some_and(is_directory_only_command);
-        let query = PathQuery::from_word(&context.current_dir, &word);
+        let query = PathQuery::from_word(&context.current_dir, word, quote);
         let base_dir = Self::normalize_path(&query.base_dir);
 
         // Check if base directory exists
@@ -66,6 +71,7 @@ impl PathCompleter {
                     file_type.is_dir(),
                     &query.display_prefix,
                     &file_name,
+                    query.quote,
                 ));
             }
         }
@@ -102,15 +108,17 @@ struct PathQuery {
     base_dir: PathBuf,
     prefix: String,
     display_prefix: String,
+    quote: Option<char>,
 }
 
 impl PathQuery {
-    fn from_word(current_dir: &Path, word: &str) -> Self {
+    fn from_word(current_dir: &Path, word: &str, quote: Option<char>) -> Self {
         if word.is_empty() {
             return Self {
                 base_dir: current_dir.to_path_buf(),
                 prefix: String::new(),
                 display_prefix: String::new(),
+                quote,
             };
         }
 
@@ -119,6 +127,7 @@ impl PathQuery {
                 base_dir: current_dir.to_path_buf(),
                 prefix: ".".to_string(),
                 display_prefix: String::new(),
+                quote,
             };
         }
 
@@ -127,6 +136,7 @@ impl PathQuery {
                 base_dir: current_dir.to_path_buf(),
                 prefix: String::new(),
                 display_prefix: word.to_string(),
+                quote,
             };
         }
 
@@ -143,6 +153,7 @@ impl PathQuery {
                 base_dir,
                 prefix,
                 display_prefix,
+                quote,
             };
         }
 
@@ -150,6 +161,7 @@ impl PathQuery {
             base_dir: current_dir.to_path_buf(),
             prefix: word.to_string(),
             display_prefix: String::new(),
+            quote,
         }
     }
 }
@@ -162,11 +174,12 @@ struct PathCandidate {
 }
 
 impl PathCandidate {
-    fn new(is_dir: bool, display_prefix: &str, file_name: &str) -> Self {
-        let mut completion = format!("{}{}", display_prefix, shell_escape_path(file_name));
+    fn new(is_dir: bool, display_prefix: &str, file_name: &str, quote: Option<char>) -> Self {
+        let mut path = format!("{}{}", display_prefix, file_name);
         if is_dir {
-            completion.push('/');
+            path.push('/');
         }
+        let completion = format_shell_path(&path, quote);
         Self {
             is_dir,
             sort_key: file_name.to_lowercase(),
@@ -211,6 +224,25 @@ fn shell_escape_path(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
     for ch in value.chars() {
         if should_escape_path_char(ch) {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
+}
+
+fn format_shell_path(value: &str, quote: Option<char>) -> String {
+    match quote {
+        Some('\'') => format!("'{}'", value.replace('\'', "'\\''")),
+        Some('"') => format!("\"{}\"", escape_double_quoted_path(value)),
+        _ => shell_escape_path(value),
+    }
+}
+
+fn escape_double_quoted_path(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if matches!(ch, '\\' | '"' | '$' | '`') {
             escaped.push('\\');
         }
         escaped.push(ch);

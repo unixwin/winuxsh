@@ -158,6 +158,7 @@ impl Prompt for WinuxshPrompt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::PROCESS_STATE_LOCK;
 
     #[test]
     fn renders_optional_right_prompt() {
@@ -196,6 +197,7 @@ mod tests {
         let git_dir = dir.join(".git");
         std::fs::create_dir_all(&git_dir).unwrap();
         std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/feature/demo\n").unwrap();
+        let _process_lock = PROCESS_STATE_LOCK.lock().unwrap();
         let _cwd = CwdGuard::enter(&dir);
 
         let prompt = WinuxshPrompt::new(
