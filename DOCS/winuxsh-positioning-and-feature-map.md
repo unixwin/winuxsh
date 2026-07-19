@@ -123,7 +123,7 @@ Nushell's syntax, data pipeline model, plugin ABI, or command semantics.
 | Completion providers | `_cmd`, `#compdef`, aliases, flags, values, paths | Partial | Import safe zsh completion assets into native TOML/provider model |
 | Completion matching | zstyle matcher-list, grouping, cache, case sensitivity | Prefix-oriented today | Translate useful `zstyle` subset after definitions are broad |
 | External completer bridge | Carapace-like external completion command | Not started | v2.3/v3 candidate, secondary to zsh asset import |
-| History | path, size, sync, ignore-space, SQLite/isolation | Basic plaintext file | Add small `[history]` TOML controls first |
+| History | path, size, sync, ignore-space, SQLite/isolation | Configurable plaintext file | Keep `[history]` small; defer sync/isolation until usage proves it |
 | Edit mode | `bindkey -e/-v`, mode indicators, cursor shape | Emacs/Vi done | Import simple bindkey mode and add prompt/cursor polish |
 | Keybindings | ZLE widgets and bindkey maps | Not started | Native subset only; arbitrary ZLE plugin scripts are deferred |
 | Menus | Completion/history menu config | Basic fixed menus | Add limited style/size config before full DSL |

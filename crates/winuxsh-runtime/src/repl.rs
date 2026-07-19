@@ -13,21 +13,19 @@ use crate::shell::Shell;
 use crate::syntax_highlighting::WinuxshSyntaxHighlighter;
 use crate::zsh_compat::NativeWidgetSuggestion;
 
-const HISTORY_SIZE: usize = 10000;
 const COMPLETION_MENU: &str = "completion_menu";
 const HISTORY_MENU: &str = "history_menu";
 
 /// Build a `Reedline` instance for the shell.
 pub fn build_line_editor(shell: &mut Shell) -> anyhow::Result<Reedline> {
-    let history = FileBackedHistory::with_file(HISTORY_SIZE, shell.history_path.clone()).map_err(
-        |e| {
+    let history = FileBackedHistory::with_file(shell.history_max_size, shell.history_path.clone())
+        .map_err(|e| {
             anyhow::anyhow!(
                 "failed to open history file {}: {}",
                 shell.history_path.display(),
                 e
             )
-        },
-    )?;
+        })?;
 
     let completer = WinuxshCompleter::new(shell.completion_state.clone());
 
@@ -41,6 +39,9 @@ pub fn build_line_editor(shell: &mut Shell) -> anyhow::Result<Reedline> {
 
     let mut editor = Reedline::create()
         .with_history(Box::new(history))
+        .with_history_exclusion_prefix(history_exclusion_prefix(
+            shell.history_ignore_space_prefixed,
+        ))
         .with_menu(completion_menu)
         .with_menu(history_menu)
         .with_edit_mode(build_edit_mode(
@@ -61,6 +62,10 @@ pub fn build_line_editor(shell: &mut Shell) -> anyhow::Result<Reedline> {
     }
 
     Ok(editor)
+}
+
+fn history_exclusion_prefix(ignore_space_prefixed: bool) -> Option<String> {
+    ignore_space_prefixed.then(|| " ".to_string())
 }
 
 fn build_edit_mode(
@@ -287,6 +292,12 @@ mod tests {
             keybindings.find_binding(KeyModifiers::NONE, KeyCode::Tab),
             Some(ReedlineEvent::UntilFound(_))
         ));
+    }
+
+    #[test]
+    fn history_exclusion_prefix_tracks_ignore_space_config() {
+        assert_eq!(history_exclusion_prefix(false), None);
+        assert_eq!(history_exclusion_prefix(true), Some(" ".to_string()));
     }
 
     #[test]

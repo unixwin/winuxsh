@@ -1229,6 +1229,39 @@ Rules:
 - do not execute zsh prompt functions or ZLE widgets.
 - do not change rubash parser/executor semantics.
 
+## Phase 23 - History Config Polish
+
+Implementation status: completed on `master`.
+
+This phase turns the existing fixed reedline history setup into a small native
+configuration surface that matches the zsh-like product goal without adopting a
+large history subsystem or Nushell semantics.
+
+Target config:
+
+```toml
+[history]
+path = "~/.winuxsh_history"
+max_size = 10000
+ignore_space_prefixed = true
+```
+
+Coverage target:
+
+- omitted `[history]` preserves the current defaults:
+  `~/.winuxsh_history`, capacity `10000`, and no ignore-space filtering.
+- `path` supports `~` expansion to the normal Windows user home.
+- `max_size` controls `FileBackedHistory::with_file(...)` capacity.
+- `ignore_space_prefixed` maps to reedline's native history exclusion prefix
+  for commands that start with a single space.
+
+Rules:
+
+- keep history as a native winuxsh/reedline feature.
+- do not source zsh history scripts or make zsh `HISTFILE` authoritative yet.
+- do not introduce SQLite/history isolation in this phase.
+- keep non-interactive `-c` and script execution unaffected.
+
 ## Non-Goals
 
 - Do not vendor zsh, Nushell, Oh My Zsh, or zsh plugin source into the winuxsh

@@ -55,6 +55,23 @@ pub struct EditorConfig {
     pub edit_mode: EditorMode,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryConfig {
+    pub path: Option<PathBuf>,
+    pub max_size: usize,
+    pub ignore_space_prefixed: bool,
+}
+
+impl Default for HistoryConfig {
+    fn default() -> Self {
+        Self {
+            path: None,
+            max_size: 10000,
+            ignore_space_prefixed: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZshCompatLevel {
     Safe,
@@ -341,6 +358,7 @@ struct WinshrcToml {
     shell: Option<ShellToml>,
     theme: Option<ThemeToml>,
     editor: Option<EditorToml>,
+    history: Option<HistoryToml>,
     aliases: Option<HashMap<String, String>>,
     completions: Option<CompletionsToml>,
     winuxcmd: Option<WinuxCmdToml>,
@@ -369,6 +387,13 @@ struct ThemeToml {
 #[derive(Debug, Deserialize)]
 struct EditorToml {
     edit_mode: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HistoryToml {
+    path: Option<String>,
+    max_size: Option<usize>,
+    ignore_space_prefixed: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -454,6 +479,7 @@ struct NativePluginToml {
 pub struct FullConfig {
     pub shell: ShellConfig,
     pub editor: EditorConfig,
+    pub history: HistoryConfig,
     pub theme_name: String,
     pub aliases: HashMap<String, String>,
     pub completion_dirs: Vec<PathBuf>,
@@ -467,6 +493,7 @@ impl Default for FullConfig {
         Self {
             shell: ShellConfig::default(),
             editor: EditorConfig::default(),
+            history: HistoryConfig::default(),
             theme_name: "default".to_string(),
             aliases: HashMap::new(),
             completion_dirs: Vec::new(),
@@ -524,6 +551,7 @@ fn build_config(parsed: WinshrcToml) -> FullConfig {
                 .map(|mode| EditorMode::from_config_value(&mode))
                 .unwrap_or_default(),
         },
+        history: parsed.history.map(build_history_config).unwrap_or_default(),
         theme_name: parsed
             .theme
             .and_then(|t| t.current_theme)
@@ -540,6 +568,31 @@ fn build_config(parsed: WinshrcToml) -> FullConfig {
         hooks: parsed.hooks.map(build_hook_config).unwrap_or_default(),
         zsh,
     }
+}
+
+fn build_history_config(parsed: HistoryToml) -> HistoryConfig {
+    let defaults = HistoryConfig::default();
+    HistoryConfig {
+        path: parsed.path.as_deref().map(expand_tilde_path),
+        max_size: parsed
+            .max_size
+            .filter(|max_size| *max_size > 0)
+            .unwrap_or(defaults.max_size),
+        ignore_space_prefixed: parsed
+            .ignore_space_prefixed
+            .unwrap_or(defaults.ignore_space_prefixed),
+    }
+}
+
+fn expand_tilde_path(value: &str) -> PathBuf {
+    let home = || dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    if value == "~" {
+        return home();
+    }
+    if let Some(rest) = value.strip_prefix("~/").or_else(|| value.strip_prefix("~\\")) {
+        return home().join(rest);
+    }
+    PathBuf::from(value)
 }
 
 fn build_prompt_indicators(parsed: &ShellToml) -> PromptIndicators {
@@ -701,6 +754,41 @@ edit_mode = "vi"
 "#,
         );
         assert_eq!(config.editor.edit_mode, EditorMode::Vi);
+    }
+
+    #[test]
+    fn defaults_history_config() {
+        let config = parse_config("");
+        assert_eq!(config.history, HistoryConfig::default());
+    }
+
+    #[test]
+    fn parses_history_config_with_tilde_path() {
+        let config = parse_config(
+            r#"
+[history]
+path = "~/.custom_winuxsh_history"
+max_size = 1234
+ignore_space_prefixed = true
+"#,
+        );
+        let expected_path = dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".custom_winuxsh_history");
+        assert_eq!(config.history.path, Some(expected_path));
+        assert_eq!(config.history.max_size, 1234);
+        assert!(config.history.ignore_space_prefixed);
+    }
+
+    #[test]
+    fn zero_history_max_size_falls_back_to_default() {
+        let config = parse_config(
+            r#"
+[history]
+max_size = 0
+"#,
+        );
+        assert_eq!(config.history.max_size, HistoryConfig::default().max_size);
     }
 
     #[test]

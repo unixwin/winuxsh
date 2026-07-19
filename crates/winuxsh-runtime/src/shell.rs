@@ -40,6 +40,8 @@ pub struct Shell {
     pub prompt: WinuxshPrompt,
     pub home_dir: PathBuf,
     pub history_path: PathBuf,
+    pub history_max_size: usize,
+    pub history_ignore_space_prefixed: bool,
     pub editor_mode: EditorMode,
     pub autosuggest: AutosuggestConfig,
     pub syntax_highlighting: SyntaxHighlightConfig,
@@ -138,7 +140,11 @@ impl Shell {
 
         // 7. User-local state files.
         let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        let history_path = home_dir.join(".winuxsh_history");
+        let history_path = config
+            .history
+            .path
+            .clone()
+            .unwrap_or_else(|| home_dir.join(".winuxsh_history"));
         let last_working_dir_cache_path = default_last_working_dir_cache_path(&home_dir);
 
         // 8. Completion state.
@@ -207,6 +213,8 @@ impl Shell {
             prompt,
             home_dir,
             history_path,
+            history_max_size: config.history.max_size,
+            history_ignore_space_prefixed: config.history.ignore_space_prefixed,
             editor_mode: config.editor.edit_mode,
             autosuggest: config.zsh.autosuggestions.with_env_overrides(),
             syntax_highlighting: syntax_highlighting.with_env_overrides(),
@@ -1998,6 +2006,8 @@ BACKTICK_VALUE=`whoami`
             prompt: WinuxshPrompt::new(None, None, None, "default"),
             home_dir: PathBuf::from("."),
             history_path: PathBuf::from(".winuxsh_history"),
+            history_max_size: 10000,
+            history_ignore_space_prefixed: false,
             editor_mode: EditorMode::Emacs,
             autosuggest: AutosuggestConfig::default(),
             syntax_highlighting: SyntaxHighlightConfig::default(),

@@ -106,7 +106,7 @@ Verification:
   - `winuxsh --import-zsh` or equivalent CLI surface
   - dry-run diagnostics for unsupported zsh/ZLE/plugin constructs
   - native `.winshrc.toml` suggestions for stable settings
-- Add `[history]` config:
+- `[history]` config is implemented:
   - `path`
   - `max_size`
   - `ignore_space_prefixed`

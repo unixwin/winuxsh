@@ -25,7 +25,7 @@ pub(crate) mod test_support {
 
 pub use shell::Shell;
 pub use config::{
-    AutosuggestConfig, EditorConfig, EditorMode, ShellConfig, SyntaxHighlightConfig,
+    AutosuggestConfig, EditorConfig, EditorMode, HistoryConfig, ShellConfig, SyntaxHighlightConfig,
     ZshCompatLevel, ZshConfig,
 };
 pub use theme::Theme;
