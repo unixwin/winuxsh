@@ -7,6 +7,7 @@ use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use crate::theme::{by_name, Theme};
+use crate::git_status::GitPromptSymbols;
 use reedline::{
     Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus, PromptViMode,
 };
@@ -46,6 +47,7 @@ pub struct WinuxshPrompt {
     template: String,
     right_template: Option<String>,
     git_prompt_format: Option<String>,
+    git_prompt_symbols: GitPromptSymbols,
     indicators: PromptIndicators,
     theme: Theme,
 }
@@ -63,6 +65,7 @@ impl WinuxshPrompt {
             git_prompt_format,
             PromptIndicators::default(),
             theme_name,
+            GitPromptSymbols::default(),
         )
     }
 
@@ -72,6 +75,7 @@ impl WinuxshPrompt {
         git_prompt_format: Option<String>,
         indicators: PromptIndicators,
         theme_name: &str,
+        symbols: GitPromptSymbols,
     ) -> Self {
         let t = template.unwrap_or_else(|| "{user}@{host} {cwd} {git_prompt}%# ".to_string());
         Self {
@@ -79,6 +83,7 @@ impl WinuxshPrompt {
             right_template,
             git_prompt_format,
             indicators,
+            git_prompt_symbols: symbols,
             theme: by_name(theme_name),
         }
     }
@@ -102,16 +107,16 @@ impl WinuxshPrompt {
         let host_s = self.theme.prompt_host.paint(&host).to_string();
         let dir_s = self.theme.prompt_dir.paint(&cwd).to_string();
         let sym_s = self.theme.prompt_symbol.paint("%").to_string();
-        let git_status = std::env::current_dir()
+        let git_status: Option<crate::git_status::GitRepoStatus> = std::env::current_dir()
             .ok()
-            .and_then(|cwd| crate::git_status::collect(&cwd));
+            .and_then(|cwd| crate::git_status::collect_for_prompt(&cwd));
         let git_branch = git_status
             .as_ref()
             .and_then(|s| s.branch.clone())
             .unwrap_or_default();
         let compact = git_status
             .as_ref()
-            .map(|s| s.compact_status())
+            .map(|s| s.compact_status_with(&self.git_prompt_symbols))
             .unwrap_or_default();
         let git_dirty = git_status.as_ref().map(|s| s.dirty).unwrap_or(false);
         let git_branch_s = if git_branch.is_empty() {
@@ -338,6 +343,9 @@ mod tests {
         // Clear the git status cache so we don't hit a stale entry from a
         // previous test that ran in another cwd.
         crate::git_status::clear_cache();
+        // Synchronously warm the cache so the non-blocking collect_for_prompt
+        // (used via render_template) finds a cached result immediately.
+        crate::git_status::collect(&dir);
         let _process_lock = PROCESS_STATE_LOCK.lock().unwrap();
         let _cwd = CwdGuard::enter(&dir);
 
@@ -395,6 +403,7 @@ mod tests {
                 history_search_fail: "fail:{term}:{status} ".to_string(),
             },
             "default",
+            GitPromptSymbols::default(),
         );
 
         assert_eq!(prompt.render_prompt_indicator(PromptEditMode::Default), "[default] ");

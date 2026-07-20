@@ -383,6 +383,7 @@ struct WinshrcToml {
     winuxcmd: Option<WinuxCmdToml>,
     hooks: Option<HooksToml>,
     zsh: Option<ZshToml>,
+    git_prompt: Option<GitPromptToml>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -504,6 +505,58 @@ struct NativePluginToml {
     presets: Option<Vec<String>>,
 }
 
+/// User-configurable git prompt symbols.
+///
+/// Each field is a format string where `{n}` is replaced by the count.
+/// Empty or missing fields inherit defaults; an empty string set
+/// explicitly suppresses that segment (oh-my-posh / starship style).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitPromptConfig {
+    pub staged: String,
+    pub unstaged: String,
+    pub untracked: String,
+    pub deleted: String,
+    pub ahead: String,
+    pub behind: String,
+    pub stashes: String,
+    pub conflicts: String,
+    pub separator: String,
+}
+
+impl Default for GitPromptConfig {
+    fn default() -> Self {
+        Self {
+            staged: "●{n}".to_string(),
+            unstaged: "✚{n}".to_string(),
+            untracked: "?{n}".to_string(),
+            deleted: "✖{n}".to_string(),
+            ahead: "↑{n}".to_string(),
+            behind: "↓{n}".to_string(),
+            stashes: "⚑{n}".to_string(),
+            conflicts: "✖{n}".to_string(),
+            separator: " ".to_string(),
+        }
+    }
+}
+
+use crate::git_status::GitPromptSymbols;
+
+impl From<&GitPromptConfig> for GitPromptSymbols {
+    fn from(cfg: &GitPromptConfig) -> Self {
+        Self {
+            staged: cfg.staged.clone(),
+            unstaged: cfg.unstaged.clone(),
+            untracked: cfg.untracked.clone(),
+            deleted: cfg.deleted.clone(),
+            ahead: cfg.ahead.clone(),
+            behind: cfg.behind.clone(),
+            stashes: cfg.stashes.clone(),
+            conflicts: cfg.conflicts.clone(),
+            separator: cfg.separator.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FullConfig {
     pub shell: ShellConfig,
@@ -517,6 +570,7 @@ pub struct FullConfig {
     pub winuxcmd_path: Option<PathBuf>,
     pub hooks: HookConfig,
     pub zsh: ZshConfig,
+    pub git_prompt: GitPromptConfig,
 }
 
 impl Default for FullConfig {
@@ -531,14 +585,28 @@ impl Default for FullConfig {
             completion_dirs: Vec::new(),
             completion_behavior: CompletionBehavior::default(),
             winuxcmd_path: None,
-            hooks: HookConfig::default(),
-            zsh: ZshConfig::default(),
+            hooks: HookConfig::default(), 
+            zsh: ZshConfig::default(), 
+            git_prompt: GitPromptConfig::default(),
         }
     }
 }
 
 /// Load config from `~/.winshrc.toml`. Returns defaults if the file
 /// does not exist or cannot be parsed (logs warning).
+#[derive(Debug, Deserialize)]
+struct GitPromptToml {
+    staged: Option<String>,
+    unstaged: Option<String>,
+    untracked: Option<String>,
+    deleted: Option<String>,
+    ahead: Option<String>,
+    behind: Option<String>,
+    stashes: Option<String>,
+    conflicts: Option<String>,
+    separator: Option<String>,
+}
+
 pub fn load() -> FullConfig {
     let config_path = default_config_path();
 
@@ -612,6 +680,23 @@ fn build_config(parsed: WinshrcToml) -> FullConfig {
         winuxcmd_path: parsed.winuxcmd.and_then(|w| w.path).map(PathBuf::from),
         hooks: parsed.hooks.map(build_hook_config).unwrap_or_default(),
         zsh,
+        git_prompt: build_git_prompt_config(parsed.git_prompt),
+    }
+}
+
+fn build_git_prompt_config(parsed: Option<GitPromptToml>) -> GitPromptConfig {
+    let defaults = GitPromptConfig::default();
+    let Some(p) = parsed else { return defaults; };
+    GitPromptConfig {
+        staged: p.staged.unwrap_or(defaults.staged),
+        unstaged: p.unstaged.unwrap_or(defaults.unstaged),
+        untracked: p.untracked.unwrap_or(defaults.untracked),
+        deleted: p.deleted.unwrap_or(defaults.deleted),
+        ahead: p.ahead.unwrap_or(defaults.ahead),
+        behind: p.behind.unwrap_or(defaults.behind),
+        stashes: p.stashes.unwrap_or(defaults.stashes),
+        conflicts: p.conflicts.unwrap_or(defaults.conflicts),
+        separator: p.separator.unwrap_or(defaults.separator),
     }
 }
 

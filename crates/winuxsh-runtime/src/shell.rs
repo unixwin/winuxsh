@@ -131,12 +131,14 @@ impl Shell {
         let git_prompt_format = zsh_report
             .as_ref()
             .and_then(git_prompt_format_from_report);
+        let git_prompt_symbols = crate::git_status::GitPromptSymbols::from(&config.git_prompt);
         let prompt = WinuxshPrompt::new_with_indicators(
             prompt_format,
             right_prompt_format,
             git_prompt_format,
             config.shell.prompt_indicators.clone(),
             &config.theme_name,
+            git_prompt_symbols,
         );
 
         // 7. User-local state files.

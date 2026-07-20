@@ -43,21 +43,71 @@ pub struct GitRepoStatus {
 
 impl GitRepoStatus {
     pub fn compact_status(&self) -> String {
+        self.compact_status_with(&GitPromptSymbols::default())
+    }
+
+    /// Render compact status using user-configurable symbols. Each
+    /// non-empty segment is joined by `separator`. Empty symbol format
+    /// strings suppress that segment (oh-my-posh / starship style).
+    pub fn compact_status_with(&self, symbols: &GitPromptSymbols) -> String {
         let mut parts: Vec<String> = Vec::new();
-        if self.conflicts > 0 { parts.push(format!("✖{}", self.conflicts)); }
-        if self.staged > 0 { parts.push(format!("●{}", self.staged)); }
-        if self.unstaged > 0 { parts.push(format!("✚{}", self.unstaged)); }
-        if self.deleted > 0 { parts.push(format!("✖{}", self.deleted)); }
-        if self.ahead > 0 { parts.push(format!("↑{}", self.ahead)); }
-        if self.behind > 0 { parts.push(format!("↓{}", self.behind)); }
-        if self.untracked > 0 { parts.push(format!("?{}", self.untracked)); }
-        if self.stashes > 0 { parts.push(format!("⚑{}", self.stashes)); }
-        parts.join(" ")
+        if let Some(p) = symbols.render(&symbols.conflicts, self.conflicts) { parts.push(p); }
+        if let Some(p) = symbols.render(&symbols.staged, self.staged) { parts.push(p); }
+        if let Some(p) = symbols.render(&symbols.unstaged, self.unstaged) { parts.push(p); }
+        if let Some(p) = symbols.render(&symbols.deleted, self.deleted) { parts.push(p); }
+        if let Some(p) = symbols.render(&symbols.ahead, self.ahead) { parts.push(p); }
+        if let Some(p) = symbols.render(&symbols.behind, self.behind) { parts.push(p); }
+        if let Some(p) = symbols.render(&symbols.untracked, self.untracked) { parts.push(p); }
+        if let Some(p) = symbols.render(&symbols.stashes, self.stashes) { parts.push(p); }
+        parts.join(&symbols.separator)
+    }
+}
+
+/// User-configurable symbols used by `compact_status_with`.
+///
+/// Each format string supports `{n}` for the count. An empty string
+/// suppresses that segment entirely, so users who want a quieter prompt
+/// (oh-my-posh / starship style) can blank out individual symbols.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitPromptSymbols {
+    pub staged: String,
+    pub unstaged: String,
+    pub untracked: String,
+    pub deleted: String,
+    pub ahead: String,
+    pub behind: String,
+    pub stashes: String,
+    pub conflicts: String,
+    pub separator: String,
+}
+
+impl Default for GitPromptSymbols {
+    fn default() -> Self {
+        Self {
+            staged: "●{n}".to_string(),
+            unstaged: "✚{n}".to_string(),
+            untracked: "?{n}".to_string(),
+            deleted: "✖{n}".to_string(),
+            ahead: "↑{n}".to_string(),
+            behind: "↓{n}".to_string(),
+            stashes: "⚑{n}".to_string(),
+            conflicts: "✖{n}".to_string(),
+            separator: " ".to_string(),
+        }
+    }
+}
+
+impl GitPromptSymbols {
+    fn render(&self, fmt: &str, n: usize) -> Option<String> {
+        if n == 0 || fmt.is_empty() {
+            return None;
+        }
+        Some(fmt.replace("{n}", &n.to_string()))
     }
 }
 
 pub fn collect(cwd: &Path) -> Option<GitRepoStatus> {
-    // Check cache first (per-cwd, 2s TTL)
+    // Check cache first (per-cwd, TTL)
     {
         let cache = GIT_STATUS_CACHE.lock().unwrap();
         if let Some(ref entry) = *cache {
@@ -101,6 +151,33 @@ pub fn collect(cwd: &Path) -> Option<GitRepoStatus> {
     let mut cache = GIT_STATUS_CACHE.lock().unwrap();
     *cache = Some(GitStatusCache { cwd: cwd.to_path_buf(), status: status.clone(), cached_at: Instant::now() });
     status
+}
+
+/// Non-blocking collect for the prompt render path.
+///
+/// Returns the cached value immediately if cache entry exists for this cwd
+/// (whether or not it's still fresh). If the cache is missing, returns None
+/// and spawns a background thread to refresh the cache so the *next* prompt
+/// render sees fresh data. Never blocks the prompt.
+pub fn collect_for_prompt(cwd: &Path) -> Option<GitRepoStatus> {
+    {
+        let cache = GIT_STATUS_CACHE.lock().unwrap();
+        if let Some(ref entry) = *cache {
+            if entry.cwd == cwd {
+                return entry.status.clone();
+            }
+        }
+    }
+    // Cache miss. Spawn a background refresh; do not block prompt render.
+    refresh_in_background(cwd.to_path_buf());
+    None
+}
+
+fn refresh_in_background(cwd: PathBuf) {
+    std::thread::spawn(move || {
+        // `collect` updates the cache as a side effect.
+        let _ = collect(&cwd);
+    });
 }
 
 /// Clear the cached git status (e.g., when a hook or filesystem event might have changed the work-tree).
@@ -232,5 +309,65 @@ mod tests {
     fn git_status_clean_compact_empty() {
         let s = GitRepoStatus { branch: Some("main".into()), dirty: false, staged: 0, unstaged: 0, untracked: 0, deleted: 0, ahead: 0, behind: 0, stashes: 0, conflicts: 0 };
         assert!(s.compact_status().is_empty());
+    }
+
+    #[test]
+    fn git_status_compact_format_with_custom_symbols() {
+        let mut symbols = GitPromptSymbols::default();
+        symbols.staged = "+{n}".to_string();
+        symbols.unstaged = "*{n}".to_string();
+        symbols.untracked = "?{n}".to_string();
+        symbols.ahead = "u{n}".to_string();
+        symbols.behind = "d{n}".to_string();
+        symbols.stashes = "s{n}".to_string();
+
+        let s = GitRepoStatus {
+            branch: Some("main".into()),
+            dirty: true,
+            staged: 2,
+            unstaged: 1,
+            untracked: 3,
+            deleted: 0,
+            ahead: 1,
+            behind: 2,
+            stashes: 1,
+            conflicts: 0,
+        };
+        let c = s.compact_status_with(&symbols);
+        assert!(c.contains("+2"));
+        assert!(c.contains("*1"));
+        assert!(c.contains("u1"));
+        assert!(c.contains("d2"));
+        assert!(c.contains("?3"));
+        assert!(c.contains("s1"));
+    }
+
+    #[test]
+    fn git_status_compact_with_empty_symbols_hides_segments() {
+        let mut symbols = GitPromptSymbols::default();
+        // Quiet style: hide staged/unstaged/untracked/stashes; keep only ahead/behind.
+        symbols.staged = String::new();
+        symbols.unstaged = String::new();
+        symbols.untracked = String::new();
+        symbols.stashes = String::new();
+
+        let s = GitRepoStatus {
+            branch: Some("main".into()),
+            dirty: true,
+            staged: 5,
+            unstaged: 3,
+            untracked: 2,
+            deleted: 0,
+            ahead: 1,
+            behind: 0,
+            stashes: 7,
+            conflicts: 0,
+        };
+        let c = s.compact_status_with(&symbols);
+        assert!(!c.contains("●"));
+        assert!(!c.contains("✚"));
+        assert!(!c.contains("?"));
+        assert!(!c.contains("⚑"));
+        assert!(c.contains("↑1"));
     }
 }
