@@ -110,6 +110,16 @@ impl Shell {
             }
         }
 
+        // Built-in git aliases (oh-my-zsh style). Always available but
+        // user ~/.winshrc.toml aliases take precedence.
+        for (name, value) in Self::default_git_aliases() {
+            if !aliases.contains_key(name) {
+                if apply_alias(&mut executor, name, value) {
+                    aliases.insert(name.to_string(), value.to_string());
+                }
+            }
+        }
+
         // 6. Prompt + theme. Native TOML stays authoritative; zsh prompt
         // imports only fill empty native prompt fields.
         let prompt_format = config.shell.prompt_format.clone().or_else(|| {
@@ -965,6 +975,50 @@ impl Shell {
 
         self.sync_process_cwd_from_executor_pwd();
         Ok(code)
+    }
+    /// Built-in git aliases (oh-my-zsh style).
+    fn default_git_aliases() -> Vec<(&'static str, &'static str)> {
+        vec![
+            ("g", "git"),
+            ("ga", "git add"),
+            ("gaa", "git add --all"),
+            ("gb", "git branch"),
+            ("gba", "git branch -a"),
+            ("gbl", "git blame -b -w"),
+            ("gc", "git commit -v"),
+            ("gca", "git commit -v -a"),
+            ("gcam", "git commit -a -m"),
+            ("gcb", "git checkout -b"),
+            ("gcl", "git clone --recurse-submodules"),
+            ("gcm", "git checkout master"),
+            ("gcmsg", "git commit -m"),
+            ("gco", "git checkout"),
+            ("gcp", "git cherry-pick"),
+            ("gd", "git diff"),
+            ("gdca", "git diff --cached"),
+            ("gf", "git fetch"),
+            ("gfa", "git fetch --all --prune"),
+            ("gl", "git pull"),
+            ("glo", "git log --oneline --decorate"),
+            ("gm", "git merge"),
+            ("gp", "git push"),
+            ("gpf", "git push --force-with-lease"),
+            ("gr", "git remote"),
+            ("gra", "git remote add"),
+            ("grb", "git rebase"),
+            ("grh", "git reset HEAD"),
+            ("grhh", "git reset HEAD --hard"),
+            ("grm", "git rm"),
+            ("grs", "git reset"),
+            ("grv", "git remote -v"),
+            ("gsh", "git show"),
+            ("gss", "git status -s"),
+            ("gst", "git status"),
+            ("gsta", "git stash save"),
+            ("gstp", "git stash pop"),
+            ("gstl", "git stash list"),
+            ("gup", "git pull --rebase"),
+        ]
     }
 
     fn execute_host_synced_simple_ast(

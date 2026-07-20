@@ -2,9 +2,13 @@
 // Provides Tab completion for executable commands
 
 use std::env;
+use std::sync::Mutex;
 
 use crate::completion::{CompletionContext, CompletionResult};
 use anyhow::Result;
+
+/// Cache of PATH commands to avoid scanning on every keystroke.
+static PATH_CMD_CACHE: Mutex<Option<(Vec<String>, Vec<String>)>> = Mutex::new(None);
 
 /// Command completer
 pub struct CommandCompleter;
@@ -13,14 +17,43 @@ impl CommandCompleter {
     /// Get all available commands (built-in + PATH)
     pub fn get_all_commands() -> Vec<String> {
         let mut commands = Self::get_builtin_commands();
-        commands.extend(Self::get_path_commands());
+        commands.extend(Self::get_path_commands_cached());
         commands.sort();
         commands.dedup();
         commands
     }
 
-    /// Get built-in commands
+    /// Get built-in shell commands
     pub fn get_builtin_commands() -> Vec<String> {
+        vec![
+            "ls".to_string(),
+            "cd".to_string(),
+            "pwd".to_string(),
+            "echo".to_string(),
+            "exit".to_string(),
+            "clear".to_string(),
+            "cat".to_string(),
+            "grep".to_string(),
+            "find".to_string(),
+            "cp".to_string(),
+            "mv".to_string(),
+            "rm".to_string(),
+            "mkdir".to_string(),
+            "set".to_string(),
+            "unset".to_string(),
+            "export".to_string(),
+            "env".to_string(),
+            "help".to_string(),
+            "history".to_string(),
+            "alias".to_string(),
+            "unalias".to_string(),
+            "source".to_string(),
+            "type".to_string(),
+        ]
+    }
+
+    /// Get commonly-used commands (shown on empty Tab)
+    pub fn get_common_commands() -> Vec<String> {
         vec![
             "ls".to_string(),
             "cd".to_string(),
@@ -51,7 +84,83 @@ impl CommandCompleter {
             "plugin".to_string(),
             "theme".to_string(),
             "oh-my-winuxsh".to_string(),
+            "git".to_string(),
+            "code".to_string(),
+            "code-insiders".to_string(),
+            "explorer".to_string(),
+            "start".to_string(),
+            "wt".to_string(),
+            "codex".to_string(),
+            "pwsh".to_string(),
+            "powershell".to_string(),
+            "cmd".to_string(),
+            "where".to_string(),
+            "which".to_string(),
+            "touch".to_string(),
+            "head".to_string(),
+            "tail".to_string(),
+            "sort".to_string(),
+            "uniq".to_string(),
+            "wc".to_string(),
+            "tee".to_string(),
+            "diff".to_string(),
+            "less".to_string(),
+            "more".to_string(),
+            "xargs".to_string(),
+            "basename".to_string(),
+            "dirname".to_string(),
+            "realpath".to_string(),
+            "sleep".to_string(),
+            "timeout".to_string(),
+            "watch".to_string(),
+            "nano".to_string(),
+            "vim".to_string(),
+            "nvim".to_string(),
+            "node".to_string(),
+            "npm".to_string(),
+            "npx".to_string(),
+            "python".to_string(),
+            "pip".to_string(),
+            "cargo".to_string(),
+            "rustc".to_string(),
+            "rustup".to_string(),
+            "gh".to_string(),
+            "docker".to_string(),
+            "docker-compose".to_string(),
+            "make".to_string(),
+            "cmake".to_string(),
+            "ninja".to_string(),
+            "ssh".to_string(),
+            "scp".to_string(),
+            "curl".to_string(),
+            "wget".to_string(),
+            "ping".to_string(),
+            "ipconfig".to_string(),
+            "netstat".to_string(),
+            "nslookup".to_string(),
+            "tracert".to_string(),
+            "choco".to_string(),
+            "scoop".to_string(),
+            "winget".to_string(),
+            "reg".to_string(),
+            "tasklist".to_string(),
+            "taskkill".to_string(),
+            "systeminfo".to_string(),
         ]
+    }
+
+    /// Get cached PATH commands (scans once, caches forever)
+    fn get_path_commands_cached() -> Vec<String> {
+        if let Ok(cache) = PATH_CMD_CACHE.lock() {
+            if let Some((ref cmds, _)) = *cache {
+                return cmds.clone();
+            }
+        }
+        let cmds = Self::get_path_commands();
+        if let Ok(mut cache) = PATH_CMD_CACHE.lock() {
+            *cache = Some((cmds.clone(), Vec::new()));
+        }
+        cmds
     }
 
     /// Get commands from PATH environment variable
@@ -93,14 +202,29 @@ impl CommandCompleter {
 
     /// Complete a command name
     pub fn complete(context: &CompletionContext) -> Result<Option<CompletionResult>> {
-        // Only complete if we're at a command position
         if !context.is_command_position() {
             return Ok(None);
         }
 
         let word = context.get_current_word().unwrap_or_default();
 
-        // Get all available commands
+        // Empty input at command position → show common commands
+        if word.is_empty() {
+            let common = Self::get_common_commands();
+            let mut matches: Vec<String> = common
+                .into_iter()
+                .filter(|cmd| context.behavior.matches(cmd, ""))
+                .collect();
+            if let Some(limit) = context.behavior.max_command_results {
+                matches.truncate(limit);
+            }
+            if matches.is_empty() {
+                return Ok(None);
+            }
+            return Ok(Some(CompletionResult::new(matches)));
+        }
+
+        // Normal prefix matching: built-in + cached PATH commands
         let all_commands = Self::get_all_commands();
 
         let mut matches: Vec<String> = all_commands
