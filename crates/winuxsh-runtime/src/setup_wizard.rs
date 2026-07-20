@@ -131,65 +131,77 @@ fn generate_config(
 ) -> String {
     let (prompt_template, right_template) = match (prompt_style, right_prompt) {
         ("powerline", "time") => (
-            "{cwd} {git_prompt} {sym} ".to_string(),
+            "{cwd} {git_prompt} ".to_string(),
             "{time} ".to_string(),
         ),
         ("powerline", "full") => (
-            "{cwd} {git_prompt} {sym} ".to_string(),
+            "{cwd} {git_prompt} ".to_string(),
             "{time} {git_branch} ".to_string(),
         ),
         ("powerline", _) => (
-            "{cwd} {git_prompt} {sym} ".to_string(),
+            "{cwd} {git_prompt} ".to_string(),
             String::new(),
         ),
         ("multiline", "time") => (
-            "{user}@{host} {time}\n{cwd} {git_prompt}{sym} ".to_string(),
+            "{user}@{host} {time}\n{cwd} {git_prompt} ".to_string(),
             String::new(),
         ),
         ("multiline", "full") => (
-            "{user}@{host} {time}\n{cwd} {git_prompt}{sym} ".to_string(),
+            "{user}@{host} {time}\n{cwd} {git_prompt} ".to_string(),
             "{git_branch} ".to_string(),
         ),
         ("multiline", _) => (
-            "{user}@{host}\n{cwd} {git_prompt}{sym} ".to_string(),
+            "{user}@{host}\n{cwd} {git_prompt} ".to_string(),
             String::new(),
         ),
         ("classic", "time") => (
-            "{user}@{host} {cwd} {git_prompt}{sym} ".to_string(),
+            "{user}@{host} {cwd} {git_prompt} ".to_string(),
             "{time} ".to_string(),
         ),
         ("classic", "full") => (
-            "{user}@{host} {cwd} {git_prompt}{sym} ".to_string(),
+            "{user}@{host} {cwd} {git_prompt} ".to_string(),
             "{time} {git_branch} ".to_string(),
         ),
         ("classic", _) => (
-            "{user}@{host} {cwd} {git_prompt}{sym} ".to_string(),
+            "{user}@{host} {cwd} {git_prompt} ".to_string(),
             String::new(),
         ),
         // minimal
         ("minimal", "time") => (
-            "{cwd}{sym} ".to_string(),
+            "{cwd} ".to_string(),
             "{time} ".to_string(),
         ),
         ("minimal", "full") => (
-            "{cwd}{sym} ".to_string(),
+            "{cwd} ".to_string(),
             "{time} {git_branch} ".to_string(),
         ),
         _ => (
-            "{cwd}{sym} ".to_string(),
+            "{cwd} ".to_string(),
             String::new(),
         ),
     };
 
     let git_section = if git_enabled {
-        r#"
-[git_prompt]
-# Suppress empty-status segments
-# staged = "●{n}"
-# unstaged = "✚{n}"
-# separator = " "
-"#.to_string()
+        // oh-my-zsh style: `git:(branch) status`. The classic / multiline /
+        // powerline templates all print `{git_prompt}` and rely on this
+        // wrapper to look like the reference screenshot. Users who prefer a
+        // bare branch name can delete this line.
+        let git_format = match prompt_style {
+            "minimal" => String::new(),
+            _ => "git:({git_branch})".to_string(),
+        };
+        let git_format_line = if git_format.is_empty() {
+            String::new()
+        } else {
+            format!("git_prompt_format = {:?}\n", git_format)
+        };
+        format!(
+            "\n[git_prompt]\n{}# staged = \"\u{25cf}{{n}}\"   # uncomment to show counts\n# unstaged = \"\u{271a}{{n}}\"\n# separator = \" \"\n",
+            git_format_line
+        )
     } else {
+        // Git explicitly disabled: blank all symbol formats so the segment
+        // stays silent even if the renderer tries to render it.
         r#"
 [git_prompt]
 staged = ""

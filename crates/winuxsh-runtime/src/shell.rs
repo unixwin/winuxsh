@@ -138,9 +138,13 @@ impl Shell {
                     .and_then(|prompt| prompt.translated_format.clone())
             })
         });
-        let git_prompt_format = zsh_report
-            .as_ref()
-            .and_then(git_prompt_format_from_report);
+        // Config TOML takes priority over a zsh-imported format so the
+        // wizard can opt into `git:({git_branch})` without a zshrc on disk.
+        let git_prompt_format = config
+            .shell
+            .git_prompt_format
+            .clone()
+            .or_else(|| zsh_report.as_ref().and_then(git_prompt_format_from_report));
         let git_prompt_symbols = crate::git_status::GitPromptSymbols::from(&config.git_prompt);
         let prompt = WinuxshPrompt::new_with_symbol(
             prompt_format,
