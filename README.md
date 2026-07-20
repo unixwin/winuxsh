@@ -227,6 +227,8 @@ Full reference with all options: [DOCS/getting-started.md](DOCS/getting-started.
 - Report a bug?  Open an issue.
 - Want a feature?  Check [the roadmap](DOCS/winuxsh-roadmap.md).
 - Build from source: `cargo build --release`.
+- Release zip includes `winuxsh.exe`, `winuxcmd/winuxcmd.exe`, and `winuxcmd/activate-winuxcmd.sh`.
+- Run `winuxsh winuxcmd/activate-winuxcmd.sh` once after unpacking to generate local command links.
 - Run the tests: `cargo test`.
 
 ## Documentation

@@ -65,6 +65,14 @@ cargo build --release
 target\release\winuxsh.exe
 ```
 
+如果你下载的是 release 包，先执行一次：
+
+```bash
+winuxsh winuxcmd/activate-winuxcmd.sh
+```
+
+它会在 `winuxcmd/` 目录下生成本地命令链接，之后 `ls`、`cat`、`grep` 就能直接用。
+
 试一下：
 
 ```bash

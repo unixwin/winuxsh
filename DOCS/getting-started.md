@@ -17,6 +17,16 @@ to your `PATH`:
 $env:PATH += ";$pwd\target\release"
 ```
 
+If you are using the release zip, run the activation script once from the
+unpacked root:
+
+```bash
+winuxsh winuxcmd/activate-winuxcmd.sh
+```
+
+That creates local command links inside `winuxcmd/`, so `ls`, `cat`, and
+friends resolve normally.
+
 ## 2. Start the shell
 
 ```pwsh
