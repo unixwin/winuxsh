@@ -12,6 +12,7 @@ pub mod git_status;
 pub mod prompt;
 pub mod repl;
 pub mod shell;
+pub mod setup_wizard;
 pub mod syntax_highlighting;
 pub mod theme;
 pub mod winuxcmd;

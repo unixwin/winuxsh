@@ -150,7 +150,16 @@ impl WinuxshPrompt {
             }
         };
 
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let time_str = format_time(now);
+        let time_str_24 = format_time_24(now);
+
         template
+            .replace("{time}", &time_str)
+            .replace("{time_24}", &time_str_24)
             .replace("{user}", &user_s)
             .replace("{host}", &host_s)
             .replace("{cwd}", &dir_s)
@@ -211,6 +220,20 @@ impl WinuxshPrompt {
             .replace("{status}", status)
             .replace("{term}", term)
     }
+}
+
+fn format_time(unix_secs: u64) -> String {
+    let secs = unix_secs % 86400;
+    let hours = secs / 3600;
+    let mins = (secs % 3600) / 60;
+    format!("{:02}:{:02}", hours, mins)
+}
+
+fn format_time_24(unix_secs: u64) -> String {
+    let secs = unix_secs % 86400;
+    let hours = secs / 3600;
+    let mins = (secs % 3600) / 60;
+    format!("{:02}:{:02}", hours, mins)
 }
 
 #[allow(dead_code)]

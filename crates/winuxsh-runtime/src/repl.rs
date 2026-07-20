@@ -666,6 +666,11 @@ fn has_unescaped_trailing_backslash(input: &str) -> bool {
 
 /// Run the interactive REPL.
 pub fn run_repl(shell: &mut Shell) -> anyhow::Result<()> {
+    // First-run setup wizard (Oh-My-Zsh style)
+    if crate::setup_wizard::is_first_run() {
+        let _ = crate::setup_wizard::run_wizard();
+    }
+
     let welcome = format!(
         "Winuxsh {} \u{2014} bash-compatible shell for Windows. Type \u{2018}exit\u{2019} or press Ctrl+D to quit.",
         env!("CARGO_PKG_VERSION")
