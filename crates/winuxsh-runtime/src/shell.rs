@@ -877,15 +877,33 @@ impl Shell {
         self.executor.set_env("PWD", &normalized_pwd);
     }
     fn sync_process_cwd_from_executor_pwd(&mut self) {
-        let Some(pwd) = self.executor.get_env("PWD").map(str::to_owned) else {
-            return;
+        let pwd = match self.executor.get_env("PWD") {
+            Some(p) => p.to_string(),
+            None => {
+                let cwd = std::env::current_dir().unwrap_or_default();
+                let pwd = host_path_to_shell_path(&cwd.to_string_lossy());
+                self.executor.set_env("PWD", &pwd);
+                return;
+            }
         };
         let host_pwd = shell_path_to_host_path(&pwd);
-        let host_path = PathBuf::from(&host_pwd);
-        if !host_path.is_dir() || std::env::set_current_dir(&host_path).is_err() {
+        let target = if cfg!(windows) {
+            PathBuf::from(host_pwd.replace("/", "\\"))
+        } else {
+            PathBuf::from(&host_pwd)
+        };
+        if !target.is_dir() {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let pwd = host_path_to_shell_path(&cwd.to_string_lossy());
+            self.executor.set_env("PWD", &pwd);
             return;
         }
-
+        if std::env::set_current_dir(&target).is_err() {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let pwd = host_path_to_shell_path(&cwd.to_string_lossy());
+            self.executor.set_env("PWD", &pwd);
+            return;
+        }
         let normalized_pwd = host_path_to_shell_path(&host_pwd);
         self.executor.set_env("PWD", &normalized_pwd);
         if let Some(old_pwd) = self.executor.get_env("OLDPWD").map(str::to_owned) {
