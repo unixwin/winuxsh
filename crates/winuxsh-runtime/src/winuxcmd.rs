@@ -75,6 +75,7 @@ pub fn ensure_on_path_with_override(override_path: Option<&Path>) -> Result<Path
             anyhow!("winuxcmd.exe not found (looked in WINUXCMD_PATH, exe dir, and PATH)")
         })?,
     };
+    auto_activate_bundled_winuxcmd(&exe);
     prepend_exe_dir_to_path(&exe)
 }
 
@@ -131,6 +132,64 @@ fn prepend_exe_dir_to_path(exe: &Path) -> Result<PathBuf> {
     std::env::set_var("PATH", &new_path);
     log::debug!("winuxcmd PATH injected: {}", dir_str);
     Ok(dir)
+}
+
+fn auto_activate_bundled_winuxcmd(exe: &Path) {
+    if std::env::var_os("WINUXSH_SKIP_WINUXCMD_ACTIVATION").is_some() {
+        return;
+    }
+
+    let Some(script) = bundled_activation_script(exe) else {
+        return;
+    };
+    let Some(dir) = exe.parent() else {
+        return;
+    };
+
+    if has_required_command_links(dir) {
+        return;
+    }
+
+    let current_exe = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(err) => {
+            log::warn!("failed to locate winuxsh for winuxcmd activation: {}", err);
+            return;
+        }
+    };
+
+    match Command::new(current_exe)
+        .arg(&script)
+        .env("WINUXSH_SKIP_WINUXCMD_ACTIVATION", "1")
+        .output()
+    {
+        Ok(output) if output.status.success() => {
+            log::debug!("winuxcmd activation completed: {}", script.display());
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            log::warn!(
+                "winuxcmd activation failed with status {}: {}",
+                output.status,
+                stderr.trim()
+            );
+        }
+        Err(err) => {
+            log::warn!("failed to run winuxcmd activation script: {}", err);
+        }
+    }
+}
+
+fn bundled_activation_script(exe: &Path) -> Option<PathBuf> {
+    let dir = exe.parent()?;
+    let script = dir.join("activate-winuxcmd.sh");
+    script.is_file().then_some(script)
+}
+
+fn has_required_command_links(dir: &Path) -> bool {
+    ["ls.exe", "cat.exe", "grep.exe", "ln.exe"]
+        .iter()
+        .all(|name| dir.join(name).is_file())
 }
 
 /// Run `winuxcmd.exe --version` and return the first line of stdout.
@@ -231,6 +290,36 @@ mod tests {
 
         assert_eq!(resolve_winuxcmd_override(&other), None);
         assert_eq!(resolve_winuxcmd_override(&dir), None);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn bundled_activation_script_is_detected_next_to_winuxcmd() {
+        let dir = unique_temp_dir("winuxcmd-activation-script");
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("winuxcmd.exe");
+        let script = dir.join("activate-winuxcmd.sh");
+        std::fs::write(&exe, b"").unwrap();
+        std::fs::write(&script, b"").unwrap();
+
+        assert_eq!(bundled_activation_script(&exe), Some(script));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn command_links_are_required_before_skipping_activation() {
+        let dir = unique_temp_dir("winuxcmd-required-links");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        assert!(!has_required_command_links(&dir));
+
+        for name in ["ls.exe", "cat.exe", "grep.exe", "ln.exe"] {
+            std::fs::write(dir.join(name), b"").unwrap();
+        }
+
+        assert!(has_required_command_links(&dir));
 
         let _ = std::fs::remove_dir_all(dir);
     }

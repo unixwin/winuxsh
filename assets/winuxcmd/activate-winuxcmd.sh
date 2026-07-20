@@ -75,6 +75,13 @@ created=0
 removed=0
 failed=0
 
+if [ "$mode" != "remove" ]; then
+  if [ -f "$winuxcmd_dir/ls.exe" ] && [ -f "$winuxcmd_dir/cat.exe" ] && [ -f "$winuxcmd_dir/grep.exe" ] && [ -f "$winuxcmd_dir/ln.exe" ]; then
+    echo "WinuxCmd command links are already active."
+    exit 0
+  fi
+fi
+
 if [ "$mode" = "remove" ]; then
   echo "Removing WinuxCmd command links from $winuxcmd_dir"
   for cmd in $commands; do

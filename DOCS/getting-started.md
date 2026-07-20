@@ -17,15 +17,15 @@ to your `PATH`:
 $env:PATH += ";$pwd\target\release"
 ```
 
-If you are using the release zip, run the activation script once from the
-unpacked root:
+If you are using the release zip, winuxsh automatically runs the activation
+script on first start when command links are missing:
 
 ```bash
 winuxsh winuxcmd/activate-winuxcmd.sh
 ```
 
 That creates local command links inside `winuxcmd/`, so `ls`, `cat`, and
-friends resolve normally.
+friends resolve normally. Once the links exist, startup skips activation.
 
 ## 2. Start the shell
 
