@@ -11,6 +11,8 @@ use crate::prompt::PromptIndicators;
 /// Shell configuration, loaded from `~/.winshrc.toml`.
 #[derive(Debug, Clone, Default)]
 pub struct ShellConfig {
+    /// Prompt indicator symbol (e.g. "%", "\$", "\u276f", "\u3bb")
+    pub prompt_symbol: String,
     /// Prompt template (e.g. "{user}@{host} {cwd} {symbol}")
     pub prompt_format: Option<String>,
     /// Optional right-side prompt template.
@@ -389,6 +391,7 @@ struct WinshrcToml {
 #[derive(Debug, Deserialize)]
 struct ShellToml {
     prompt_format: Option<String>,
+    prompt_symbol: Option<String>,
     right_prompt_format: Option<String>,
     prompt_indicator: Option<String>,
     emacs_indicator: Option<String>,
@@ -576,7 +579,10 @@ pub struct FullConfig {
 impl Default for FullConfig {
     fn default() -> Self {
         Self {
-            shell: ShellConfig::default(),
+            shell: ShellConfig {
+                prompt_symbol: "%".to_string(),
+                ..ShellConfig::default()
+            },
             editor: EditorConfig::default(),
             history: HistoryConfig::default(),
             menus: MenuConfig::default(),
@@ -644,6 +650,7 @@ fn build_config(parsed: WinshrcToml) -> FullConfig {
     let shell_config = ShellConfig {
         prompt_format: shell.as_ref().and_then(|s| s.prompt_format.clone()),
         right_prompt_format: shell.as_ref().and_then(|s| s.right_prompt_format.clone()),
+        prompt_symbol: shell.as_ref().and_then(|s| s.prompt_symbol.clone()).unwrap_or_else(|| "%".to_string()),
         prompt_indicators: shell
             .as_ref()
             .map(build_prompt_indicators)

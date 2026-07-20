@@ -67,6 +67,13 @@ status: active
 - [x] Phase 5 config: [winuxcmd].path 参与 PATH injection
 
 ### 用户体验
+- [x] 引导式配置向导 (Oh-My-Zsh 风格: 首次运行交互式问答, 自动生成 ~/.winshrc.toml)
+- [x] {time}/{time_24} prompt 模板变量 (右侧时间提示)
+- [x] 5 种 prompt 预设样式 (minimal/classic/powerline/multiline + right prompt options)
+- [x] 已修复: cd .. 不改变进程 cwd 的 bug
+- [x] 已修复: /c/Users 路径格式不被 winuxcmd 识别的 bug
+- [x] 已修复: C:\ 反斜杠路径被 tokenizer 吃掉的 bug
+
 - [x] Vi 模式 (reedline 原生支持,主要工作量在键位配置)
 - [x] Ctrl+R 历史搜索 (reedline 原生)
 - [ ] 更多 prompt 自定义模板

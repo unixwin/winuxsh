@@ -49,6 +49,7 @@ pub struct WinuxshPrompt {
     git_prompt_format: Option<String>,
     git_prompt_symbols: GitPromptSymbols,
     indicators: PromptIndicators,
+    prompt_symbol: String,
     theme: Theme,
 }
 
@@ -59,13 +60,14 @@ impl WinuxshPrompt {
         git_prompt_format: Option<String>,
         theme_name: &str,
     ) -> Self {
-        Self::new_with_indicators(
+        Self::new_with_symbol(
             template,
             right_template,
             git_prompt_format,
             PromptIndicators::default(),
             theme_name,
             GitPromptSymbols::default(),
+            "%".to_string(),
         )
     }
 
@@ -77,6 +79,26 @@ impl WinuxshPrompt {
         theme_name: &str,
         symbols: GitPromptSymbols,
     ) -> Self {
+        Self::new_with_symbol(
+            template,
+            right_template,
+            git_prompt_format,
+            indicators,
+            theme_name,
+            symbols,
+            "%".to_string(),
+        )
+    }
+
+    pub fn new_with_symbol(
+        template: Option<String>,
+        right_template: Option<String>,
+        git_prompt_format: Option<String>,
+        indicators: PromptIndicators,
+        theme_name: &str,
+        symbols: GitPromptSymbols,
+        prompt_symbol: String,
+    ) -> Self {
         let t = template.unwrap_or_else(|| "{user}@{host} {cwd} {git_prompt}%# ".to_string());
         Self {
             template: t,
@@ -84,6 +106,7 @@ impl WinuxshPrompt {
             git_prompt_format,
             indicators,
             git_prompt_symbols: symbols,
+            prompt_symbol,
             theme: by_name(theme_name),
         }
     }
@@ -106,7 +129,7 @@ impl WinuxshPrompt {
         let user_s = self.theme.prompt_user.paint(&user).to_string();
         let host_s = self.theme.prompt_host.paint(&host).to_string();
         let dir_s = self.theme.prompt_dir.paint(&cwd).to_string();
-        let sym_s = self.theme.prompt_symbol.paint("%").to_string();
+        let sym_s = self.theme.prompt_symbol.paint(&self.prompt_symbol).to_string();
         let git_status: Option<crate::git_status::GitRepoStatus> = std::env::current_dir()
             .ok()
             .and_then(|cwd| crate::git_status::collect_for_prompt(&cwd));
@@ -200,7 +223,7 @@ impl WinuxshPrompt {
                 "{git_conflicts}",
                 &git_status.as_ref().map(|s| s.conflicts.to_string()).unwrap_or_default(),
             )
-            .replace("%#", &sym_s)
+            .replace("%#", &self.theme.prompt_symbol.paint(&self.prompt_symbol).to_string())
             .replace("%n", &user)
             .replace("%m", &host)
             .replace("%~", &cwd)
