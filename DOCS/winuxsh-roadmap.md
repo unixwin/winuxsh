@@ -66,10 +66,14 @@ status: active
 ### 配置一致性
 - [x] Phase 5 config: [winuxcmd].path 参与 PATH injection
 
-### 用户体验
+### 用户体验 (v2.2)
 - [x] 引导式配置向导 (Oh-My-Zsh 风格: 首次运行交互式问答, 自动生成 ~/.winshrc.toml)
 - [x] {time}/{time_24} prompt 模板变量 (右侧时间提示)
 - [x] 5 种 prompt 预设样式 (minimal/classic/powerline/multiline + right prompt options)
+- [x] Unicode 提示符号预设: 设置向导可选 ❯ λ ▶ $ % 等符号
+- [x] 配置化 prompt_symbol: config TOML + ShellConfig + WinuxshPrompt 全链路
+- [x] 内置 40+ oh-my-zsh 风格 git 别名 (gst, gco, gp, gl, gd 等)
+- [x] 补全系统增强: PATH 命令缓存 + 空 Tab 显示常用命令列表
 - [x] 已修复: cd .. 不改变进程 cwd 的 bug
 - [x] 已修复: /c/Users 路径格式不被 winuxcmd 识别的 bug
 - [x] 已修复: C:\ 反斜杠路径被 tokenizer 吃掉的 bug

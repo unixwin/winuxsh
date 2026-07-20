@@ -386,13 +386,13 @@ mod tests {
         let dir = unique_temp_dir("winuxsh-prompt-git-render");
         std::fs::create_dir_all(&dir).unwrap();
         init_real_repo(&dir);
-        // Clear the git status cache so we don't hit a stale entry from a
-        // previous test that ran in another cwd.
-        crate::git_status::clear_cache();
-        // Synchronously warm the cache so the non-blocking collect_for_prompt
-        // (used via render_template) finds a cached result immediately.
-        crate::git_status::collect(&dir);
+        // Cache is cleared and warmed inside the process lock below to
+        // avoid parallel-test cache eviction.
         let _process_lock = PROCESS_STATE_LOCK.lock().unwrap();
+        // Clear + warm cache while holding the process lock, so a parallel
+        // test cannot evict our cache entry before we render.
+        crate::git_status::clear_cache();
+        crate::git_status::collect(&dir);
         let _cwd = CwdGuard::enter(&dir);
 
         let prompt = WinuxshPrompt::new(

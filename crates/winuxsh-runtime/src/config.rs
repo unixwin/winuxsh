@@ -529,14 +529,16 @@ pub struct GitPromptConfig {
 impl Default for GitPromptConfig {
     fn default() -> Self {
         Self {
-            staged: "●{n}".to_string(),
-            unstaged: "✚{n}".to_string(),
-            untracked: "?{n}".to_string(),
-            deleted: "✖{n}".to_string(),
-            ahead: "↑{n}".to_string(),
-            behind: "↓{n}".to_string(),
-            stashes: "⚑{n}".to_string(),
-            conflicts: "✖{n}".to_string(),
+            // oh-my-zsh style: boolean symbols (no count by default).
+            // Users who want counts can set e.g. staged = "●{n}" explicitly.
+            staged: "●".to_string(),
+            unstaged: "✚".to_string(),
+            untracked: "?".to_string(),
+            deleted: "✖".to_string(),
+            ahead: "↑".to_string(),
+            behind: "↓".to_string(),
+            stashes: "⚑".to_string(),
+            conflicts: "✖".to_string(),
             separator: " ".to_string(),
         }
     }

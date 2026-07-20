@@ -131,27 +131,27 @@ fn generate_config(
 ) -> String {
     let (prompt_template, right_template) = match (prompt_style, right_prompt) {
         ("powerline", "time") => (
-            "{cwd} {git_prompt} \u{276f} ".to_string(),
+            "{cwd} {git_prompt} {sym} ".to_string(),
             "{time} ".to_string(),
         ),
         ("powerline", "full") => (
-            "{cwd} {git_prompt} \u{276f} ".to_string(),
+            "{cwd} {git_prompt} {sym} ".to_string(),
             "{time} {git_branch} ".to_string(),
         ),
         ("powerline", _) => (
-            "{cwd} {git_prompt} \u{276f} ".to_string(),
+            "{cwd} {git_prompt} {sym} ".to_string(),
             String::new(),
         ),
         ("multiline", "time") => (
-            "{user}@{host} {time}\n{cwd} {git_prompt}%# ".to_string(),
+            "{user}@{host} {time}\n{cwd} {git_prompt}{sym} ".to_string(),
             String::new(),
         ),
         ("multiline", "full") => (
-            "{user}@{host} {time}\n{cwd} {git_prompt}%# ".to_string(),
+            "{user}@{host} {time}\n{cwd} {git_prompt}{sym} ".to_string(),
             "{git_branch} ".to_string(),
         ),
         ("multiline", _) => (
-            "{user}@{host}\n{cwd} {git_prompt}%# ".to_string(),
+            "{user}@{host}\n{cwd} {git_prompt}{sym} ".to_string(),
             String::new(),
         ),
         ("classic", "time") => (
@@ -253,19 +253,11 @@ fn prompt_choice(label: &str, default: &str, options: &[&str], help: &str) -> St
         println!("{}", line);
     }
 
+    let default_idx = options.iter().position(|o| *o == default).unwrap_or(0);
+    let default_display = default_idx + 1;
+
     loop {
-        print!(
-            "  \u{2502}  Enter choice [{}]: ",
-            options
-                .iter()
-                .map(|o| if *o == default {
-                    format!("{}", o)
-                } else {
-                    o.to_string()
-                })
-                .collect::<Vec<_>>()
-                .join("/")
-        );
+        print!("  |  Enter choice [1-{} / Enter for {}]: ", options.len(), default_display);
         io::stdout().flush().ok();
         let mut input = String::new();
         io::stdin().read_line(&mut input).ok();
@@ -275,11 +267,17 @@ fn prompt_choice(label: &str, default: &str, options: &[&str], help: &str) -> St
             return default.to_string();
         }
 
+        if let Ok(idx) = input.parse::<usize>() {
+            if idx >= 1 && idx <= options.len() {
+                return options[idx - 1].to_string();
+            }
+        }
+
         if options.contains(&input.as_str()) {
             return input;
         }
 
-        println!("  \u{2502}  \u{26a0}\u{fe0f}  Invalid choice.  Options: {}", options.join(", "));
+        println!("  |  Enter a number 1-{} (or Enter for {}).", options.len(), default_display);
     }
 }
 

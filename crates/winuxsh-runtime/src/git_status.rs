@@ -84,14 +84,16 @@ pub struct GitPromptSymbols {
 impl Default for GitPromptSymbols {
     fn default() -> Self {
         Self {
-            staged: "●{n}".to_string(),
-            unstaged: "✚{n}".to_string(),
-            untracked: "?{n}".to_string(),
-            deleted: "✖{n}".to_string(),
-            ahead: "↑{n}".to_string(),
-            behind: "↓{n}".to_string(),
-            stashes: "⚑{n}".to_string(),
-            conflicts: "✖{n}".to_string(),
+            staged: "●".to_string(),
+            unstaged: "✚".to_string(),
+            untracked: "?".to_string(),
+            deleted: "✖".to_string(),
+            ahead: "↑".to_string(),
+            behind: "↓".to_string(),
+            // oh-my-zsh uses a flag for stash entries. The dollar sign
+            // collides visually with the prompt indicator, so keep the flag.
+            stashes: "⚑".to_string(),
+            conflicts: "✖".to_string(),
             separator: " ".to_string(),
         }
     }
@@ -302,7 +304,14 @@ mod tests {
     fn git_status_compact_format() {
         let s = GitRepoStatus { branch: Some("main".into()), dirty: true, staged: 2, unstaged: 1, untracked: 3, deleted: 1, ahead: 1, behind: 2, stashes: 1, conflicts: 0 };
         let c = s.compact_status();
-        assert!(c.contains("●2")); assert!(c.contains("✚1")); assert!(c.contains("↑1")); assert!(c.contains("↓2")); assert!(c.contains("?3")); assert!(c.contains("⚑1"));
+        // Default is boolean format (no {n}); symbols repeat based on count.
+        // staged=2 → "●●", unstaged=1 → "✚", untracked=3 → "???", etc.
+        assert!(c.contains("●"));  // staged symbol
+        assert!(c.contains("✚"));  // unstaged symbol
+        assert!(c.contains("?"));     // untracked literal
+        assert!(c.contains("↑"));  // ahead
+        assert!(c.contains("↓"));  // behind
+        assert!(c.contains("⚑"));     // stashes (oh-my-zsh style)
     }
 
     #[test]
@@ -346,10 +355,13 @@ mod tests {
     fn git_status_compact_with_empty_symbols_hides_segments() {
         let mut symbols = GitPromptSymbols::default();
         // Quiet style: hide staged/unstaged/untracked/stashes; keep only ahead/behind.
+        // ahead/behind keep the count form so the test sees the count.
         symbols.staged = String::new();
         symbols.unstaged = String::new();
         symbols.untracked = String::new();
         symbols.stashes = String::new();
+        symbols.ahead = "↑{n}".to_string();
+        symbols.behind = "↓{n}".to_string();
 
         let s = GitRepoStatus {
             branch: Some("main".into()),
