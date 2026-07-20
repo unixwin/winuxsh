@@ -73,7 +73,7 @@ impl WinuxshPrompt {
         indicators: PromptIndicators,
         theme_name: &str,
     ) -> Self {
-        let t = template.unwrap_or_else(|| "{user}@{host} {cwd} %# ".to_string());
+        let t = template.unwrap_or_else(|| "{user}@{host} {cwd} {git_prompt}%# ".to_string());
         Self {
             template: t,
             right_template,
@@ -335,6 +335,9 @@ mod tests {
         let dir = unique_temp_dir("winuxsh-prompt-git-render");
         std::fs::create_dir_all(&dir).unwrap();
         init_real_repo(&dir);
+        // Clear the git status cache so we don't hit a stale entry from a
+        // previous test that ran in another cwd.
+        crate::git_status::clear_cache();
         let _process_lock = PROCESS_STATE_LOCK.lock().unwrap();
         let _cwd = CwdGuard::enter(&dir);
 

@@ -252,6 +252,14 @@ impl Shell {
             return Ok(0);
         }
 
+        // If the user just ran a `git ...` command, invalidate the prompt's
+        // cached git status so the next prompt re-reads the live state.
+        if let Some(first) = tokens.first() {
+            if first.value.trim().eq_ignore_ascii_case("git") {
+                crate::git_status::clear_cache();
+            }
+        }
+
         // parse() returns Ast directly (not Result) in rubash.
         let mut ast = parse(&tokens);
         normalize_cd_windows_drive_args(&mut ast);

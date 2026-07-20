@@ -7,9 +7,24 @@
 
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use std::sync::Mutex;
+use std::path::PathBuf;
 
-const GIT_TIMEOUT: Duration = Duration::from_millis(200);
+const GIT_TIMEOUT: Duration = if cfg!(debug_assertions) {
+    Duration::from_millis(2000)
+} else {
+    Duration::from_millis(200)
+};
+const CACHE_TTL: Duration = Duration::from_millis(5000);
+
+struct GitStatusCache {
+    cwd: PathBuf,
+    status: Option<GitRepoStatus>,
+    cached_at: Instant,
+}
+
+static GIT_STATUS_CACHE: Mutex<Option<GitStatusCache>> = Mutex::new(None);
 
 /// Aggregated git status for the current working directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,7 +57,21 @@ impl GitRepoStatus {
 }
 
 pub fn collect(cwd: &Path) -> Option<GitRepoStatus> {
-    if !is_likely_git_repo(cwd) { return None; }
+    // Check cache first (per-cwd, 2s TTL)
+    {
+        let cache = GIT_STATUS_CACHE.lock().unwrap();
+        if let Some(ref entry) = *cache {
+            if entry.cwd == cwd && entry.cached_at.elapsed() < CACHE_TTL {
+                return entry.status.clone();
+            }
+        }
+    }
+    if !is_likely_git_repo(cwd) {
+        // Cache the None result too for 2s to avoid repeated stat spam
+        let mut cache = GIT_STATUS_CACHE.lock().unwrap();
+        *cache = Some(GitStatusCache { cwd: cwd.to_path_buf(), status: None, cached_at: Instant::now() });
+        return None;
+    }
     let status_output = run_git(&["status", "--porcelain", "-b"], cwd, GIT_TIMEOUT, 4 * 1024)?;
     let status_stdout = String::from_utf8(status_output.stdout).ok()?;
     let mut lines = status_stdout.lines();
@@ -67,24 +96,39 @@ pub fn collect(cwd: &Path) -> Option<GitRepoStatus> {
         (count_commits(cwd, "@{upstream}..HEAD").unwrap_or(0), count_commits(cwd, "HEAD..@{upstream}").unwrap_or(0))
     } else { (ahead0, behind0) };
     let stashes = count_stashes(cwd);
-    Some(GitRepoStatus { branch, dirty, staged, unstaged, untracked, deleted, ahead, behind, stashes, conflicts })
+    let status = Some(GitRepoStatus { branch, dirty, staged, unstaged, untracked, deleted, ahead, behind, stashes, conflicts });
+    // Update cache
+    let mut cache = GIT_STATUS_CACHE.lock().unwrap();
+    *cache = Some(GitStatusCache { cwd: cwd.to_path_buf(), status: status.clone(), cached_at: Instant::now() });
+    status
 }
+
+/// Clear the cached git status (e.g., when a hook or filesystem event might have changed the work-tree).
+ pub fn clear_cache() {
+    let mut cache = GIT_STATUS_CACHE.lock().unwrap();
+    *cache = None;
+ }
 
 fn is_likely_git_repo(mut dir: &Path) -> bool {
     loop { let git = dir.join(".git"); if git.is_dir() || git.is_file() { return true; } match dir.parent() { Some(p) => dir = p, None => return false } }
 }
 
-fn run_git(args: &[&str], cwd: &Path, _timeout: Duration, max_stdout: usize) -> Option<Output> {
+fn run_git(args: &[&str], cwd: &Path, timeout: Duration, max_stdout: usize) -> Option<Output> {
     let cwd = cwd.to_owned();
     let args: Vec<String> = args.iter().map(|s| (*s).to_string()).collect();
-    let handle = std::thread::spawn(move || {
-        Command::new("git").args(&args).current_dir(&cwd)
+    let (tx, rx) = std::sync::mpsc::channel();
+    let _handle = std::thread::spawn(move || {
+        let result = Command::new("git").args(&args).current_dir(&cwd)
             .env_remove("GIT_DIR").env_remove("GIT_WORK_TREE").env("GIT_OPTIONAL_LOCKS", "0")
-            .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).output()
+            .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).output();
+        let _ = tx.send(result);
     });
-    let output = match handle.join() { Ok(Ok(o)) => o, _ => return None };
+    let output = match rx.recv_timeout(timeout) {
+        Ok(Ok(o)) => o,
+        _ => return None, // timed out, git hung, or sender dropped
+    };
     if !output.status.success() || output.stdout.len() > max_stdout { None } else { Some(output) }
-}
+ }
 
 fn parse_branch_line(line: &str) -> Option<String> {
     let r = line.trim().strip_prefix("## ")?;
