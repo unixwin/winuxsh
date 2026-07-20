@@ -33,6 +33,7 @@ jobs:
         run: cargo build --locked
 
       - name: cargo test (lib, runtime)
-        run: cargo test --lib -p winuxsh-runtime
+        working-directory: ./crates/winuxsh-runtime
+        run: cargo test --lib
 
 
