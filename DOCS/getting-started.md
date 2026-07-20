@@ -120,6 +120,30 @@ matching = "prefix"
 # path = "D:/tools/winuxcmd/winuxcmd.exe"
 ```
 
+## 6b. Segment-based prompt (experimental)
+
+Enable the p10k-style segment engine by adding to `~/.winshrc.toml`:
+
+```toml
+[shell]
+prompt_style = "segments"
+segment_preset = "classic"   # lean | classic | rainbow | pure | robbyrussell
+```
+
+The "classic" preset shows the directory in blue with a powerline triangle
+separator, git status in green, and time/status on the right side. Each preset
+has its own colour palette and element order.
+
+Custom element order (overrides the preset):
+
+```toml
+left_prompt_elements = ["dir", "vcs", "newline", "prompt_char"]
+right_prompt_elements = ["time", "status"]
+```
+
+Available elements: `dir`, `vcs`, `status`, `time`, `prompt_char`, `os_icon`,
+`context` (user@host), `background_jobs`, `cmd_exec_time`, `newline`.
+
 Restart winuxsh to pick up the changes.
 
 ## 7. Import your .zshrc (optional)

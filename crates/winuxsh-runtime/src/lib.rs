@@ -9,8 +9,9 @@ pub mod completion;
 pub mod config;
 pub mod ctrl_c;
 pub mod git_status;
-pub mod prompt;
-pub mod repl;
+ pub mod prompt;
+pub mod prompt_segments;
+ pub mod repl;
 pub mod shell;
 pub mod setup_wizard;
 pub mod syntax_highlighting;
@@ -35,3 +36,5 @@ pub use completion::{
     CompletionBehavior, CompletionMatchMode, CompletionState, WinuxshCompleter,
 };
 pub use prompt::PromptIndicators;
+pub use prompt::PromptBackend;
+pub use prompt_segments::{SegmentId, SegmentPreset, SegmentPrompt, SegmentPromptAdapter, SegmentPromptConfig};

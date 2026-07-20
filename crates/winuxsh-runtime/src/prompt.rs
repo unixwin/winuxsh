@@ -11,6 +11,7 @@ use crate::git_status::GitPromptSymbols;
 use reedline::{
     Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus, PromptViMode,
 };
+use crate::prompt_segments::SegmentPromptAdapter;
 
 /// Prompt indicators rendered by reedline after the left prompt.
 ///
@@ -341,6 +342,52 @@ impl Prompt for WinuxshPrompt {
             PromptHistorySearchStatus::Failing => (&self.indicators.history_search_fail, "failing"),
         };
         Cow::Owned(self.render_history_search_template(template, status, &search.term))
+    }
+}
+
+/// Backend selector for the prompt: legacy template engine or new segment engine.
+pub enum PromptBackend {
+    Template(WinuxshPrompt),
+    Segments(SegmentPromptAdapter),
+}
+
+impl Prompt for PromptBackend {
+    fn render_prompt_left(&self) -> Cow<'_, str> {
+        match self {
+            PromptBackend::Template(p) => p.render_prompt_left(),
+            PromptBackend::Segments(p) => p.render_prompt_left(),
+        }
+    }
+
+    fn render_prompt_right(&self) -> Cow<'_, str> {
+        match self {
+            PromptBackend::Template(p) => p.render_prompt_right(),
+            PromptBackend::Segments(p) => p.render_prompt_right(),
+        }
+    }
+
+    fn render_prompt_indicator(&self, mode: PromptEditMode) -> Cow<'_, str> {
+        match self {
+            PromptBackend::Template(p) => p.render_prompt_indicator(mode),
+            PromptBackend::Segments(p) => p.render_prompt_indicator(mode),
+        }
+    }
+
+    fn render_prompt_multiline_indicator(&self) -> Cow<'_, str> {
+        match self {
+            PromptBackend::Template(p) => p.render_prompt_multiline_indicator(),
+            PromptBackend::Segments(p) => p.render_prompt_multiline_indicator(),
+        }
+    }
+
+    fn render_prompt_history_search_indicator(
+        &self,
+        search: PromptHistorySearch,
+    ) -> Cow<'_, str> {
+        match self {
+            PromptBackend::Template(p) => p.render_prompt_history_search_indicator(search),
+            PromptBackend::Segments(p) => p.render_prompt_history_search_indicator(search),
+        }
     }
 }
 

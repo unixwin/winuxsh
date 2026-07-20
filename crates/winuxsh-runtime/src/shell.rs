@@ -21,7 +21,8 @@ use crate::config::{
     load as load_config, AutosuggestConfig, EditorMode, HookConfig, MenuConfig, NativePluginConfig,
     NativeWidgetConfig, SyntaxHighlightConfig,
 };
-use crate::prompt::WinuxshPrompt;
+use crate::prompt::{PromptBackend, WinuxshPrompt};
+use crate::prompt_segments::{SegmentPrompt, SegmentPromptAdapter, SegmentPromptConfig, SegmentId, SegmentPreset};
 use crate::zsh_compat::{
     apply_alias, apply_safe_env, completion_defs_from_report,
     dynamic_completion_defs_from_report_with_options, git_prompt_format_from_report, scan,
@@ -37,7 +38,7 @@ const DOTENV_MAX_SIZE: u64 = 10 * 1024 * 1024;
 pub struct Shell {
     pub executor: Executor,
     pub completion_state: Arc<Mutex<CompletionState>>,
-    pub prompt: WinuxshPrompt,
+    pub prompt: PromptBackend,
     pub home_dir: PathBuf,
     pub history_path: PathBuf,
     pub history_max_size: usize,
@@ -120,41 +121,72 @@ impl Shell {
             }
         }
 
-        // 6. Prompt + theme. Native TOML stays authoritative; zsh prompt
-        // imports only fill empty native prompt fields.
-        let prompt_format = config.shell.prompt_format.clone().or_else(|| {
-            zsh_report.as_ref().and_then(|report| {
-                report
-                    .prompt
-                    .as_ref()
-                    .and_then(|prompt| prompt.translated_format.clone())
-            })
-        });
-        let right_prompt_format = config.shell.right_prompt_format.clone().or_else(|| {
-            zsh_report.as_ref().and_then(|report| {
-                report
-                    .right_prompt
-                    .as_ref()
-                    .and_then(|prompt| prompt.translated_format.clone())
-            })
-        });
-        // Config TOML takes priority over a zsh-imported format so the
-        // wizard can opt into `git:({git_branch})` without a zshrc on disk.
-        let git_prompt_format = config
-            .shell
-            .git_prompt_format
-            .clone()
-            .or_else(|| zsh_report.as_ref().and_then(git_prompt_format_from_report));
+        // 6. Prompt + theme. Choose backend based on `prompt_style`:
+        //    "segments"  -> new p10k-style segment engine
+        //    "template"  -> legacy template engine (default, backward-compatible)
+        let prompt_style = config.shell.prompt_style.as_deref().unwrap_or("template");
         let git_prompt_symbols = crate::git_status::GitPromptSymbols::from(&config.git_prompt);
-        let prompt = WinuxshPrompt::new_with_symbol(
-            prompt_format,
-            right_prompt_format,
-            git_prompt_format,
-            config.shell.prompt_indicators.clone(),
-            &config.theme_name,
-            git_prompt_symbols,
-            config.shell.prompt_symbol.clone(),
-        );
+        let prompt: PromptBackend = if prompt_style == "segments" {
+            let preset = config
+                .shell
+                .segment_preset
+                .as_deref()
+                .and_then(SegmentPreset::from_name)
+                .unwrap_or(SegmentPreset::Classic);
+            let mut seg_config = SegmentPromptConfig::from_preset(
+                preset,
+                &config.shell.prompt_symbol,
+                git_prompt_symbols,
+            );
+            seg_config.theme_name = config.theme_name.clone();
+            if let Some(ref left) = config.shell.left_prompt_elements {
+                seg_config.left_elements = left
+                    .iter()
+                    .filter_map(|s| SegmentId::from_name(s))
+                    .collect();
+            }
+            if let Some(ref right) = config.shell.right_prompt_elements {
+                seg_config.right_elements = right
+                    .iter()
+                    .filter_map(|s| SegmentId::from_name(s))
+                    .collect();
+            }
+            PromptBackend::Segments(SegmentPromptAdapter::new(SegmentPrompt::new(seg_config)))
+        } else {
+            // Native TOML stays authoritative; zsh prompt imports only fill
+            // empty native prompt fields.
+            let prompt_format = config.shell.prompt_format.clone().or_else(|| {
+                zsh_report.as_ref().and_then(|report| {
+                    report
+                        .prompt
+                        .as_ref()
+                        .and_then(|prompt| prompt.translated_format.clone())
+                })
+            });
+            let right_prompt_format = config.shell.right_prompt_format.clone().or_else(|| {
+                zsh_report.as_ref().and_then(|report| {
+                    report
+                        .right_prompt
+                        .as_ref()
+                        .and_then(|prompt| prompt.translated_format.clone())
+                })
+            });
+            let git_prompt_format = config
+                .shell
+                .git_prompt_format
+                .clone()
+                .or_else(|| zsh_report.as_ref().and_then(git_prompt_format_from_report));
+            let template_prompt = WinuxshPrompt::new_with_symbol(
+                prompt_format,
+                right_prompt_format,
+                git_prompt_format,
+                config.shell.prompt_indicators.clone(),
+                &config.theme_name,
+                git_prompt_symbols,
+                config.shell.prompt_symbol.clone(),
+            );
+            PromptBackend::Template(template_prompt)
+        };
 
         // 7. User-local state files.
         let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -419,12 +451,14 @@ impl Shell {
     }
 
     /// Run native hooks before rendering the next prompt.
-    pub fn run_precmd_hooks(&mut self) {
-        self.run_native_precmd_plugins();
-        let hooks = self.hooks.precmd.clone();
-        let last_exit_code = self.executor.last_exit_code().to_string();
-        self.run_hook_scripts(&hooks, &[("WINUXSH_LAST_EXIT_CODE", last_exit_code)]);
-    }
+ pub fn run_precmd_hooks(&mut self) {
+     self.run_native_precmd_plugins();
+     let hooks = self.hooks.precmd.clone();
+     let last_exit_code = self.executor.last_exit_code().to_string();
+    // Set in process env so segment prompt can read it via std::env::var.
+    std::env::set_var("WINUXSH_LAST_EXIT_CODE", &last_exit_code);
+     self.run_hook_scripts(&hooks, &[("WINUXSH_LAST_EXIT_CODE", last_exit_code)]);
+ }
 
     /// Run native hooks immediately before the user's interactive command.
     pub fn run_preexec_hooks(&mut self, command: &str) {
@@ -2249,7 +2283,7 @@ BACKTICK_VALUE=`whoami`
         let mut shell = Shell {
             executor: Executor::new(),
             completion_state: Arc::new(Mutex::new(CompletionState::new(PathBuf::from(".")))),
-            prompt: WinuxshPrompt::new(None, None, None, "default"),
+            prompt: PromptBackend::Template(WinuxshPrompt::new(None, None, None, "default")),
             home_dir: PathBuf::from("."),
             history_path: PathBuf::from(".winuxsh_history"),
             history_max_size: 10000,

@@ -10,20 +10,28 @@ use crate::prompt::PromptIndicators;
 
 /// Shell configuration, loaded from `~/.winshrc.toml`.
 #[derive(Debug, Clone, Default)]
-pub struct ShellConfig {
-    /// Prompt indicator symbol (e.g. "%", "\$", "\u276f", "\u3bb")
-    pub prompt_symbol: String,
-    /// Prompt template (e.g. "{user}@{host} {cwd} {symbol}")
-    pub prompt_format: Option<String>,
-/// Optional right-side prompt template.
-pub right_prompt_format: Option<String>,
-/// Optional format for the git prompt segment. Supports `{git_branch}` and
-/// `{git_status}` placeholders, e.g. `git:({git_branch})`. When unset, the
-/// branch name is rendered on its own.
-pub git_prompt_format: Option<String>,
-/// Optional mode-specific prompt indicators.
-pub prompt_indicators: PromptIndicators,
-}
+ pub struct ShellConfig {
+     /// Prompt indicator symbol (e.g. "%", "\$", "\u276f", "\u3bb")
+     pub prompt_symbol: String,
+     /// Prompt template (e.g. "{user}@{host} {cwd} {symbol}")
+     pub prompt_format: Option<String>,
+ /// Optional right-side prompt template.
+ pub right_prompt_format: Option<String>,
+ /// Optional format for the git prompt segment. Supports `{git_branch}` and
+ /// `{git_status}` placeholders, e.g. `git:({git_branch})`. When unset, the
+ /// branch name is rendered on its own.
+ pub git_prompt_format: Option<String>,
+ /// Optional mode-specific prompt indicators.
+ pub prompt_indicators: PromptIndicators,
+    /// Prompt backend: "template" (legacy) or "segments" (p10k-style).
+    pub prompt_style: Option<String>,
+    /// Segment preset: "lean" | "classic" | "rainbow" | "pure" | "robbyrussell".
+    pub segment_preset: Option<String>,
+    /// Custom left-prompt segment order (overrides preset).
+    pub left_prompt_elements: Option<Vec<String>>,
+    /// Custom right-prompt segment order (overrides preset).
+    pub right_prompt_elements: Option<Vec<String>>,
+ }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HookConfig {
@@ -393,19 +401,23 @@ struct WinshrcToml {
 }
 
 #[derive(Debug, Deserialize)]
-struct ShellToml {
-    prompt_format: Option<String>,
-    prompt_symbol: Option<String>,
-    right_prompt_format: Option<String>,
-    git_prompt_format: Option<String>,
-    prompt_indicator: Option<String>,
-    emacs_indicator: Option<String>,
-    vi_insert_indicator: Option<String>,
-    vi_normal_indicator: Option<String>,
-    multiline_indicator: Option<String>,
-    history_search_indicator: Option<String>,
-    history_search_fail_indicator: Option<String>,
-}
+ struct ShellToml {
+     prompt_format: Option<String>,
+     prompt_symbol: Option<String>,
+     right_prompt_format: Option<String>,
+     git_prompt_format: Option<String>,
+     prompt_indicator: Option<String>,
+     emacs_indicator: Option<String>,
+     vi_insert_indicator: Option<String>,
+     vi_normal_indicator: Option<String>,
+     multiline_indicator: Option<String>,
+     history_search_indicator: Option<String>,
+     history_search_fail_indicator: Option<String>,
+    prompt_style: Option<String>,
+    segment_preset: Option<String>,
+    left_prompt_elements: Option<Vec<String>>,
+    right_prompt_elements: Option<Vec<String>>,
+ }
 
 #[derive(Debug, Deserialize)]
 struct ThemeToml {
@@ -659,11 +671,15 @@ fn build_config(parsed: WinshrcToml) -> FullConfig {
         right_prompt_format: shell.as_ref().and_then(|s| s.right_prompt_format.clone()),
         prompt_symbol: shell.as_ref().and_then(|s| s.prompt_symbol.clone()).unwrap_or_else(|| "%".to_string()),
         git_prompt_format: shell.as_ref().and_then(|s| s.git_prompt_format.clone()),
-        prompt_indicators: shell
-            .as_ref()
-            .map(build_prompt_indicators)
-            .unwrap_or_default(),
-    };
+     prompt_indicators: shell
+         .as_ref()
+         .map(build_prompt_indicators)
+         .unwrap_or_default(),
+        prompt_style: shell.as_ref().and_then(|s| s.prompt_style.clone()),
+        segment_preset: shell.as_ref().and_then(|s| s.segment_preset.clone()),
+        left_prompt_elements: shell.as_ref().and_then(|s| s.left_prompt_elements.clone()),
+        right_prompt_elements: shell.as_ref().and_then(|s| s.right_prompt_elements.clone()),
+ };
 
     FullConfig {
         shell: shell_config,

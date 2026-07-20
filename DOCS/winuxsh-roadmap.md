@@ -150,6 +150,7 @@ status: active
 - [ ] Phase 32 zsh-lite profile plan: 基于现有 `[zsh]` / `[zsh.native_widgets]` / `[zsh.native_plugins]` 生成可审阅默认 zsh-like 配置块
 - [ ] Phase 33 Git daily-use polish: 内置 git completion + alias pack 测试 + prompt 文档，让 git 插件成为第一等 daily shell 能力
 - [x] Phase 33a oh-my-zsh-style git prompt status: 新增 `crates/winuxsh-runtime/src/git_status.rs` 通过 `git status --porcelain -b` / rev-list / stash list 收集 branch/dirty/staged/unstaged/untracked/deleted/ahead/behind/stashes/conflicts；prompt 模板新增 `{git_dirty}` / `{git_staged}` / `{git_unstaged}` / `{git_untracked}` / `{git_deleted}` / `{git_ahead}` / `{git_behind}` / `{git_stashes}` / `{git_conflicts}` / `{git_status}` 紧凑串；theme 新增 `git_clean` / `git_dirty` / `git_status_detail` 着色；`{git_prompt}` 默认形如 `git:(main) ●2 ↑1 ↓1 ?3`，clean=green / dirty=yellow；`completions/defaults/git.toml` 内置 add/commit/push/pull/checkout/switch/branch/merge/rebase/reset/restore/stash/status/log/diff/init/clone 子命令补全
+- [x] Phase 34 p10k-style segment-based prompt engine: new prompt_segments.rs module with 5 presets (lean/classic/rainbow/pure/robbyrussell), powerline separators, multiline prefixes
 - [x] README / tutorial documentation baseline: README.md / README-zh.md 重写为用户入口，新增 `DOCS/zsh-migration-guide.md` 迁移教程
 - [ ] zsh/Oh My Zsh 兼容导入层（completion/theme/alias/native UX modules）
 
