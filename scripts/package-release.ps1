@@ -1,7 +1,10 @@
 param(
     [string]$Version,
     [string]$WinuxCmdPath,
-    [string]$Configuration = "release"
+    [string]$Configuration = "release",
+    [string]$Target,
+    [string]$Arch,
+    [switch]$AllowPathWinuxCmd
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,27 +20,34 @@ try {
         $Version = $Matches[1]
     }
 
-    $winuxshExe = Join-Path $RepoRoot "target\$Configuration\winuxsh.exe"
+    if ($Target) {
+        $winuxshExe = Join-Path $RepoRoot "target\$Target\$Configuration\winuxsh.exe"
+    }
+    else {
+        $winuxshExe = Join-Path $RepoRoot "target\$Configuration\winuxsh.exe"
+    }
     if (-not (Test-Path -LiteralPath $winuxshExe)) {
+        $buildArgs = @("build", "--locked")
         if ($Configuration -eq "release") {
-            cargo build --locked --release
+            $buildArgs += "--release"
         }
-        else {
-            cargo build --locked
+        if ($Target) {
+            $buildArgs += @("--target", $Target)
         }
+        cargo @buildArgs
     }
     if (-not (Test-Path -LiteralPath $winuxshExe)) {
         throw "winuxsh.exe not found at $winuxshExe"
     }
 
-    if (-not $WinuxCmdPath) {
+    if (-not $WinuxCmdPath -and $AllowPathWinuxCmd) {
         $fromWhere = (& where.exe winuxcmd.exe 2>$null | Select-Object -First 1)
         if ($fromWhere) {
             $WinuxCmdPath = $fromWhere
         }
     }
     if (-not $WinuxCmdPath -or -not (Test-Path -LiteralPath $WinuxCmdPath)) {
-        throw "winuxcmd.exe not found. Pass -WinuxCmdPath C:\path\to\winuxcmd.exe"
+        throw "winuxcmd.exe not found. Pass an explicit -WinuxCmdPath C:\path\to\winuxcmd.exe"
     }
 
     $activationScript = Join-Path $RepoRoot "assets\winuxcmd\activate-winuxcmd.sh"
@@ -46,7 +56,12 @@ try {
     }
 
     $distDir = Join-Path $RepoRoot "dist"
-    $packageName = "winuxsh-v$Version"
+    if ($Arch) {
+        $packageName = "winuxsh-v$Version-win-$Arch"
+    }
+    else {
+        $packageName = "winuxsh-v$Version"
+    }
     $stageDir = Join-Path $distDir $packageName
     $zipPath = Join-Path $distDir "$packageName.zip"
 
