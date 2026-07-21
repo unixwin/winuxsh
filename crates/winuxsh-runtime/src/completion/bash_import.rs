@@ -36,8 +36,7 @@ use crate::completion::external::{CommandDef, FlagDef, PathLiteral, ValuesSource
 /// The command name is derived from the file stem (stripping a leading `_`),
 /// so `_fd.bash` → `fd`, `fd.bash` → `fd`.
 pub fn parse_bash_completion(path: &Path) -> Result<CommandDef, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("read error: {}", e))?;
+    let content = std::fs::read_to_string(path).map_err(|e| format!("read error: {}", e))?;
 
     let cmd_name = path
         .file_stem()
