@@ -352,13 +352,12 @@ fn print_version() {
         "Winuxsh {} \u{2014} bash-compatible shell for Windows",
         env!("CARGO_PKG_VERSION")
     );
-    println!("  rubash   {}", rubash_version());
+    println!("  rubash   git {}", rubash_revision());
     if let Some(v) = winuxsh_runtime::winuxcmd::version() {
         println!("  winuxcmd {}", v);
     }
 }
 
-fn rubash_version() -> &'static str {
-    // When rubash exposes a version constant, switch to that.
-    env!("CARGO_PKG_VERSION")
+fn rubash_revision() -> &'static str {
+    "f451e16937437d49a2575fbc197345a498d68576"
 }

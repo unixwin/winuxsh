@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use reedline::{Completer, Reedline};
-use rubash::{executor::Executor, lexer::tokenize, parser::parse, Ast};
+use rubash::{executor::Executor, lexer::tokenize, parser::parse, Ast, Token, TokenKind};
 
 use crate::completion::runtime::RuntimeCompletionPlugin;
 use crate::completion::{CompletionState, WinuxshCompleter};
@@ -290,15 +290,26 @@ impl Shell {
 
     /// Execute a single input line via rubash. Returns the exit code.
     pub fn execute_line(&mut self, line: &str) -> anyhow::Result<i32> {
+        self.execute_line_with_options(line, false)
+    }
+
+    fn execute_line_with_options(
+        &mut self,
+        line: &str,
+        interactive_terminal_colors: bool,
+    ) -> anyhow::Result<i32> {
         let line = line.trim();
         if line.is_empty() {
             return Ok(0);
         }
 
         let line = normalize_native_windows_path_literals(line);
-        let tokens = tokenize(&line);
+        let mut tokens = tokenize(&line);
         if tokens.is_empty() {
             return Ok(0);
+        }
+        if interactive_terminal_colors {
+            enable_interactive_terminal_grep_colors(&mut tokens);
         }
 
         // If the user just ran a `git ...` command, invalidate the prompt's
@@ -393,7 +404,7 @@ impl Shell {
     pub fn execute_interactive_line(&mut self, line: &str) -> anyhow::Result<i32> {
         let old_pwd = self.executor.get_env("PWD").map(str::to_owned);
         self.run_preexec_hooks(line);
-        let code = self.execute_line(line)?;
+        let code = self.execute_line_with_options(line, true)?;
         self.sync_alias_mirror_from_line(line, code);
         self.remember_interactive_command(line, code);
         let new_pwd = self.executor.get_env("PWD").map(str::to_owned);
@@ -409,7 +420,7 @@ impl Shell {
     pub fn execute_interactive_script(&mut self, script: &str) -> anyhow::Result<i32> {
         let old_pwd = self.executor.get_env("PWD").map(str::to_owned);
         self.run_preexec_hooks(script);
-        let code = self.execute_script(script)?;
+        let code = self.execute_script_with_options(script, true)?;
         self.sync_alias_mirror_from_line(script, code);
         self.remember_interactive_command(script, code);
         let new_pwd = self.executor.get_env("PWD").map(str::to_owned);
@@ -975,15 +986,26 @@ impl Shell {
     /// This enables heredocs, line continuations (backslash-newline),
     /// and multi-line compound commands (if/for/while across lines).
     pub fn execute_script(&mut self, script: &str) -> anyhow::Result<i32> {
+        self.execute_script_with_options(script, false)
+    }
+
+    fn execute_script_with_options(
+        &mut self,
+        script: &str,
+        interactive_terminal_colors: bool,
+    ) -> anyhow::Result<i32> {
         let script = script.trim();
         if script.is_empty() {
             return Ok(0);
         }
 
         let script = normalize_native_windows_path_literals(script);
-        let tokens = tokenize(&script);
+        let mut tokens = tokenize(&script);
         if tokens.is_empty() {
             return Ok(0);
+        }
+        if interactive_terminal_colors {
+            enable_interactive_terminal_grep_colors(&mut tokens);
         }
 
         let mut ast = parse(&tokens);
@@ -1187,6 +1209,144 @@ fn is_cd_command(command: &rubash::parser::CommandNode) -> bool {
         .is_some_and(|word| word.eq_ignore_ascii_case("cd"))
 }
 
+fn enable_interactive_terminal_grep_colors(tokens: &mut Vec<Token>) {
+    if !cfg!(windows) {
+        return;
+    }
+
+    let mut command_start = 0;
+    while command_start < tokens.len() {
+        let command_end = find_command_separator(tokens, command_start).unwrap_or(tokens.len());
+        let separator = tokens.get(command_end).map(|token| &token.kind);
+        let terminal_output = !matches!(separator, Some(TokenKind::Background));
+        if terminal_output {
+            enable_terminal_grep_colors_in_command(tokens, command_start, command_end);
+        }
+        if command_end == tokens.len() {
+            break;
+        }
+        command_start = command_end + 1;
+    }
+}
+
+fn find_command_separator(tokens: &[Token], start: usize) -> Option<usize> {
+    tokens
+        .iter()
+        .enumerate()
+        .skip(start)
+        .find_map(|(index, token)| {
+            matches!(
+                token.kind,
+                TokenKind::Semicolon
+                    | TokenKind::And
+                    | TokenKind::Or
+                    | TokenKind::Background
+                    | TokenKind::Eof
+            )
+            .then_some(index)
+        })
+}
+
+fn enable_terminal_grep_colors_in_command(tokens: &mut Vec<Token>, start: usize, end: usize) {
+    let mut stage_start = start;
+    while stage_start < end {
+        let stage_end = find_pipeline_separator(tokens, stage_start, end).unwrap_or(end);
+        if stage_end == end && stage_outputs_to_terminal(tokens, stage_start, stage_end) {
+            enable_terminal_grep_colors_in_stage(tokens, stage_start, stage_end);
+            return;
+        }
+        stage_start = stage_end + 1;
+    }
+}
+
+fn find_pipeline_separator(tokens: &[Token], start: usize, end: usize) -> Option<usize> {
+    tokens[start..end]
+        .iter()
+        .position(|token| matches!(token.kind, TokenKind::Pipe | TokenKind::PipeErr))
+        .map(|offset| start + offset)
+}
+
+fn stage_outputs_to_terminal(tokens: &[Token], start: usize, end: usize) -> bool {
+    !tokens[start..end]
+        .iter()
+        .any(|token| matches!(token.kind, TokenKind::RedirectOut | TokenKind::Append))
+}
+
+fn enable_terminal_grep_colors_in_stage(tokens: &mut Vec<Token>, start: usize, end: usize) {
+    let Some(command_index) = simple_command_word_index(tokens, start, end) else {
+        return;
+    };
+    let Some(needs_exe_shim) = grep_command_needs_exe_shim(&tokens[command_index]) else {
+        return;
+    };
+    let has_color_option = grep_stage_has_color_option(tokens, command_index + 1, end);
+
+    // rubash has a no-color optimized pipeline implementation for bare `grep`.
+    // Use the winuxcmd shim so terminal-facing interactive grep reaches grep.exe.
+    if needs_exe_shim {
+        tokens[command_index].value = "grep.exe".to_string();
+        tokens[command_index].raw = "grep.exe".to_string();
+    }
+    if !has_color_option {
+        tokens.insert(
+            command_index + 1,
+            Token::new(TokenKind::Word, "--color=always", tokens[command_index].position),
+        );
+    }
+}
+
+fn simple_command_word_index(tokens: &[Token], start: usize, end: usize) -> Option<usize> {
+    let mut saw_command_prefix = false;
+    for (offset, token) in tokens[start..end].iter().enumerate() {
+        match token.kind {
+            TokenKind::Assignment => continue,
+            TokenKind::Word if token.value == "command" && !saw_command_prefix => {
+                saw_command_prefix = true;
+            }
+            TokenKind::Word if token.value == "builtin" && !saw_command_prefix => return None,
+            TokenKind::Word => return Some(start + offset),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn grep_command_needs_exe_shim(token: &Token) -> Option<bool> {
+    if !matches!(token.kind, TokenKind::Word) {
+        return None;
+    }
+    if token.value.eq_ignore_ascii_case("grep") && token.raw.eq_ignore_ascii_case("grep") {
+        return Some(true);
+    }
+    if token.value.eq_ignore_ascii_case("grep.exe") && token.raw.eq_ignore_ascii_case("grep.exe") {
+        return Some(false);
+    }
+    None
+}
+
+fn grep_stage_has_color_option(tokens: &[Token], start: usize, end: usize) -> bool {
+    for token in &tokens[start..end] {
+        if !matches!(
+            token.kind,
+            TokenKind::Word | TokenKind::Variable | TokenKind::Assignment | TokenKind::CommandSubst
+        ) {
+            continue;
+        }
+        let value = token.value.as_str();
+        if value == "--" {
+            break;
+        }
+        if value == "--color"
+            || value == "--colour"
+            || value.starts_with("--color=")
+            || value.starts_with("--colour=")
+        {
+            return true;
+        }
+    }
+    false
+}
+
 fn normalize_winuxcmd_slash_drive_args(ast: &mut Ast) {
     if !cfg!(windows) {
         return;
@@ -1209,6 +1369,7 @@ fn normalize_winuxcmd_slash_drive_args(ast: &mut Ast) {
 }
 
 fn is_winuxcmd_path_command(command: &str) -> bool {
+    let command = command.strip_suffix(".exe").unwrap_or(command);
     matches!(
         command,
         "ls" | "cat"
@@ -1904,6 +2065,87 @@ mod tests {
             assert_eq!(ast.commands[0].words[1], "/c/Users");
             assert_eq!(ast.commands[1].words[1], "/c/Users");
         }
+    }
+
+    #[test]
+    fn interactive_terminal_grep_colors_force_pipeline_final_stage() {
+        if !cfg!(windows) {
+            return;
+        }
+
+        let mut tokens = tokenize("ls -la | grep map");
+        enable_interactive_terminal_grep_colors(&mut tokens);
+        let ast = parse(&tokens);
+        let pipeline = ast.commands[0].pipeline_command.as_ref().unwrap();
+
+        assert_eq!(
+            pipeline.stages[1].words,
+            vec!["grep.exe", "--color=always", "map"]
+        );
+    }
+
+    #[test]
+    fn interactive_terminal_grep_colors_preserve_explicit_color_choice() {
+        if !cfg!(windows) {
+            return;
+        }
+
+        let mut tokens = tokenize("ls -la | grep --color=never map");
+        enable_interactive_terminal_grep_colors(&mut tokens);
+        let ast = parse(&tokens);
+        let pipeline = ast.commands[0].pipeline_command.as_ref().unwrap();
+
+        assert_eq!(
+            pipeline.stages[1].words,
+            vec!["grep.exe", "--color=never", "map"]
+        );
+    }
+
+    #[test]
+    fn interactive_terminal_grep_colors_force_grep_exe_pipeline_stage() {
+        if !cfg!(windows) {
+            return;
+        }
+
+        let mut tokens = tokenize("ls -la | grep.exe map");
+        enable_interactive_terminal_grep_colors(&mut tokens);
+        let ast = parse(&tokens);
+        let pipeline = ast.commands[0].pipeline_command.as_ref().unwrap();
+
+        assert_eq!(
+            pipeline.stages[1].words,
+            vec!["grep.exe", "--color=always", "map"]
+        );
+    }
+
+    #[test]
+    fn interactive_terminal_grep_colors_skip_redirected_stdout() {
+        if !cfg!(windows) {
+            return;
+        }
+
+        let mut tokens = tokenize("ls -la | grep map > out.txt");
+        enable_interactive_terminal_grep_colors(&mut tokens);
+        let ast = parse(&tokens);
+        let pipeline = ast.commands[0].pipeline_command.as_ref().unwrap();
+
+        assert_eq!(pipeline.stages[1].words, vec!["grep", "map"]);
+    }
+
+    #[test]
+    fn interactive_terminal_grep_colors_force_simple_terminal_grep() {
+        if !cfg!(windows) {
+            return;
+        }
+
+        let mut tokens = tokenize("grep map README.md");
+        enable_interactive_terminal_grep_colors(&mut tokens);
+        let ast = parse(&tokens);
+
+        assert_eq!(
+            ast.commands[0].words,
+            vec!["grep.exe", "--color=always", "map", "README.md"]
+        );
     }
 
     #[test]
