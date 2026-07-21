@@ -1,0 +1,39 @@
+name: Winuxsh CI
+
+on:
+  push:
+    branches:
+      - master
+      - "rewrite/**"
+  pull_request:
+    branches:
+      - master
+      - "rewrite/**"
+
+env:
+  CARGO_TERM_COLOR: always
+  MSRV: "1.70"
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1.11
+        with:
+          toolchain: ${{ env.MSRV }}
+          components: rustfmt
+
+      - name: cargo fmt --check
+        run: cargo fmt --check
+
+      - name: cargo build
+        run: cargo build --locked
+
+      - name: cargo test (lib, runtime)
+        working-directory: ./crates/winuxsh-runtime
+        run: cargo test --lib
+
+

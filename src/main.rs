@@ -1,262 +1,383 @@
-// WinSH MVP6 - Array Support and Internationalization
-//
-// MVP6 Features:
-// - Array support (definition, access, expansion)
-// - Internationalization (English only)
-// - Enhanced config file support (terminal styling)
-// - Plugin system support
-// - Modular architecture following Rust best practices
+//! winuxsh entry point
+//!
+//! Usage:
+//!   winuxsh                  → interactive REPL
+//!   winuxsh -c "command"     → execute one command, print exit code, exit
+//!   winuxsh script.sh        → execute a script file
+//!   winuxsh --help | -h      → usage
+//!   winuxsh --version        → version (winuxsh / rubash / winuxcmd)
+//!   winuxsh --zsh-compat-report      → scan zsh config and print report
+//!   winuxsh --zsh-compat-report-json → scan zsh config and print JSON report
+//!   winuxsh --zsh-compat-import-plan → print a reviewable .winshrc.toml patch
+//!   winuxsh --zsh-compat-import-apply → write the import patch with a backup
+//!   winuxsh --zsh-compat-import-status → inspect import block and backups
+//!   winuxsh --zsh-compat-import-rollback-plan → print restore command
+//!   winuxsh --zsh-compat-doctor → summarize zsh compatibility health
+//!   winuxsh --zsh-native-packs → list built-in native zsh plugin packs
+//!   winuxsh --zsh-native-packs-json → list built-in native zsh plugin packs as JSON
+//!   winuxsh --zsh-profile-plan <profile> → print a native zsh profile TOML plan
+//!   winuxsh --completion-probe "line" [cursor] → print REPL completions
 
-use anyhow::Result;
-
-// Win32 API for Ctrl+C handling
-#[cfg(windows)]
-use std::sync::atomic::{AtomicBool, Ordering};
-
-#[cfg(windows)]
-static mut CURRENT_CHILD_PID: u32 = 0;
-
-#[cfg(windows)]
-static CTRL_C_RECEIVED: AtomicBool = AtomicBool::new(false);
-
-#[cfg(windows)]
-use windows_sys::Win32::Foundation::BOOL;
-#[cfg(windows)]
-use windows_sys::Win32::System::Console::{
-    SetConsoleCtrlHandler, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT, CTRL_C_EVENT, CTRL_LOGOFF_EVENT,
-    CTRL_SHUTDOWN_EVENT, PHANDLER_ROUTINE,
-};
-
-#[cfg(windows)]
-unsafe extern "system" fn ctrl_handler(ctrl_type: u32) -> BOOL {
-    match ctrl_type {
-        CTRL_C_EVENT => {
-            // Ctrl+C received
-            CTRL_C_RECEIVED.store(true, Ordering::SeqCst);
-
-            // If there's a child process running, try to terminate it
-            if CURRENT_CHILD_PID != 0 {
-                // Terminate the child process only
-                use windows_sys::Win32::System::Threading::{
-                    OpenProcess, TerminateProcess, PROCESS_TERMINATE,
-                };
-                let handle = OpenProcess(PROCESS_TERMINATE, 0, CURRENT_CHILD_PID);
-                if !handle.is_null() {
-                    TerminateProcess(handle, 1);
-                }
-                return 1; // Signal handled
-            }
-
-            // No child process, let the default handler run
-            return 0;
-        }
-        _ => 0, // Let default handlers run for other signals
-    }
-}
-#[cfg(windows)]
-pub fn setup_ctrl_c_handler() {
-    unsafe {
-        if SetConsoleCtrlHandler(Some(ctrl_handler), 1) == 0 {
-            eprintln!("Warning: Failed to set Ctrl+C handler");
-        } else {
-            log::debug!("Ctrl+C handler installed successfully");
-        }
-    }
-}
-
-#[cfg(windows)]
-pub fn set_current_child_pid(pid: u32) {
-    unsafe {
-        CURRENT_CHILD_PID = pid;
-    }
-}
-
-#[cfg(windows)]
-pub fn clear_current_child_pid() {
-    unsafe {
-        CURRENT_CHILD_PID = 0;
-    }
-}
-
-#[cfg(windows)]
-pub fn is_ctrl_c_received() -> bool {
-    CTRL_C_RECEIVED.swap(false, Ordering::SeqCst)
-}
-
-#[cfg(not(windows))]
-pub fn setup_ctrl_c_handler() {}
-#[cfg(not(windows))]
-pub fn set_current_child_pid(_: u32) {}
-#[cfg(not(windows))]
-pub fn clear_current_child_pid() {}
-#[cfg(not(windows))]
-pub fn is_ctrl_c_received() -> bool {
-    false
-}
-
-use colored::Colorize;
-use reedline::Signal;
-use std::env;
+use std::io::Read;
 use std::path::PathBuf;
+use std::process::ExitCode;
 
-mod array;
-mod builtins;
-mod command_router;
-mod completion;
-mod config;
-mod error;
-mod executor;
-mod job;
-mod oh_my_winuxsh;
-mod plugin;
-mod shell;
-mod theme;
-mod tokenizer;
-mod winuxcmd_ffi;
-
-use shell::Shell;
-use winuxcmd_ffi::WinuxCmdFFI;
-
-fn print_usage() {
-    println!("WinSH usage:");
-    println!("  winuxsh -c \"command\"");
-    println!("  winuxsh script.sh [args...]");
-    println!("  winuxsh --help | -h");
-    println!("  winuxsh --version");
-}
-
-fn main() {
-    if let Err(e) = run() {
-        eprintln!("{} {}", "Error:".red(), e);
-        std::process::exit(1);
-    }
-}
-
-fn run() -> Result<()> {
-    // Initialize logging (default to error level only)
+fn main() -> ExitCode {
+    // Initialize logging (only error level by default)
     env_logger::Builder::new()
         .filter_level(log::LevelFilter::Error)
         .parse_env("RUST_LOG")
         .init();
 
-    // Setup Ctrl+C handler
-    setup_ctrl_c_handler();
+    // Install Ctrl+C handler (best-effort)
+    winuxsh_runtime::ctrl_c::install();
 
-    // Initialize WinuxCmd FFI
-    if let Err(e) = initialize_winuxcmd() {
-        eprintln!("Warning: Failed to initialize WinuxCmd: {}", e);
+    let args: Vec<String> = std::env::args().collect();
+
+    if let Err(e) = run(&args) {
+        eprintln!("winuxsh: {}", e);
+        return ExitCode::from(1);
+    }
+    ExitCode::SUCCESS
+}
+
+fn run(args: &[String]) -> anyhow::Result<()> {
+    if args.len() < 2 {
+        return if winuxsh_runtime::terminal::stdio_is_interactive() {
+            run_repl()
+        } else {
+            run_stdin_script()
+        };
     }
 
-    // Parse command line arguments
-
-    let args: Vec<String> = env::args().collect();
-
-    if args.len() > 1 {
-        match args[1].as_str() {
-            "-c" => {
-                if args.len() > 2 {
-                    let mut shell = Shell::new(true)?;
-                    if let Err(e) = shell.save_history(&args[2]) {
-                        eprintln!(
-                            "{} {}",
-                            "Warning:".yellow(),
-                            format!("Failed to save history: {}", e)
-                        );
-                    }
-                    shell.execute_command(&args[2])?;
-                } else {
-                    eprintln!("{} {}", "Error:".red(), "-c requires an argument");
-                    std::process::exit(1);
-                }
-            }
-            "--help" | "-h" => {
-                print_usage();
-            }
-            "--version" => {
-                println!(
-                    "{}",
-                    "WinSH MVP6 - Array Support and Internationalization version 0.6.0".green()
-                );
-            }
-            _ => {
-                // Check if it's a script file
-                let script_path = PathBuf::from(&args[1]);
-                if script_path.exists() {
-                    let mut shell = Shell::new(true)?;
-                    shell.run_script_file(&script_path, &args[2..])?;
-                } else {
-                    eprintln!("{} {}", "Unknown argument:".red(), args[1]);
-                    print_usage();
-                    std::process::exit(1);
-                }
-            }
+    let first = &args[1];
+    match first.as_str() {
+        "-h" | "--help" => {
+            print_usage();
+            Ok(())
         }
+        "--version" | "-V" => {
+            print_version();
+            Ok(())
+        }
+        "--zsh-compat-report" => {
+            print_zsh_compat_report(false)?;
+            Ok(())
+        }
+        "--zsh-compat-report-json" => {
+            print_zsh_compat_report(true)?;
+            Ok(())
+        }
+        "--zsh-compat-import-plan" => {
+            print_zsh_compat_import_plan()?;
+            Ok(())
+        }
+        "--zsh-compat-import-apply" => {
+            apply_zsh_compat_import_plan()?;
+            Ok(())
+        }
+        "--zsh-compat-import-status" => {
+            print_zsh_compat_import_status()?;
+            Ok(())
+        }
+        "--zsh-compat-import-rollback-plan" => {
+            print_zsh_compat_import_rollback_plan()?;
+            Ok(())
+        }
+        "--zsh-compat-doctor" => {
+            print_zsh_compat_doctor()?;
+            Ok(())
+        }
+        "--zsh-native-packs" => {
+            print_zsh_native_packs(false)?;
+            Ok(())
+        }
+        "--zsh-native-packs-json" => {
+            print_zsh_native_packs(true)?;
+            Ok(())
+        }
+        "--zsh-profile-plan" => {
+            print_zsh_profile_plan(args)?;
+            Ok(())
+        }
+        "--completion-probe" => {
+            print_completion_probe(args)?;
+            Ok(())
+        }
+        "-c" => {
+            if args.len() < 3 {
+                anyhow::bail!("-c requires an argument");
+            }
+            let mut shell = winuxsh_runtime::Shell::new()?;
+            let code = shell.execute_script(&args[2])?;
+            if code != 0 {
+                std::process::exit(code);
+            }
+            Ok(())
+        }
+        _ => {
+            // Treat as a script file to execute
+            let script = PathBuf::from(first);
+            if !script.exists() {
+                anyhow::bail!("unknown argument '{}' (not a script file)", first);
+            }
+            let mut shell = winuxsh_runtime::Shell::new()?;
+            let content = std::fs::read_to_string(&script)?;
+            shell.execute_script(&content)?;
+            Ok(())
+        }
+    }
+}
+
+fn run_repl() -> anyhow::Result<()> {
+    let mut shell = winuxsh_runtime::Shell::new()?;
+    winuxsh_runtime::repl::run_repl(&mut shell)
+}
+
+fn run_stdin_script() -> anyhow::Result<()> {
+    let mut script = String::new();
+    std::io::stdin().read_to_string(&mut script)?;
+    if script.trim().is_empty() {
         return Ok(());
     }
 
-    let mut shell = Shell::new(true)?;
-    shell.run_repl()?;
-
+    let mut shell = winuxsh_runtime::Shell::new()?;
+    let code = shell.execute_script(&script)?;
+    if code != 0 {
+        std::process::exit(code);
+    }
     Ok(())
 }
 
-// Add this to shell module temporarily
-impl Shell {
-    pub fn run_repl(&mut self) -> Result<()> {
+fn print_usage() {
+    println!(
+        "Winuxsh {} \u{2014} a bash-compatible shell that feels at home on Windows.",
+        env!("CARGO_PKG_VERSION")
+    );
+    println!();
+    println!("Usage:  winuxsh [option]");
+    println!("        winuxsh -c <cmd>         Run a command then exit");
+    println!("        winuxsh <script> [args]   Run a script file");
+    println!();
+    println!("Options:");
+    println!("  -h, --help                Show this help");
+    println!("  -V, --version             Version and component info");
+    println!("  -c <command>              Execute a command ad-hoc");
+    println!();
+    println!("  --zsh-compat-report       Scan ~/.zshrc, show safe-import report");
+    println!("  --zsh-compat-report-json  Same, as JSON");
+    println!("  --zsh-compat-import-plan  Generate a .winshrc.toml import patch");
+    println!("  --zsh-compat-import-apply Apply the patch (with backup)");
+    println!("  --zsh-compat-import-status Inspect import block and backup");
+    println!("  --zsh-compat-import-rollback-plan  Show restore command");
+    println!("  --zsh-compat-doctor       Overall zsh health summary");
+    println!();
+    println!("  --zsh-native-packs        List built-in zsh plugin replacements");
+    println!("  --zsh-native-packs-json   Same, as JSON");
+    println!("  --zsh-profile-plan <profile>  Print TOML for a profile");
+    println!();
+    println!("  --completion-probe <line> [cursor]  Debug: print completion candidates");
+    println!();
+    println!("Configuration: ~/.winshrc.toml (see DOCS/ for reference)");
+}
+
+fn print_completion_probe(args: &[String]) -> anyhow::Result<()> {
+    if args.len() < 3 {
+        anyhow::bail!("--completion-probe requires an input line");
+    }
+    let line = &args[2];
+    let cursor_pos = if let Some(raw) = args.get(3) {
+        raw.parse::<usize>()
+            .map_err(|_| anyhow::anyhow!("invalid cursor position '{}'", raw))?
+    } else {
+        line.len()
+    };
+    let shell = winuxsh_runtime::Shell::new()?;
+    for suggestion in shell.completion_probe(line, cursor_pos) {
+        println!("{}", suggestion);
+    }
+    Ok(())
+}
+
+fn print_zsh_compat_import_plan() -> anyhow::Result<()> {
+    let config = winuxsh_runtime::config::load();
+    let options = winuxsh_runtime::zsh_compat::ZshImportOptions::for_report(&config.zsh);
+    let report = winuxsh_runtime::zsh_compat::scan(&options);
+    println!(
+        "{}",
+        winuxsh_runtime::zsh_compat::import_plan_toml(&options, &report)
+    );
+    Ok(())
+}
+
+fn apply_zsh_compat_import_plan() -> anyhow::Result<()> {
+    let config = winuxsh_runtime::config::load();
+    let options = winuxsh_runtime::zsh_compat::ZshImportOptions::for_report(&config.zsh);
+    let report = winuxsh_runtime::zsh_compat::scan(&options);
+    let plan = winuxsh_runtime::zsh_compat::import_plan_toml(&options, &report);
+    let config_path = winuxsh_runtime::config::default_config_path();
+    let summary = winuxsh_runtime::zsh_compat::apply_import_plan_to_config(&config_path, &plan)?;
+
+    println!(
+        "Wrote zsh compatibility import block to {}",
+        summary.config_path.display()
+    );
+    if summary.replaced_existing_block {
+        println!("Replaced the previous winuxsh-managed zsh import block");
+    } else {
+        println!("Added a new winuxsh-managed zsh import block");
+    }
+    if let Some(backup_path) = summary.backup_path {
+        println!("Backup: {}", backup_path.display());
+    }
+    Ok(())
+}
+
+fn print_zsh_compat_import_status() -> anyhow::Result<()> {
+    let config = winuxsh_runtime::config::load();
+    let options = winuxsh_runtime::zsh_compat::ZshImportOptions::for_report(&config.zsh);
+    let report = winuxsh_runtime::zsh_compat::scan(&options);
+    let plan = winuxsh_runtime::zsh_compat::import_plan_toml(&options, &report);
+    let config_path = winuxsh_runtime::config::default_config_path();
+    let status = winuxsh_runtime::zsh_compat::inspect_import_config_status(&config_path, &plan)?;
+
+    println!("Config: {}", status.config_path.display());
+    println!("Exists: {}", yes_no(status.config_exists));
+    println!(
+        "Managed block: {}",
+        zsh_import_block_state_label(status.block_state)
+    );
+    if status.toml_valid {
+        println!("TOML: valid");
+    } else {
         println!(
-            "{}",
-            "WinSH MVP6 - Array Support and Internationalization".green()
+            "TOML: invalid ({})",
+            status.toml_error.as_deref().unwrap_or("unknown error")
         );
-        println!("Type 'help' for available commands");
-        println!();
+    }
+    println!(
+        "Next apply: {}",
+        zsh_import_apply_readiness_label(status.apply_readiness)
+    );
+    if let Some(error) = status.apply_error {
+        println!("Apply detail: {}", error);
+    }
+    println!("Backups: {}", status.backup_paths.len());
+    if let Some(path) = status.backup_paths.last() {
+        println!("Latest backup: {}", path.display());
+    }
+    Ok(())
+}
 
-        loop {
-            let prompt = self.get_prompt();
+fn print_zsh_compat_import_rollback_plan() -> anyhow::Result<()> {
+    let config_path = winuxsh_runtime::config::default_config_path();
+    let plan = winuxsh_runtime::zsh_compat::inspect_import_rollback_plan(&config_path)?;
 
-            match self.line_editor.read_line(&prompt) {
-                Ok(Signal::Success(buffer)) => {
-                    let line = buffer.trim();
-                    if line.is_empty() {
-                        continue;
-                    }
+    println!("Config: {}", plan.config_path.display());
+    println!("Backups: {}", plan.backup_paths.len());
+    if let Some(path) = plan.latest_backup_path {
+        println!("Latest backup: {}", path.display());
+    } else {
+        println!("Latest backup: none");
+    }
+    if let Some(command) = plan.restore_command {
+        println!("Restore command:");
+        println!("{}", command);
+    } else {
+        println!("Restore command: unavailable (no backups found)");
+    }
+    Ok(())
+}
 
-                    if let Err(e) = self.save_history(line) {
-                        eprintln!(
-                            "{} {}",
-                            "Warning:".yellow(),
-                            format!("Failed to save history: {}", e)
-                        );
-                    }
+fn print_zsh_compat_doctor() -> anyhow::Result<()> {
+    let config = winuxsh_runtime::config::load();
+    let options = winuxsh_runtime::zsh_compat::ZshImportOptions::for_report(&config.zsh);
+    let report = winuxsh_runtime::zsh_compat::scan(&options);
+    let plan = winuxsh_runtime::zsh_compat::import_plan_toml(&options, &report);
+    let config_path = winuxsh_runtime::config::default_config_path();
+    let status = winuxsh_runtime::zsh_compat::inspect_import_config_status(&config_path, &plan)?;
+    let rollback = winuxsh_runtime::zsh_compat::inspect_import_rollback_plan(&config_path)?;
 
-                    // Execute command
-                    if let Err(e) = self.execute_command(line) {
-                        eprintln!("{} {}", "Error:".red(), e);
-                    }
+    println!(
+        "{}",
+        winuxsh_runtime::zsh_compat::zsh_compat_doctor_text(&report, &status, &rollback)
+    );
+    Ok(())
+}
 
-                    // Update completion state with current directory after command execution
-                    self.update_completion_state();
-                }
-                Ok(Signal::CtrlD) => {
-                    println!();
-                    println!("Goodbye!");
-                    break;
-                }
-                Ok(Signal::CtrlC) => {
-                    println!();
-                    continue;
-                }
-                Err(e) => {
-                    eprintln!("{} {}", "Error:".red(), e);
-                    break;
-                }
-            }
-        }
-
-        Ok(())
+fn yes_no(value: bool) -> &'static str {
+    if value {
+        "yes"
+    } else {
+        "no"
     }
 }
 
-/// Initialize WinuxCmd daemon (FFI disabled, always succeeds)
-fn initialize_winuxcmd() -> anyhow::Result<()> {
+fn zsh_import_block_state_label(
+    state: winuxsh_runtime::zsh_compat::ZshImportBlockState,
+) -> &'static str {
+    match state {
+        winuxsh_runtime::zsh_compat::ZshImportBlockState::Missing => "missing",
+        winuxsh_runtime::zsh_compat::ZshImportBlockState::Present => "present",
+        winuxsh_runtime::zsh_compat::ZshImportBlockState::Malformed => "malformed",
+    }
+}
+
+fn zsh_import_apply_readiness_label(
+    readiness: winuxsh_runtime::zsh_compat::ZshImportApplyReadiness,
+) -> &'static str {
+    match readiness {
+        winuxsh_runtime::zsh_compat::ZshImportApplyReadiness::AddNewBlock => "add new block",
+        winuxsh_runtime::zsh_compat::ZshImportApplyReadiness::ReplaceExistingBlock => {
+            "replace existing block"
+        }
+        winuxsh_runtime::zsh_compat::ZshImportApplyReadiness::Blocked => "blocked",
+    }
+}
+
+fn print_zsh_compat_report(json: bool) -> anyhow::Result<()> {
+    let config = winuxsh_runtime::config::load();
+    let options = winuxsh_runtime::zsh_compat::ZshImportOptions::for_report(&config.zsh);
+    let report = winuxsh_runtime::zsh_compat::scan(&options);
+    if json {
+        println!("{}", report.to_json_pretty()?);
+    } else {
+        println!("{}", report.to_human());
+    }
     Ok(())
+}
+
+fn print_zsh_native_packs(json: bool) -> anyhow::Result<()> {
+    if json {
+        println!("{}", winuxsh_runtime::zsh_compat::native_zsh_packs_json()?);
+    } else {
+        println!("{}", winuxsh_runtime::zsh_compat::native_zsh_packs_text());
+    }
+    Ok(())
+}
+
+fn print_zsh_profile_plan(args: &[String]) -> anyhow::Result<()> {
+    let Some(profile) = args.get(2) else {
+        anyhow::bail!("--zsh-profile-plan requires a profile: agent or zsh-lite");
+    };
+    println!(
+        "{}",
+        winuxsh_runtime::zsh_compat::zsh_profile_plan_toml_for_name(profile)?
+    );
+    Ok(())
+}
+
+fn print_version() {
+    println!(
+        "Winuxsh {} \u{2014} bash-compatible shell for Windows",
+        env!("CARGO_PKG_VERSION")
+    );
+    println!("  rubash   git {}", rubash_revision());
+    if let Some(v) = winuxsh_runtime::winuxcmd::version() {
+        println!("  winuxcmd {}", v);
+    }
+}
+
+fn rubash_revision() -> &'static str {
+    "f451e16937437d49a2575fbc197345a498d68576"
 }

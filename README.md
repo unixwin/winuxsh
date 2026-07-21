@@ -1,455 +1,243 @@
-﻿# WinSH - Windows Shell
+# Winuxsh
 
-[中文](README-zh.md) | English
+[中文](README-zh.md) · English
 
-A modern Unix-style command-line shell for Windows, written in Rust. WinSH provides a powerful shell experience with full compatibility with Windows commands and Unix-style tools.
+> **bash for Windows — no WSL, no MSYS2, no PowerShell surprises.**
+> Built for humans and coding agents, tested against the bash spec.
 
-## Features
+```text
+me@DESKTOP C:\Users\me\repo\winuxsh  master ●2 ✚1 ?3
+❯
+```
 
-### Core Functionality
-- **860+ Command Completion**: Auto-discovery of commands from PATH
-- **Command Completion** : via config file auto build command completion
-- **Wildcard Expansion**: Full support for `*`, `?`, `[]` patterns
-- **Command Substitution**: Execute commands within commands using `$(command)`
-- **Script Execution**: Run `.sh` scripts with full shell support
-- **History Management**: Browse command history with arrow keys
+Branch name, dirty state, staged/untracked counts — all built into the prompt
+the moment you `cd` into a git repo.  No plugins to install.  No config to
+tweak.  Just `❯` and go.
 
-### Advanced Features
-- **Array System**: Define, access, and manipulate arrays
-- **Plugin Architecture**: Extensible plugin system for custom functionality
-- **Theme Management**: 8 built-in themes with color customization
-- **Environment Variables**: Full support for environment variable management
-- **Emacs Mode**: Powerful keybindings for efficient editing
+## Why
 
-### Completion System
-- **Flag Completion with Descriptions**: Tab-complete flags with inline usage hints (e.g. `--regexp   A pattern to search for.`) — see [TOML Definition Format](#completion-definition-files-toml-format)
-- **Bash Script Auto-Import**: Scans `_cmd.bash` / `cmd.bash` files in completion dirs and parses them automatically — see [Bash Auto-Import](#bash-completion-script-auto-import)
-- **Auto-Description Enrichment**: Runs `cmd -h` after first load to extract flag descriptions; persisted to cache — see [Auto-Description](#auto-description-enrichment-cmd--h)
-- **Environment Variable Completion**: Type `$` to Tab-complete environment variables — see [Env Var Completion](#environment-variable-completion)
-- **3-Layer Cache**: In-memory → disk (`.parsed.toml`) → subprocess, with mtime-based invalidation
-- **Multiple Completion Dirs**: Configure multiple directories in `~/.winshrc.toml`
-- **ListMenu Popup**: Floating completion menu with aligned descriptions
+You know how PowerShell does `ls` and gives you a table of objects?  Or how
+`test -f Cargo.toml` doesn't exist in pwsh?  Or how your coding agent keeps
+failing because the shell it expected isn't there?
 
-### Built-in Commands
-
-| Command | Description |
-|---------|-------------|
-| `ls` | List directory contents |
-| `cd` | Change directory |
-| `pwd` | Print working directory |
-| `echo` | Display text |
-| `cat` | Display file contents |
-| `grep` | Search text |
-| `find` | Find files |
-| `cp` | Copy files |
-| `mv` | Move/rename files |
-| `rm` | Remove files |
-| `mkdir` | Create directories |
-| `jobs` | List background jobs |
-| `fg` / `bg` | Foreground / background job control |
-| `set` / `unset` / `export` | Variable management |
-| `alias` / `unalias` | Command aliases |
-| `array` | Array operations |
-| `plugin` | Plugin management |
-| `theme` | Theme management |
-| `history` | Command history |
-| `source` | Execute script in current shell |
-
-## Installation
-
-### Build from Source
+Winuxsh fixes that.  It is the terminal that feels like bash, lives on
+Windows like PowerShell, and speaks Windows-native paths (`C:\Users`, not
+`/mnt/c/Users`).
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/winuxsh.git
-cd winuxsh
+# That works — immediately, from the first keystroke
+cd C:\Users\me\Documents
+ls -la
+git status
+if [ -d repo ]; then echo "found it"; fi
+```
 
-# Build release version
+## Quick start
+
+```pwsh
 cargo build --release
-
-# The executable will be at target/release/mvp6-array.exe
+target\release\winuxsh.exe
 ```
 
-### Setup
+The first time you start it, you get a setup wizard (think `oh-my-zsh` install):
 
-1. Add the executable directory to your PATH
-2. Configure utils backend (default: winuxcmd)
-3. Configure Windows Terminal to use WinSH as default shell
+```text
+🎉  Welcome to Winuxsh 0.6.0!
+✨  A bash-compatible shell for Windows — no WSL, no MSYS2 required.
 
-### Utils Backend Configuration
+  Let's get you set up.  (Press Enter to accept defaults.)
 
-WinSH supports multiple Unix utils backends:
+📝  Editing mode
+  │  emacs = standard keybindings (Ctrl+A/E/K, Tab, Ctrl+R)
+  │  vi    = vim-style insert/normal modes
+  │  Enter choice [emacs/vi]:
 
-**Default Backend (WinuxCmd)**:
-```bash
-# Already configured in utils/winuxcmd/
-# Available commands: ls, cat, grep, find, cp, mv, rm, mkdir, etc.
+🎨  Colour theme
+  │  Enter choice [default/dark/light/colorful]:
+
+🎵  Prompt symbol
+  │  ❯ heavy right-pointing angle (powerlevel10k style)
+  │  λ lambda (functional/minimal)
+  │  $ dollar sign (classic bash)
+  │  % percent sign (classic fish)
+  │  Enter choice [❯/λ/$/%]:
+
+⏱️  Right-side info
+  │  off  = no right prompt
+  │  time = show current time (HH:MM)
+  │  full = time + git branch
+  │  Enter choice [off/time/full]:
+
+🔄  Show git branch/status in the prompt [Y/n]:
 ```
 
-**Switching Backends**:
-```bash
-# Edit ~/.winshrc.toml
-[utils]
-backend = "winuxcmd"  # or "uutils"
-path = "utils/winuxcmd"
+That is it.  One round of questions, `~/.winshrc.toml` is written, and
+every launch after that is instant.
+
+## What makes it different
+
+| You want this                  | PowerShell gives you       | Winuxsh gives you          |
+|--------------------------------|----------------------------|----------------------------|
+| `ls` / `grep` / `find` / `cp`  | Aliases + cmdlets          | Real `winuxcmd` coreutils |
+| `if [ -f file ]; then`         | `if (Test-Path file) {`    | Real bash `if`            |
+| `for i in a b c; do ... done`  | `foreach ($i in ...) {`    | Real bash `for`           |
+| `git:(master) ●2 ✚1` in prompt | Have to install oh-my-posh | Built in, works on `cd`   |
+| `gst` / `gco` / `gp` (git)     | Custom aliases             | Pre-installed git aliases |
+| `$(command)`                   | `$(command)` but different | Same as bash              |
+| `exit 127`                     | `$LASTEXITCODE`            | Same as bash              |
+| `C:\Users` paths               | Works natively             | Also works natively       |
+| `Ctrl+R` history search        | Yes (but different)        | Yes (reedline, standard)  |
+| `cd .. && pwd`                 | Yes                        | Yes                       |
+| Setup wizard                   | No                         | Yes, oh-my-zsh style      |
+| Coding agent friendly          | Not really                 | `-c` / `script.sh` quiet  |
+| Reads your `.zshrc`            | No                         | `--zsh-compat-report`     |
+
+## Screenshots
+
+**A real terminal session** — `cd`, `ls`, `git status`, block completion:
+
+```text
+me@DESKTOP C:\Users\me\repo\winuxsh
+❯ ls
+Cargo.toml  src/  crates/  DOCS/  tests/  README.md
+
+me@DESKTOP C:\Users\me\repo\winuxsh  master ●2 ✚1
+❯ git status
+Changes to be committed:
+  modified:   src/shell.rs
+
+me@DESKTOP C:\Users\me\repo\winuxsh  master ●2
+❯ if [ -f Cargo.toml ]; then
+  echo "yes, it is a rust project"
+fi
+yes, it is a rust project
 ```
 
-For more details, see `utils/README.md`.
+**Autosuggestions** — ghost text after the cursor, accept with `Ctrl+Space`:
 
-## Usage
-
-add this to windows terminal settings
-replace the default profile with this one and $env:PATH to your PATH variable
-```json
-{
-    "guid": "{9acb9455-ca63-5af2-ba0c-1fa3a891bd59}",
-    "commandline":"${env:PATH}\\winuxsh.exe",
-    "hidden": false,
-    "name": "winuxsh",
-}
+```text
+me@DESKTOP C:\Users\me\repo\winuxsh  master
+❯ cd rep○  ← "cd repo/" shows as hint
 ```
 
-### Interactive Mode
+**Syntax highlighting** — commands in green, flags in cyan, errors in red.
 
-```bash
-./winuxsh.exe
+**Right prompt** — time, git branch, or both:
+
+```text
+me@DESKTOP C:\Users\me\repo\winuxsh     09:47
+❯
 ```
 
-### Execute Single Command
-
-```bash
-./winuxsh.exe -c "echo Hello World"
-```
-
-### Execute Script
-
-```bash
-./winuxsh.exe script.sh
-```
-
-### Command Examples
-
-```bash
-# Wildcard expansion
-ls *.rs
-echo *.toml
-
-# Command substitution
-echo "Current user: $(whoami)"
-
-# Array operations
-array define colors red green blue
-array get colors 0
-array len colors
-
-# Theme management
-theme list
-theme set cyberpunk
-
-# Tab completion with descriptions
-rg -<Tab>
-# 0: --regexp       A pattern to search for.
-# 1: --file         Search for patterns from the given file.
-# 2: --after-context   Show NUM lines after each match.
-# ...
-
-# Environment variable completion
-echo $WIN<Tab>
-# → $WINDIR, $WINUXSH_*, ...
-```
-
-## Architecture
-
-WinSH follows a modular architecture with clear separation of concerns:
+## What it runs
 
 ```
-src/
-├── main.rs               # Entry point and REPL loop
-├── shell.rs              # Shell state and execution
-├── tokenizer.rs          # Lexical analysis
-├── parser.rs             # Syntax analysis
-├── executor.rs           # Command execution
-├── builtins.rs           # Built-in commands
-├── array.rs              # Array system
-├── plugin.rs             # Plugin system
-├── theme.rs              # Theme management
-├── config.rs             # Configuration
-├── job.rs                # Job control
-├── error.rs              # Error handling
-├── oh_my_winuxsh.rs      # Oh-My-Winuxsh plugin
-└── completion/
-    ├── mod.rs            # CompletionContext / CompletionResult
-    ├── completer.rs      # WinuxshCompleter (reedline integration)
-    ├── external.rs       # External command completion plugin (TOML + bash + cache)
-    ├── bash_import.rs    # Bash completion script parser
-    ├── command.rs        # Command name completion
-    ├── path.rs           # Path completion
-    └── variables.rs      # Environment variable completion
+winuxsh = rubash (shell engine) + winuxcmd.exe (coreutils) + reedline (REPL)
 ```
 
+| Component | Job |
+|-----------|-----|
+| `rubash`  | bash-compatible parser, executor, builtins, functions, heredocs |
+| `winuxcmd`| Unix coreutils (`ls`, `cat`, `grep`, `find`, `cp`, `mv`, `rm`, ...) |
+| `reedline`| Interactive editing, history, Tab completion, autosuggestions |
+| `~/.winshrc.toml` | Configuration — prompt, theme, editor, aliases, more |
+| `.zshrc` scan | `--zsh-compat-report` reads your zsh intent → native TOML |
 
-## Configuration
+## For zsh / Oh My Zsh users
 
-Configuration is stored in `~/.winshrc.toml`:
+You don't need to migrate manually.  Winuxsh can inspect your existing setup
+and propose a safe import:
+
+```pwsh
+winuxsh --zsh-compat-report         # see what is importable
+winuxsh --zsh-compat-import-plan    # preview the TOML it would write
+winuxsh --zsh-compat-import-apply   # write it (with backup)
+winuxsh --zsh-compat-doctor         # overall health check
+```
+
+Things that get imported from `.zshrc`:
+- `PATH` / `ENV` exports (safe subset — no expansion or backtick)
+- `alias` declarations
+- `PROMPT` / `RPROMPT` (translated to native TOML template)
+- Oh My Zsh plugin intent (e.g. `git` → native git alias pack)
+
+What stays in `.zshrc` and continues working there:
+- Complex `compdef` / `_arguments` (native completion reads the same files)
+- Custom functions (winuxsh reads the same function source via rubash)
+- Theme expressions that can't be translated (`%F{...}` parsing)
+
+## Built-in git aliases
+
+These work out of the box, no config required:
+
+```text
+gst → git status         gco → git checkout         gp → git push
+gl  → git pull           gd  → git diff              ga → git add
+gc  → git commit -v      gb  → git branch            gr → git remote
+gsta → git stash save    gstp → git stash pop         glg → git log --stat
+```
+
+Full list: about 40 aliases mirroring oh-my-zsh git plugin.
+User `[aliases]` in `~/.winshrc.toml` override any built-in.
+
+## Configuration reference
+
+Minimal `~/.winshrc.toml`:
 
 ```toml
 [shell]
-prompt_format = "{user}@{host} {cwd} {symbol}"
+prompt_format = "{user}@{host} {cwd} {git_prompt}{symbol}"
+prompt_symbol = "❯"
+right_prompt_format = "{time} "
+
+[editor]
+edit_mode = "emacs"           # emacs | vi
 
 [theme]
-current_theme = "default"
+current_theme = "default"     # default | dark | light | colorful | custom
 
 [aliases]
 ll = "ls -la"
-la = "ls -a"
 
 [completions]
-# Multiple completion definition directories
-completion_dirs = [
-    "D:/shellTools/ripgrep/complete",
-    "D:/shellTools/fd/autocomplete",
-    "D:/shellTools/bat/autocomplete",
-]
+matching = "prefix"           # prefix | substring
+case_sensitive = false
 ```
 
-### Completion Definition Files (TOML Format)
+Full reference with all options: [DOCS/getting-started.md](DOCS/getting-started.md).
 
-Create `<command>.toml` inside any completion directory:
+## Project status
 
-```toml
-command = "mytool"
-description = "My custom tool"
+| Layer    | Status |
+|----------|--------|
+| rubash   | ✔ bash parser/executor — passes upstream bash test suite |
+| winuxcmd | ✔ Unix coreutils via PATH injection, no FFI |
+| REPL     | ✔ reedline: history, Tab, autosuggest, syntax highlight |
+| Completion | ✔ Built-in (ls, grep, find, git…), TOML, bash import, cache |
+| Git prompt | ✔ Non-blocking async refresh, configurable symbols |
+| Setup wizard | ✔ Oh-My-Zsh style, first-run guided config |
+| Zsh compat   | ✔ Scanner, import plan, native packs (autosuggest, highlight, git) |
+| User themes  | ✔ `~/.winuxsh/themes/<name>.toml` |
+| Vi mode      | ✔ reedline native |
+| Ctrl+R       | ✔ reedline native |
+| v3 roadmap   | Plugin framework, Oh-My-Winuxsh, job control |
 
-[[flags]]
-short = "-v"
-long = "--verbose"
-description = "Enable verbose output"
+## How to help
 
-[[flags]]
-long = "--output"
-description = "Output file path"
-takes_value = true
-values_from = "path"
+- Report a bug?  Open an issue.
+- Want a feature?  Check [the roadmap](DOCS/winuxsh-roadmap.md).
+- Build from source: `cargo build --release`.
+- Release zip includes `winuxsh.exe`, `winuxcmd/winuxcmd.exe`, and `winuxcmd/activate-winuxcmd.sh`.
+- On first start, winuxsh runs the activation script once if command links are missing.
+- Run the tests: `cargo test`.
 
-[[flags]]
-long = "--format"
-description = "Output format"
-takes_value = true
-values = ["json", "yaml", "toml"]
-```
+## Documentation
 
-### Bash Completion Script Auto-Import
-
-At startup WinSH scans all configured completion directories for bash completion scripts (`_cmd.bash` / `cmd.bash`) and parses them automatically.
-
-**How it works:**
-
-1. Scan for `*.bash` files in each completion directory
-2. Parse `opts="..."` fields to extract short (`-x`) and long (`--xxx`) flags
-3. Serialize the result to `~/.winsh/completions/cache/<cmd>.parsed.toml` (invalidated when the bash file's mtime changes)
-4. Subsequent starts read from cache — no re-parsing
-
-**Where to get the scripts:** Most modern CLI tools (ripgrep, fd, bat, btm, …) ship a `complete/` or `autocomplete/` directory in their release archive containing bash completion scripts. Point `completion_dirs` at those directories.
-
-> If both `rg.toml` and `_rg.bash` exist in a directory, the TOML file takes priority and the bash script is skipped.
-
-### Auto-Description Enrichment (`cmd -h`)
-
-Bash scripts carry no description text. After loading all definitions WinSH automatically runs `cmd -h` for every command that has flags without descriptions.
-
-**How it works:**
-
-1. After all completion definitions are loaded, run `cmd -h` for each command missing descriptions
-2. Parse help output — flag lines are identified by the following format:
-   ```
-     -s, --case-sensitive             Description text
-         --long-only                  Description text
-     -e, --regexp=PATTERN             Description text
-   ```
-   Two or more consecutive spaces separate the flag name(s) from the description.
-3. Write extracted descriptions into `FlagDef.description`
-4. **Persist to cache**: overwrite the `.parsed.toml` with the enriched definitions — next start reads from cache without re-running `cmd -h`
-
-### Environment Variable Completion
-
-Type a `$` prefix and press Tab to complete environment variables:
-
-```bash
-$ echo $PATH<Tab>
-$ echo $HOME<Tab>
-$ echo $USERPROFILE<Tab>
-
-# Partial match also works
-$ echo $WIN<Tab>
-# → $WINDIR, $WINUXSH_*, ...
-```
-
-Variables set via `export` / `set` as well as system environment variables are all available for completion.
-
-## Theme System
-
-WinSH includes 8 built-in themes:
-- `default` - Classic green/blue theme
-- `dark` - Minimal dark theme
-- `light` - Light color theme
-- `colorful` - Vibrant colors
-- `minimal` - Plain text
-- `cyberpunk` - Neon colors
-- `ocean` - Blue tones
-- `forest` - Green tones
-
-## Plugin System
-
-WinSH supports a plugin system for extending functionality:
-
-### Built-in Plugins
-- **Welcome Plugin**: Displays welcome message on startup
-- **Oh-My-Winuxsh**: Theme and plugin management
-
-### Creating Plugins
-
-Implement the `Plugin` trait:
-
-```rust
-pub trait Plugin {
-    fn name(&self) -> &str;
-    fn init(&mut self) -> Result<()>;
-    fn execute(&self, args: &[String], shell: &mut Shell) -> Result<bool>;
-    fn description(&self) -> &str;
-}
-```
-
-## Compatibility
-
-- **OS**: Windows 10/11
-- **Rust**: 2021 edition
-- **Terminal**: Windows Terminal recommended
-- **Architecture**: x64
-
-## Development
-
-### Building
-
-```bash
-# Debug build
-cargo build
-
-# Release build
-cargo build --release
-
-# Run tests
-cargo test
-
-# Format code
-cargo fmt
-
-# Lint code
-cargo clippy
-```
-
-
-## Performance
-
-WinSH features intelligent command routing with WinuxCmd DLL integration for optimal performance.
-
-### Command Routing Priority
-
-Commands are routed based on priority:
-1. **Built-in Commands** - Native WinSH commands (fastest)
-2. **WinuxCmd DLL** - Unix tools via DLL (very fast)
-3. **PATH Execution** - External executables (standard performance)
-
-### Performance Benchmarks
-
-Testing results comparing WinuxCmd DLL vs PATH execution:
-
-**Single Execution (with shell startup overhead):**
-- WinuxCmd DLL: 28.4ms
-- PATH Execution: 55.3ms
-- **DLL Speedup: 49% faster**
-
-**Batch Execution (10 commands):**
-- WinuxCmd DLL: 4.6ms per command
-- PATH Execution: 31.7ms per command
-- **DLL Speedup: ~7x faster**
-
-### Performance Advantages
-
-- **DLL Integration**: Direct DLL calls avoid process creation overhead
-- **Efficient FFI**: Foreign function interface minimizes overhead
-- **Smart Routing**: Automatic command classification ensures optimal execution path
-- **Memory Efficiency**: Shared DLL reduces memory usage
-
-### Daemon Management
-
-WinSH automatically manages the WinuxCmd daemon:
-- Auto-starts daemon if not running
-- Persists across shell sessions
-- Multiple shell instances share the same daemon
-- No manual configuration required
-## Contributing
-
-Contributions are welcome! Please follow these guidelines:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+- [Getting Started](DOCS/getting-started.md) — full config reference
+- [Zsh Migration Guide](DOCS/zsh-migration-guide.md)
+- [Roadmap](DOCS/winuxsh-roadmap.md)
+- [Architecture](DOCS/architecture.md)
 
 ## License
 
-MIT License - see LICENSE file for details
-
-## Acknowledgments
-
-- **reedline**: Line editing library by Nushell
-- **winuxcmd**: Unix-style tools for Windows
-- **colored**: Terminal color support
-
-## Version History
-
-### MVP6 (Current)
-- Array support
-- Plugin system
-- Theme management
-- 860+ command completion
-- Full wildcard expansion
-- Command substitution
-- Script execution
-- TOML-driven external command completion
-- Bash completion script auto-import
-- Flag descriptions from `cmd -h` with disk cache
-- ListMenu popup with aligned descriptions
-- Multi-directory completion config
-
-### MVP5
-- Job control
-- Pipeline support
-- Vi mode basics
-
-### MVP4
-- Basic shell functionality
-- File operations
-- Command execution
-
-## Support
-
-For issues and questions:
-- GitHub Issues: https://github.com/caomengxuan666/winuxsh/issues
-- Documentation: See inline code documentation
-
-## Roadmap
-
-### MVP7 (Planned)
-- Vi mode editing
-- History search (Ctrl+R)
-- Smart completion
-- Pipeline improvements
-- Background job control
-
-### Future
-- Cross-platform support (Linux, macOS)
-- More plugins
-- Advanced scripting features
-- Performance optimizations
+GPL-3.0-or-later.  See [LICENSE](LICENSE).
