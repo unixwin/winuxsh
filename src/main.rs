@@ -18,6 +18,7 @@
 //!   winuxsh --zsh-profile-plan <profile> → print a native zsh profile TOML plan
 //!   winuxsh --completion-probe "line" [cursor] → print REPL completions
 
+use std::io::Read;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -42,7 +43,11 @@ fn main() -> ExitCode {
 
 fn run(args: &[String]) -> anyhow::Result<()> {
     if args.len() < 2 {
-        return run_repl();
+        return if winuxsh_runtime::terminal::stdio_is_interactive() {
+            run_repl()
+        } else {
+            run_stdin_script()
+        };
     }
 
     let first = &args[1];
@@ -127,6 +132,21 @@ fn run(args: &[String]) -> anyhow::Result<()> {
 fn run_repl() -> anyhow::Result<()> {
     let mut shell = winuxsh_runtime::Shell::new()?;
     winuxsh_runtime::repl::run_repl(&mut shell)
+}
+
+fn run_stdin_script() -> anyhow::Result<()> {
+    let mut script = String::new();
+    std::io::stdin().read_to_string(&mut script)?;
+    if script.trim().is_empty() {
+        return Ok(());
+    }
+
+    let mut shell = winuxsh_runtime::Shell::new()?;
+    let code = shell.execute_script(&script)?;
+    if code != 0 {
+        std::process::exit(code);
+    }
+    Ok(())
 }
 
 fn print_usage() {

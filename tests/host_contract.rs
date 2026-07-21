@@ -3,8 +3,9 @@
 //! These tests intentionally exercise the built binary instead of internal
 //! helpers: this is the contract humans and agents rely on.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn winuxsh_binary() -> PathBuf {
@@ -236,6 +237,67 @@ fn stdout_stderr_and_exit_code_are_preserved() {
     let _ = std::fs::remove_dir_all(temp);
 }
 
+#[test]
+fn piped_stdin_without_args_runs_plain_script_surface() {
+    if !cfg!(windows) {
+        return;
+    }
+
+    let temp = unique_temp_dir("winuxsh-host-piped-stdin");
+    let home = temp.join("home");
+    let start = temp.join("start");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&start).unwrap();
+
+    let mut child = Command::new(winuxsh_binary())
+        .current_dir(&start)
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("ZDOTDIR", &home)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|err| panic!("spawn winuxsh: {err}"));
+
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"printf 'alpha\\nbeta\\n' | grep alpha\n")
+        .unwrap();
+
+    let output = child.wait_with_output().unwrap();
+    assert_success(&output, "piped stdin script surface");
+    assert_eq!(normalize_text(&output.stdout), "alpha");
+    assert_eq!(normalize_text(&output.stderr), "");
+    assert_no_terminal_controls(&output.stdout);
+    assert_no_terminal_controls(&output.stderr);
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn command_mode_grep_capture_stays_plain() {
+    if !cfg!(windows) {
+        return;
+    }
+
+    let temp = unique_temp_dir("winuxsh-host-grep-capture");
+    let home = temp.join("home");
+    let start = temp.join("start");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&start).unwrap();
+
+    let output = run_winuxsh("printf 'alpha\nbeta\n' | grep alpha", &start, &home, &[]);
+    assert_success(&output, "captured grep");
+    assert_eq!(normalize_text(&output.stdout), "alpha");
+    assert_no_terminal_controls(&output.stdout);
+    assert_no_terminal_controls(&output.stderr);
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
 fn run_winuxsh(script: &str, cwd: &Path, home: &Path, extra_env: &[(&str, String)]) -> Output {
     let mut command = Command::new(winuxsh_binary());
     command
@@ -278,6 +340,16 @@ fn normalize_text(bytes: &[u8]) -> String {
         .replace("\r\n", "\n")
         .trim()
         .to_string()
+}
+
+fn assert_no_terminal_controls(bytes: &[u8]) {
+    for byte in bytes {
+        assert_ne!(*byte, 0x1b, "unexpected ANSI escape in output");
+        assert!(
+            *byte >= 0x20 || matches!(*byte, b'\t' | b'\n' | b'\r'),
+            "unexpected control byte 0x{byte:02X} in output"
+        );
+    }
 }
 
 fn assert_same_path(actual: &str, expected: &str) {
