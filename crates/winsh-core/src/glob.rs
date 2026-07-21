@@ -6,8 +6,8 @@
 //! - Extended globs: (...), ~, ^
 //! - Options: NULL_GLOB, GLOB_DOTS, CASE_GLOB
 
-use std::path::{Path, PathBuf};
 use std::fs;
+use std::path::{Path, PathBuf};
 
 use crate::ShellError;
 
@@ -36,7 +36,11 @@ impl Default for GlobOptions {
 }
 
 /// Expand glob patterns in a list of words.
-pub fn expand_globs(words: &[String], cwd: &Path, opts: &GlobOptions) -> Result<Vec<String>, ShellError> {
+pub fn expand_globs(
+    words: &[String],
+    cwd: &Path,
+    opts: &GlobOptions,
+) -> Result<Vec<String>, ShellError> {
     let mut result = Vec::new();
 
     for word in words {
@@ -117,7 +121,8 @@ fn expand_simple(pattern: &str, cwd: &Path, opts: &GlobOptions) -> Result<Vec<St
 
             if match_pattern(&pattern_part, &name, opts.case_glob) {
                 let full_path = base_dir.join(&name);
-                let rel_path = full_path.strip_prefix(cwd)
+                let rel_path = full_path
+                    .strip_prefix(cwd)
                     .unwrap_or(&full_path)
                     .to_string_lossy()
                     .to_string()
@@ -131,7 +136,11 @@ fn expand_simple(pattern: &str, cwd: &Path, opts: &GlobOptions) -> Result<Vec<St
 }
 
 /// Recursive glob expansion with **.
-fn expand_recursive(pattern: &str, cwd: &Path, opts: &GlobOptions) -> Result<Vec<String>, ShellError> {
+fn expand_recursive(
+    pattern: &str,
+    cwd: &Path,
+    opts: &GlobOptions,
+) -> Result<Vec<String>, ShellError> {
     let mut results = Vec::new();
 
     // Split pattern at **
@@ -142,14 +151,22 @@ fn expand_recursive(pattern: &str, cwd: &Path, opts: &GlobOptions) -> Result<Vec
     }
 
     let prefix = parts[0].trim_end_matches('/');
-    let suffix = if parts.len() > 1 { parts[1].trim_start_matches('/') } else { "*" };
+    let suffix = if parts.len() > 1 {
+        parts[1].trim_start_matches('/')
+    } else {
+        "*"
+    };
 
     // Determine the base directory
     let base_dir = if prefix.is_empty() {
         cwd.to_path_buf()
     } else {
         let p = Path::new(prefix);
-        if p.is_absolute() { p.to_path_buf() } else { cwd.join(p) }
+        if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            cwd.join(p)
+        }
     };
 
     // Recursively walk the directory tree
@@ -172,7 +189,8 @@ fn expand_recursive(pattern: &str, cwd: &Path, opts: &GlobOptions) -> Result<Vec
             // Check if this file matches the suffix
             if has_glob_chars(suffix) {
                 if match_pattern(suffix, &name, opts.case_glob) {
-                    let rel = full_path.strip_prefix(cwd)
+                    let rel = full_path
+                        .strip_prefix(cwd)
                         .unwrap_or(&full_path)
                         .to_string_lossy()
                         .to_string()
@@ -180,7 +198,8 @@ fn expand_recursive(pattern: &str, cwd: &Path, opts: &GlobOptions) -> Result<Vec
                     results.push(rel);
                 }
             } else if name == suffix {
-                let rel = full_path.strip_prefix(cwd)
+                let rel = full_path
+                    .strip_prefix(cwd)
                     .unwrap_or(&full_path)
                     .to_string_lossy()
                     .to_string()
@@ -194,7 +213,11 @@ fn expand_recursive(pattern: &str, cwd: &Path, opts: &GlobOptions) -> Result<Vec
 }
 
 /// Expand bracket patterns [...].
-fn expand_bracket(pattern: &str, cwd: &Path, opts: &GlobOptions) -> Result<Vec<String>, ShellError> {
+fn expand_bracket(
+    pattern: &str,
+    cwd: &Path,
+    opts: &GlobOptions,
+) -> Result<Vec<String>, ShellError> {
     // For now, use the simple expansion which handles brackets via match_pattern
     expand_simple(pattern, cwd, opts)
 }

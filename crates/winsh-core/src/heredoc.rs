@@ -141,11 +141,7 @@ mod tests {
 
     #[test]
     fn test_read_heredoc() {
-        let input = vec![
-            "hello".to_string(),
-            "world".to_string(),
-            "EOF".to_string(),
-        ];
+        let input = vec!["hello".to_string(), "world".to_string(), "EOF".to_string()];
         let mut iter = input.into_iter();
         let heredoc = read_heredoc("EOF", false, &mut iter).unwrap();
         assert_eq!(heredoc.content, "hello\nworld");
@@ -168,10 +164,7 @@ mod tests {
 
     #[test]
     fn test_read_heredoc_unterminated() {
-        let input = vec![
-            "hello".to_string(),
-            "world".to_string(),
-        ];
+        let input = vec!["hello".to_string(), "world".to_string()];
         let mut iter = input.into_iter();
         let result = read_heredoc("EOF", false, &mut iter);
         assert!(result.is_err());

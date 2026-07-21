@@ -171,7 +171,15 @@ fn tokenize_arithmetic(expr: &str) -> Result<Vec<ArithToken>, ShellError> {
             '0'..='9' => {
                 let mut num = String::new();
                 while let Some(&c) = chars.peek() {
-                    if c.is_ascii_digit() || c == 'x' || c == 'X' || c == 'o' || c == 'O' || c == 'b' || c == 'B' || (c.is_ascii_hexdigit() && num.starts_with("0x")) {
+                    if c.is_ascii_digit()
+                        || c == 'x'
+                        || c == 'X'
+                        || c == 'o'
+                        || c == 'O'
+                        || c == 'b'
+                        || c == 'B'
+                        || (c.is_ascii_hexdigit() && num.starts_with("0x"))
+                    {
                         num.push(chars.next().unwrap());
                     } else {
                         break;
@@ -297,7 +305,11 @@ struct ArithmeticParser<'a> {
 
 impl<'a> ArithmeticParser<'a> {
     fn new(tokens: Vec<ArithToken>, env: &'a Env) -> Self {
-        Self { tokens, pos: 0, env }
+        Self {
+            tokens,
+            pos: 0,
+            env,
+        }
     }
 
     fn peek(&self) -> Option<&ArithToken> {
@@ -321,7 +333,9 @@ impl<'a> ArithmeticParser<'a> {
                 "expected {:?}, got {:?}",
                 expected, token
             ))),
-            None => Err(ShellError::ArithmeticSyntax("unexpected end of expression".to_string())),
+            None => Err(ShellError::ArithmeticSyntax(
+                "unexpected end of expression".to_string(),
+            )),
         }
     }
 

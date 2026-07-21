@@ -1,10 +1,10 @@
-﻿// Path completion for WinSH
+// Path completion for WinSH
 // Provides Tab completion for files and directories
 
-use std::path::{Path, PathBuf};
-use std::fs;
 use crate::completion::{CompletionContext, CompletionResult};
 use crate::error::Result;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 /// Path completer
 pub struct PathCompleter;
@@ -23,51 +23,56 @@ impl PathCompleter {
         }
 
         // Determine base directory and prefix
-        let (base_dir, prefix, add_trailing_slash) = if word.starts_with('/') || word.starts_with('\\') {
-            // Absolute path
-            let word_clone = word.clone();
-            let path = if word.starts_with('\\') { 
-                // Windows UNC path
-                PathBuf::from(&word_clone)
+        let (base_dir, prefix, add_trailing_slash) =
+            if word.starts_with('/') || word.starts_with('\\') {
+                // Absolute path
+                let word_clone = word.clone();
+                let path = if word.starts_with('\\') {
+                    // Windows UNC path
+                    PathBuf::from(&word_clone)
+                } else {
+                    // Unix-style absolute path (convert to Windows)
+                    PathBuf::from(&word_clone)
+                };
+
+                if let Some(parent) = path.parent() {
+                    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    (parent.to_path_buf(), file_name.to_string(), false)
+                } else {
+                    (PathBuf::from("/"), word[1..].to_string(), false)
+                }
+            } else if word.ends_with('/') || word.ends_with('\\') {
+                // Path ends with separator - complete directory contents
+                let dir_part = &word[..word.len().saturating_sub(1)];
+                let base_dir = context.current_dir.join(dir_part);
+                (base_dir, String::new(), false)
+            } else if word.contains('/') || word.contains('\\') {
+                // Relative path with directory separator
+                let last_sep = word.rfind(|c: char| c == '/' || c == '\\').unwrap();
+                let dir_part = &word[..last_sep];
+                let prefix_part = &word[last_sep + 1..];
+                (
+                    context.current_dir.join(dir_part),
+                    prefix_part.to_string(),
+                    false,
+                )
+            } else if word.starts_with('.') {
+                // Current directory reference
+                if word == "." || word == "./" {
+                    (context.current_dir.clone(), String::new(), false)
+                } else if word.starts_with("./") {
+                    (context.current_dir.clone(), word[2..].to_string(), false)
+                } else {
+                    (context.current_dir.clone(), word[1..].to_string(), false)
+                }
             } else {
-                // Unix-style absolute path (convert to Windows)
-                PathBuf::from(&word_clone)
+                // No path separator, assume current directory
+                (context.current_dir.clone(), word.clone(), false)
             };
-            
-            if let Some(parent) = path.parent() {
-                let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                (parent.to_path_buf(), file_name.to_string(), false)
-            } else {
-                (PathBuf::from("/"), word[1..].to_string(), false)
-            }
-        } else if word.ends_with('/') || word.ends_with('\\') {
-            // Path ends with separator - complete directory contents
-            let dir_part = &word[..word.len().saturating_sub(1)];
-            let base_dir = context.current_dir.join(dir_part);
-            (base_dir, String::new(), false)
-        } else if word.contains('/') || word.contains('\\') {
-            // Relative path with directory separator
-            let last_sep = word.rfind(|c: char| c == '/' || c == '\\').unwrap();
-            let dir_part = &word[..last_sep];
-            let prefix_part = &word[last_sep + 1..];
-            (context.current_dir.join(dir_part), prefix_part.to_string(), false)
-        } else if word.starts_with('.') {
-            // Current directory reference
-            if word == "." || word == "./" {
-                (context.current_dir.clone(), String::new(), false)
-            } else if word.starts_with("./") {
-                (context.current_dir.clone(), word[2..].to_string(), false)
-            } else {
-                (context.current_dir.clone(), word[1..].to_string(), false)
-            }
-        } else {
-            // No path separator, assume current directory
-            (context.current_dir.clone(), word.clone(), false)
-        };
 
         // Normalize base path
         let base_dir = Self::normalize_path(&base_dir);
-        
+
         // Check if base directory exists
         if !base_dir.exists() || !base_dir.is_dir() {
             return Ok(None);
@@ -77,7 +82,11 @@ impl PathCompleter {
     }
 
     /// Complete entries in a directory
-    fn complete_directory(base_dir: &Path, prefix: &str, _add_trailing_slash: bool) -> Result<Option<CompletionResult>> {
+    fn complete_directory(
+        base_dir: &Path,
+        prefix: &str,
+        _add_trailing_slash: bool,
+    ) -> Result<Option<CompletionResult>> {
         let entries = match fs::read_dir(base_dir) {
             Ok(entries) => entries,
             Err(_) => return Ok(None),
@@ -117,7 +126,7 @@ impl PathCompleter {
     /// Normalize path for Windows/Unix compatibility
     fn normalize_path(path: &Path) -> PathBuf {
         let path_str = path.to_string_lossy().to_string();
-        
+
         // Convert Unix paths to Windows paths
         let normalized = path_str.replace('/', "\\");
         PathBuf::from(normalized)

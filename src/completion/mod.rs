@@ -1,14 +1,14 @@
 // Completion module for WinSH
 // Provides Tab completion for commands, paths, and variables
 
+pub mod bash_import;
 pub mod command;
 pub mod completer;
 pub mod external;
-pub mod bash_import;
 pub mod path;
 pub mod variables;
 
-pub use completer::{WinuxshCompleter, CompletionState};
+pub use completer::{CompletionState, WinuxshCompleter};
 
 use std::path::PathBuf;
 
@@ -61,8 +61,7 @@ impl CompletionContext {
             return true;
         }
 
-        let last_sep = before_cursor
-            .rfind(|c: char| c == ';' || c == '|' || c == '&' || c == '\n');
+        let last_sep = before_cursor.rfind(|c: char| c == ';' || c == '|' || c == '&' || c == '\n');
 
         if let Some(p) = last_sep {
             let skip = ceil_char_boundary(before_cursor, p + 1);
@@ -222,21 +221,14 @@ mod tests {
 
     #[test]
     fn test_is_path_completion() {
-        let ctx = CompletionContext::new(
-            PathBuf::from("/home/user"),
-            "cat /tmp/fil".to_string(),
-            12,
-        );
+        let ctx =
+            CompletionContext::new(PathBuf::from("/home/user"), "cat /tmp/fil".to_string(), 12);
         assert!(ctx.is_path_completion());
     }
 
     #[test]
     fn test_is_variable_completion() {
-        let ctx = CompletionContext::new(
-            PathBuf::from("/home/user"),
-            "echo $HOM".to_string(),
-            9,
-        );
+        let ctx = CompletionContext::new(PathBuf::from("/home/user"), "echo $HOM".to_string(), 9);
         assert!(ctx.is_variable_completion());
     }
 }

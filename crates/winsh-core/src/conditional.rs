@@ -227,7 +227,11 @@ struct ConditionalParser<'a> {
 
 impl<'a> ConditionalParser<'a> {
     fn new(tokens: Vec<CondToken>, env: &'a Env) -> Self {
-        Self { tokens, pos: 0, env }
+        Self {
+            tokens,
+            pos: 0,
+            env,
+        }
     }
 
     fn peek(&self) -> Option<&CondToken> {
@@ -459,9 +463,7 @@ impl<'a> ConditionalParser<'a> {
     fn get_value(&mut self) -> Result<String, ShellError> {
         match self.advance() {
             Some(CondToken::String(s)) => Ok(s),
-            Some(CondToken::Variable(name)) => {
-                Ok(self.env.get(&name).unwrap_or("").to_string())
-            }
+            Some(CondToken::Variable(name)) => Ok(self.env.get(&name).unwrap_or("").to_string()),
             Some(token) => Err(ShellError::SyntaxError {
                 line: 0,
                 col: 0,

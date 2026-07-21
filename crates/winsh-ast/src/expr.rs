@@ -1,7 +1,7 @@
 //! Expression types for arithmetic and conditional expressions.
 
-use std::fmt;
 use crate::word::Word;
+use std::fmt;
 
 /// An expression used in arithmetic (( )) or conditional [[ ]] contexts.
 #[derive(Debug, Clone, PartialEq)]
@@ -227,19 +227,13 @@ mod tests {
 
     #[test]
     fn test_expr_arithmetic() {
-        let expr = Expr::Add(
-            Box::new(Expr::int(1)),
-            Box::new(Expr::int(2)),
-        );
+        let expr = Expr::Add(Box::new(Expr::int(1)), Box::new(Expr::int(2)));
         assert_eq!(expr.to_string(), "1 + 2");
     }
 
     #[test]
     fn test_expr_comparison() {
-        let expr = Expr::Lt(
-            Box::new(Expr::var("x")),
-            Box::new(Expr::int(10)),
-        );
+        let expr = Expr::Lt(Box::new(Expr::var("x")), Box::new(Expr::int(10)));
         assert_eq!(expr.to_string(), "x < 10");
     }
 

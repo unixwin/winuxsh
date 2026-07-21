@@ -1,10 +1,9 @@
-﻿/// WinuxCmd FFI bindings for direct DLL execution
+use libloading::{Library, Symbol};
+/// WinuxCmd FFI bindings for direct DLL execution
 /// No daemon required - all commands execute directly via the DLL
-
-use std::ffi::{CStr, CString, c_char, c_int};
+use std::ffi::{c_char, c_int, CStr, CString};
 use std::path::Path;
 use std::sync::Mutex;
-use libloading::{Library, Symbol};
 
 /// Response from WinuxCmd FFI
 #[derive(Debug)]
@@ -30,10 +29,7 @@ type FreeBufferFunc = unsafe extern "C" fn(*mut c_char);
 
 type GetVersionFunc = unsafe extern "C" fn() -> *const c_char;
 
-type GetAllCommandsFunc = unsafe extern "C" fn(
-    *mut *mut *mut c_char,
-    *mut c_int,
-) -> c_int;
+type GetAllCommandsFunc = unsafe extern "C" fn(*mut *mut *mut c_char, *mut c_int) -> c_int;
 
 type FreeCommandsArrayFunc = unsafe extern "C" fn(*mut *mut c_char, c_int);
 
@@ -70,11 +66,12 @@ impl WinuxCmdFFI {
 
             // Get executable path and build DLL search paths relative to it
             let exe_path = std::env::current_exe()?;
-            let exe_dir = exe_path.parent()
+            let exe_dir = exe_path
+                .parent()
                 .ok_or_else(|| anyhow::anyhow!("Failed to get executable directory"))?;
 
             let dll_paths = vec![
-                exe_dir.join("winuxcmd/winuxcore.dll"),  // New DLL name
+                exe_dir.join("winuxcmd/winuxcore.dll"), // New DLL name
                 exe_dir.join("../utils/winuxcmd/winuxcore.dll"),
                 exe_dir.join("../../utils/winuxcmd/winuxcore.dll"),
                 exe_dir.join("winuxcore.dll"),
@@ -96,7 +93,10 @@ impl WinuxCmdFFI {
             }
 
             let library = library.ok_or_else(|| {
-                anyhow::anyhow!("Failed to load winuxcore.dll from any location. Tried:\n{}", error_msg)
+                anyhow::anyhow!(
+                    "Failed to load winuxcore.dll from any location. Tried:\n{}",
+                    error_msg
+                )
             })?;
 
             // Load all function pointers at once - this will move library but we get what we need
@@ -104,8 +104,10 @@ impl WinuxCmdFFI {
                 let execute_sym: Symbol<ExecuteFunc> = library.get(b"winux_execute")?;
                 let free_buffer_sym: Symbol<FreeBufferFunc> = library.get(b"winux_free_buffer")?;
                 let get_version_sym: Symbol<GetVersionFunc> = library.get(b"winux_get_version")?;
-                let get_all_commands_sym: Symbol<GetAllCommandsFunc> = library.get(b"winux_get_all_commands")?;
-                let free_commands_array_sym: Symbol<FreeCommandsArrayFunc> = library.get(b"winux_free_commands_array")?;
+                let get_all_commands_sym: Symbol<GetAllCommandsFunc> =
+                    library.get(b"winux_get_all_commands")?;
+                let free_commands_array_sym: Symbol<FreeCommandsArrayFunc> =
+                    library.get(b"winux_free_commands_array")?;
 
                 (
                     *execute_sym.into_raw(),
@@ -150,13 +152,13 @@ impl WinuxCmdFFI {
 
             if let Some(execute) = FFI.execute {
                 let cmd_cstring = CString::new(command)?;
-                let mut arg_cstrings: Vec<CString> = args.iter()
+                let mut arg_cstrings: Vec<CString> = args
+                    .iter()
                     .map(|arg| CString::new(arg.as_str()))
                     .collect::<Result<Vec<_>, _>>()?;
 
-                let mut arg_pointers: Vec<*const c_char> = arg_cstrings.iter()
-                    .map(|cs| cs.as_ptr())
-                    .collect();
+                let mut arg_pointers: Vec<*const c_char> =
+                    arg_cstrings.iter().map(|cs| cs.as_ptr()).collect();
 
                 let mut output: *mut c_char = std::ptr::null_mut();
                 let mut error: *mut c_char = std::ptr::null_mut();

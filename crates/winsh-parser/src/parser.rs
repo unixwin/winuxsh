@@ -1,9 +1,9 @@
 //! The main parser implementation.
 
-use winsh_ast::{Token, Stmt, Word, Redirection, RedirOp, RedirTarget};
+use winsh_ast::stmt::CaseItem;
 use winsh_ast::token::TokenKind;
 use winsh_ast::word::WordPart;
-use winsh_ast::stmt::CaseItem;
+use winsh_ast::{RedirOp, RedirTarget, Redirection, Stmt, Token, Word};
 use winsh_core::ShellError;
 
 /// A parser for the WinSH shell language.
@@ -163,7 +163,17 @@ impl Parser {
                     background = true;
                     break;
                 }
-                TokenKind::RedirOut | TokenKind::RedirIn | TokenKind::RedirAppend => {
+                TokenKind::RedirOut
+                | TokenKind::RedirIn
+                | TokenKind::RedirAppend
+                | TokenKind::RedirErr
+                | TokenKind::RedirErrAppend
+                | TokenKind::RedirErrToOut
+                | TokenKind::RedirOutToErr
+                | TokenKind::RedirCombined
+                | TokenKind::RedirCombinedAppend
+                | TokenKind::HereDoc
+                | TokenKind::HereString => {
                     redirections.push(self.parse_redirection()?);
                 }
                 _ => {
@@ -245,11 +255,31 @@ impl Parser {
             }
         };
 
+        if op == RedirOp::ErrToOut {
+            return Ok(Redirection {
+                fd: Some(2),
+                op,
+                target: RedirTarget::Fd(1),
+            });
+        }
+
+        if op == RedirOp::OutToErr {
+            return Ok(Redirection {
+                fd: Some(1),
+                op,
+                target: RedirTarget::Fd(2),
+            });
+        }
+
         self.skip_newlines();
         let target = self.parse_word()?;
+        let fd = match op {
+            RedirOp::Err | RedirOp::ErrAppend => Some(2),
+            _ => None,
+        };
 
         Ok(Redirection {
-            fd: None,
+            fd,
             op,
             target: RedirTarget::File(target),
         })
@@ -826,6 +856,28 @@ mod tests {
                 assert_eq!(redirections[0].op, RedirOp::Out);
             }
             _ => panic!("Expected command with redirection"),
+        }
+    }
+
+    #[test]
+    fn test_parse_fd_redirections() {
+        let stmts = parse("echo hello 2> err.txt 1>&2");
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Command {
+                words,
+                redirections,
+                ..
+            } => {
+                assert_eq!(words.len(), 2);
+                assert_eq!(redirections.len(), 2);
+                assert_eq!(redirections[0].fd, Some(2));
+                assert_eq!(redirections[0].op, RedirOp::Err);
+                assert_eq!(redirections[1].fd, Some(1));
+                assert_eq!(redirections[1].op, RedirOp::OutToErr);
+                assert_eq!(redirections[1].target, RedirTarget::Fd(2));
+            }
+            _ => panic!("Expected command with fd redirections"),
         }
     }
 

@@ -29,9 +29,12 @@ pub fn expand_variable(
         }
         Some(modifier) => {
             // Parse the modifier
-            if modifier.starts_with('-') || modifier.starts_with(':') 
-                || modifier.starts_with('+') || modifier.starts_with('?')
-                || modifier.starts_with('=') {
+            if modifier.starts_with('-')
+                || modifier.starts_with(':')
+                || modifier.starts_with('+')
+                || modifier.starts_with('?')
+                || modifier.starts_with('=')
+            {
                 expand_default_modifier(name, modifier, env)
             } else if modifier.starts_with('#') && !modifier.starts_with("##") {
                 expand_prefix_removal(name, &modifier[1..], false, env)
@@ -58,11 +61,7 @@ pub fn expand_variable(
 }
 
 /// Expand default value modifiers: ${VAR:-default}, ${VAR:=default}, ${VAR:+alternate}, ${VAR:?error}
-fn expand_default_modifier(
-    name: &str,
-    modifier: &str,
-    env: &Env,
-) -> Result<String, ShellError> {
+fn expand_default_modifier(name: &str, modifier: &str, env: &Env) -> Result<String, ShellError> {
     let value = env.get(name);
     let is_set = value.is_some();
     let is_empty = value.map(|s| s.is_empty()).unwrap_or(true);
@@ -181,11 +180,7 @@ fn expand_suffix_removal(
 }
 
 /// Expand substitution: ${VAR/old/new} or ${VAR//old/new}
-fn expand_substitution(
-    name: &str,
-    modifier: &str,
-    env: &Env,
-) -> Result<String, ShellError> {
+fn expand_substitution(name: &str, modifier: &str, env: &Env) -> Result<String, ShellError> {
     let value = env.get(name).unwrap_or("");
 
     if modifier.starts_with("//") {
@@ -328,27 +323,42 @@ mod tests {
     fn test_expand_default_value() {
         let mut env = Env::new();
         env.set("VAR", "value");
-        assert_eq!(expand_variable("VAR", Some("-default"), &env).unwrap(), "value");
+        assert_eq!(
+            expand_variable("VAR", Some("-default"), &env).unwrap(),
+            "value"
+        );
 
         let env = Env::new();
-        assert_eq!(expand_variable("VAR", Some("-default"), &env).unwrap(), "default");
+        assert_eq!(
+            expand_variable("VAR", Some("-default"), &env).unwrap(),
+            "default"
+        );
     }
 
     #[test]
     fn test_expand_default_assign() {
         let env = Env::new();
         // Note: With &Env, we can't actually assign, so this just returns the default
-        assert_eq!(expand_variable("VAR", Some("=default"), &env).unwrap(), "default");
+        assert_eq!(
+            expand_variable("VAR", Some("=default"), &env).unwrap(),
+            "default"
+        );
     }
 
     #[test]
     fn test_expand_alternate() {
         let mut env = Env::new();
         env.set("VAR", "value");
-        assert_eq!(expand_variable("VAR", Some("+alternate"), &env).unwrap(), "alternate");
+        assert_eq!(
+            expand_variable("VAR", Some("+alternate"), &env).unwrap(),
+            "alternate"
+        );
 
         let env = Env::new();
-        assert_eq!(expand_variable("VAR", Some("+alternate"), &env).unwrap(), "");
+        assert_eq!(
+            expand_variable("VAR", Some("+alternate"), &env).unwrap(),
+            ""
+        );
     }
 
     #[test]
@@ -363,10 +373,16 @@ mod tests {
         env.set("FILE", "/path/to/file.tar.gz");
 
         // ${FILE#*/} - remove shortest prefix up to /
-        assert_eq!(expand_variable("FILE", Some("#*/"), &env).unwrap(), "path/to/file.tar.gz");
+        assert_eq!(
+            expand_variable("FILE", Some("#*/"), &env).unwrap(),
+            "path/to/file.tar.gz"
+        );
 
         // ${FILE##*/} - remove longest prefix up to /
-        assert_eq!(expand_variable("FILE", Some("##*/"), &env).unwrap(), "file.tar.gz");
+        assert_eq!(
+            expand_variable("FILE", Some("##*/"), &env).unwrap(),
+            "file.tar.gz"
+        );
     }
 
     #[test]
@@ -375,10 +391,16 @@ mod tests {
         env.set("FILE", "/path/to/file.tar.gz");
 
         // ${FILE%.*} - remove shortest suffix starting with .
-        assert_eq!(expand_variable("FILE", Some("%.*"), &env).unwrap(), "/path/to/file.tar");
+        assert_eq!(
+            expand_variable("FILE", Some("%.*"), &env).unwrap(),
+            "/path/to/file.tar"
+        );
 
         // ${FILE%%.*} - remove longest suffix starting with .
-        assert_eq!(expand_variable("FILE", Some("%%.*"), &env).unwrap(), "/path/to/file");
+        assert_eq!(
+            expand_variable("FILE", Some("%%.*"), &env).unwrap(),
+            "/path/to/file"
+        );
     }
 
     #[test]
@@ -387,10 +409,16 @@ mod tests {
         env.set("VAR", "hello world hello");
 
         // ${VAR/old/new} - replace first occurrence
-        assert_eq!(expand_variable("VAR", Some("/hello/bye"), &env).unwrap(), "bye world hello");
+        assert_eq!(
+            expand_variable("VAR", Some("/hello/bye"), &env).unwrap(),
+            "bye world hello"
+        );
 
         // ${VAR//old/new} - replace all occurrences
-        assert_eq!(expand_variable("VAR", Some("//hello/bye"), &env).unwrap(), "bye world bye");
+        assert_eq!(
+            expand_variable("VAR", Some("//hello/bye"), &env).unwrap(),
+            "bye world bye"
+        );
     }
 
     #[test]

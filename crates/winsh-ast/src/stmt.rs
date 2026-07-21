@@ -1,9 +1,9 @@
 //! Statement types for the AST.
 
-use std::fmt;
 use crate::expr::Expr;
 use crate::redir::Redirection;
 use crate::word::Word;
+use std::fmt;
 
 /// A statement in the shell language.
 ///
@@ -29,16 +29,10 @@ pub enum Stmt {
     },
 
     /// Logical AND: cmd1 && cmd2
-    And {
-        left: Box<Stmt>,
-        right: Box<Stmt>,
-    },
+    And { left: Box<Stmt>, right: Box<Stmt> },
 
     /// Logical OR: cmd1 || cmd2
-    Or {
-        left: Box<Stmt>,
-        right: Box<Stmt>,
-    },
+    Or { left: Box<Stmt>, right: Box<Stmt> },
 
     /// Sequence of statements: cmd1 ; cmd2 ; cmd3
     Sequence(Vec<Stmt>),
@@ -85,10 +79,7 @@ pub enum Stmt {
     },
 
     /// Case statement: case WORD in PATTERN) COMMANDS ;; ... esac
-    Case {
-        word: Word,
-        cases: Vec<CaseItem>,
-    },
+    Case { word: Word, cases: Vec<CaseItem> },
 
     /// Select statement: select VAR in WORDS; do ...; done
     Select {
@@ -98,10 +89,7 @@ pub enum Stmt {
     },
 
     /// Function definition: name() { ... } or function name { ... }
-    FunctionDef {
-        name: String,
-        body: Vec<Stmt>,
-    },
+    FunctionDef { name: String, body: Vec<Stmt> },
 
     /// Arithmetic evaluation: (( expr ))
     ArithmeticEval(Box<Expr>),
@@ -165,14 +153,24 @@ impl Stmt {
 
     /// Check if this statement runs in background.
     pub fn is_background(&self) -> bool {
-        matches!(self, Stmt::Command { background: true, .. })
+        matches!(
+            self,
+            Stmt::Command {
+                background: true,
+                ..
+            }
+        )
     }
 }
 
 impl fmt::Display for Stmt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Stmt::Command { words, redirections, background } => {
+            Stmt::Command {
+                words,
+                redirections,
+                background,
+            } => {
                 for (i, word) in words.iter().enumerate() {
                     if i > 0 {
                         write!(f, " ")?;
@@ -212,7 +210,12 @@ impl fmt::Display for Stmt {
             }
             Stmt::Subshell(stmt) => write!(f, "({})", stmt),
             Stmt::Group(stmt) => write!(f, "{{ {}; }}", stmt),
-            Stmt::If { condition, then_branch, elif_branches, else_branch } => {
+            Stmt::If {
+                condition,
+                then_branch,
+                elif_branches,
+                else_branch,
+            } => {
                 write!(f, "if {}; then ", condition)?;
                 for stmt in then_branch {
                     write!(f, "{}; ", stmt)?;
@@ -242,7 +245,12 @@ impl fmt::Display for Stmt {
                 }
                 write!(f, "done")
             }
-            Stmt::ForCStyle { init, condition, update, body } => {
+            Stmt::ForCStyle {
+                init,
+                condition,
+                update,
+                body,
+            } => {
                 write!(f, "for ((")?;
                 if let Some(i) = init {
                     write!(f, "{}", i)?;
@@ -315,7 +323,9 @@ impl fmt::Display for Stmt {
             Stmt::ArithmeticEval(expr) => write!(f, "(( {} ))", expr),
             Stmt::Conditional(expr) => write!(f, "[[ {} ]]", expr),
             Stmt::Assign { name, value, .. } => write!(f, "{}={}", name, value),
-            Stmt::HereDoc { delimiter, content, .. } => {
+            Stmt::HereDoc {
+                delimiter, content, ..
+            } => {
                 write!(f, "<<{}\n{}\n{}", delimiter, content, delimiter)
             }
             Stmt::Empty => Ok(()),
@@ -379,7 +389,11 @@ mod tests {
     fn test_stmt_if() {
         let stmt = Stmt::If {
             condition: Box::new(Stmt::Command {
-                words: vec![Word::literal("test"), Word::literal("-f"), Word::literal("file")],
+                words: vec![
+                    Word::literal("test"),
+                    Word::literal("-f"),
+                    Word::literal("file"),
+                ],
                 redirections: vec![],
                 background: false,
             }),

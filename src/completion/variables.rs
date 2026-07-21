@@ -1,17 +1,20 @@
 // Variable completion for WinSH
 // Provides Tab completion for environment variables
 
-use std::collections::HashMap;
+use crate::array::ArrayValue;
 use crate::completion::{CompletionContext, CompletionResult};
 use crate::error::Result;
-use crate::array::ArrayValue;
+use std::collections::HashMap;
 
 /// Variable completer
 pub struct VariableCompleter;
 
 impl VariableCompleter {
     /// Complete a variable name
-    pub fn complete(context: &CompletionContext, env_vars: &HashMap<String, ArrayValue>) -> Result<Option<CompletionResult>> {
+    pub fn complete(
+        context: &CompletionContext,
+        env_vars: &HashMap<String, ArrayValue>,
+    ) -> Result<Option<CompletionResult>> {
         let word = match context.get_current_word() {
             Some(w) => w,
             None => return Ok(None),
@@ -41,7 +44,7 @@ impl VariableCompleter {
 
         // Get all available variables
         let mut all_vars = Self::get_environment_variables();
-        
+
         // Add shell variables
         for (key, _) in env_vars.iter() {
             all_vars.push(key.clone());
@@ -70,9 +73,7 @@ impl VariableCompleter {
 
     /// Get system environment variables
     pub fn get_environment_variables() -> Vec<String> {
-        std::env::vars()
-            .map(|(key, _)| key)
-            .collect()
+        std::env::vars().map(|(key, _)| key).collect()
     }
 
     /// Get common environment variables for quick completion
@@ -103,11 +104,11 @@ impl VariableCompleter {
     /// Expand environment variables in a string
     pub fn expand_variables(input: &str, env_vars: &HashMap<String, ArrayValue>) -> String {
         let mut result = input.to_string();
-        
+
         // Expand $VAR format
         while let Some(start) = result.find('$') {
             let rest = &result[start + 1..];
-            
+
             // Check for ${VAR} format
             if rest.starts_with('{') {
                 if let Some(end) = rest.find('}') {
@@ -117,16 +118,17 @@ impl VariableCompleter {
                     continue;
                 }
             }
-            
+
             // Find end of variable name
-            let end = rest.find(|c: char| !c.is_alphanumeric() && c != '_')
+            let end = rest
+                .find(|c: char| !c.is_alphanumeric() && c != '_')
                 .unwrap_or(rest.len());
-            
+
             let var_name = &rest[..end];
             let replacement = Self::get_variable_value(var_name, env_vars);
             result = format!("{}{}{}", &result[..start], replacement, &rest[end..]);
         }
-        
+
         result
     }
 
@@ -136,12 +138,12 @@ impl VariableCompleter {
         if let Some(ArrayValue::String(ref value)) = env_vars.get(var_name) {
             return value.clone();
         }
-        
+
         // Check environment variables
         if let Ok(value) = std::env::var(var_name) {
             return value;
         }
-        
+
         // Return empty string if not found
         String::new()
     }
@@ -170,7 +172,7 @@ mod tests {
     fn test_expand_variables() {
         let mut env_vars = HashMap::new();
         env_vars.insert("TEST".to_string(), ArrayValue::String("value".to_string()));
-        
+
         // Note: This test might not pass if TEST is not in env_vars or system env
         // Just testing the function exists and runs
         let result = VariableCompleter::expand_variables("echo $TEST", &env_vars);

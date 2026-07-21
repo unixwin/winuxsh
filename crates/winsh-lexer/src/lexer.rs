@@ -1,9 +1,9 @@
 //! The main lexer implementation.
 
-use winsh_ast::{Token, Span};
-use winsh_ast::token::TokenKind;
-use winsh_core::ShellError;
 use crate::quote;
+use winsh_ast::token::TokenKind;
+use winsh_ast::{Span, Token};
+use winsh_core::ShellError;
 
 /// A lexer for the WinSH shell language.
 ///
@@ -71,6 +71,12 @@ impl Lexer {
         if c == '\n' {
             self.advance();
             return Ok(self.make_token(TokenKind::Newline));
+        }
+
+        if c == '1' || c == '2' {
+            if let Some(token) = self.read_fd_redirection(c) {
+                return Ok(token);
+            }
         }
 
         // Handle operators
@@ -421,9 +427,17 @@ impl Lexer {
         }
 
         // Read variable name
-        while !self.is_at_end() && self.peek() != '}' && self.peek() != ':' && self.peek() != '-' 
-            && self.peek() != '=' && self.peek() != '+' && self.peek() != '?' 
-            && self.peek() != '#' && self.peek() != '%' && self.peek() != '/' {
+        while !self.is_at_end()
+            && self.peek() != '}'
+            && self.peek() != ':'
+            && self.peek() != '-'
+            && self.peek() != '='
+            && self.peek() != '+'
+            && self.peek() != '?'
+            && self.peek() != '#'
+            && self.peek() != '%'
+            && self.peek() != '/'
+        {
             name.push(self.advance());
         }
 
@@ -447,7 +461,8 @@ impl Lexer {
             // ${VAR#pattern}, ${VAR%pattern}, ${VAR/old/new}
             let mut full = name.clone();
             full.push(self.advance()); // operator
-            if !self.is_at_end() && (self.peek() == '#' || self.peek() == '%' || self.peek() == '/') {
+            if !self.is_at_end() && (self.peek() == '#' || self.peek() == '%' || self.peek() == '/')
+            {
                 full.push(self.advance()); // double operator
             }
             while !self.is_at_end() && self.peek() != '}' {
@@ -494,7 +509,11 @@ impl Lexer {
     }
 
     /// Read until a delimiter and create a token.
-    fn read_until_delimiter(&mut self, delimiter: &str, kind_fn: fn(String) -> TokenKind) -> Result<Token, ShellError> {
+    fn read_until_delimiter(
+        &mut self,
+        delimiter: &str,
+        kind_fn: fn(String) -> TokenKind,
+    ) -> Result<Token, ShellError> {
         let start_line = self.line;
         let mut content = String::new();
         let delimiter_chars: Vec<char> = delimiter.chars().collect();
@@ -562,18 +581,52 @@ impl Lexer {
     /// Read a tilde expansion.
     fn read_tilde(&mut self) -> Result<Token, ShellError> {
         self.advance(); // Skip ~
-        let mut user = String::new();
+        let mut word = String::from("~");
 
-        while !self.is_at_end() && (self.peek().is_alphanumeric() || self.peek() == '_' || self.peek() == '-') {
-            user.push(self.advance());
+        while !self.is_at_end() {
+            let c = self.peek();
+            if c.is_whitespace() || "|&;()<>!#`'\"$".contains(c) {
+                break;
+            }
+            word.push(self.advance());
         }
 
-        // Tilde is only valid at the start of a word
-        // For now, just return it as a word
-        if user.is_empty() {
-            Ok(self.make_token(TokenKind::Word("~".to_string())))
-        } else {
-            Ok(self.make_token(TokenKind::Word(format!("~{}", user))))
+        Ok(self.make_token(TokenKind::Word(word)))
+    }
+
+    /// Read fd-qualified redirections such as 2>, 2>>, 2>&1, and 1>&2.
+    fn read_fd_redirection(&mut self, fd: char) -> Option<Token> {
+        if self.peek_offset(1) != '>' {
+            return None;
+        }
+
+        match fd {
+            '1' if self.peek_offset(2) == '&' && self.peek_offset(3) == '2' => {
+                self.advance();
+                self.advance();
+                self.advance();
+                self.advance();
+                Some(self.make_token(TokenKind::RedirOutToErr))
+            }
+            '2' if self.peek_offset(2) == '&' && self.peek_offset(3) == '1' => {
+                self.advance();
+                self.advance();
+                self.advance();
+                self.advance();
+                Some(self.make_token(TokenKind::RedirErrToOut))
+            }
+            '2' if self.peek_offset(2) == '>' => {
+                self.advance();
+                self.advance();
+                self.advance();
+                Some(self.make_token(TokenKind::RedirErrAppend))
+            }
+            '2' => {
+                self.advance();
+                self.advance();
+                Some(self.make_token(TokenKind::RedirErr))
+            }
+            _ => None,
         }
     }
 
@@ -591,7 +644,9 @@ impl Lexer {
 
     /// Skip whitespace (excluding newlines).
     fn skip_whitespace(&mut self) {
-        while !self.is_at_end() && (self.peek() == ' ' || self.peek() == '\t' || self.peek() == '\r') {
+        while !self.is_at_end()
+            && (self.peek() == ' ' || self.peek() == '\t' || self.peek() == '\r')
+        {
             self.advance();
         }
     }
@@ -615,6 +670,11 @@ impl Lexer {
         } else {
             self.input[self.pos]
         }
+    }
+
+    /// Peek ahead without consuming input.
+    fn peek_offset(&self, offset: usize) -> char {
+        self.input.get(self.pos + offset).copied().unwrap_or('\0')
     }
 
     /// Advance to the next character and return the previous one.
@@ -689,17 +749,35 @@ mod tests {
     }
 
     #[test]
+    fn test_tokenize_fd_redirections() {
+        let tokens = Lexer::tokenize("echo hello 2> err.txt 1>&2").unwrap();
+        assert_eq!(tokens[2].kind, TokenKind::RedirErr);
+        assert_eq!(tokens[3].kind, TokenKind::Word("err.txt".to_string()));
+        assert_eq!(tokens[4].kind, TokenKind::RedirOutToErr);
+
+        let tokens = Lexer::tokenize("cmd 2>> err.txt 2>&1").unwrap();
+        assert_eq!(tokens[1].kind, TokenKind::RedirErrAppend);
+        assert_eq!(tokens[3].kind, TokenKind::RedirErrToOut);
+    }
+
+    #[test]
     fn test_tokenize_single_quote() {
         let tokens = Lexer::tokenize("echo 'hello world'").unwrap();
         assert_eq!(tokens[0].kind, TokenKind::Word("echo".to_string()));
-        assert_eq!(tokens[1].kind, TokenKind::SingleQuoted("hello world".to_string()));
+        assert_eq!(
+            tokens[1].kind,
+            TokenKind::SingleQuoted("hello world".to_string())
+        );
     }
 
     #[test]
     fn test_tokenize_double_quote() {
         let tokens = Lexer::tokenize("echo \"hello world\"").unwrap();
         assert_eq!(tokens[0].kind, TokenKind::Word("echo".to_string()));
-        assert_eq!(tokens[1].kind, TokenKind::DoubleQuoted("hello world".to_string()));
+        assert_eq!(
+            tokens[1].kind,
+            TokenKind::DoubleQuoted("hello world".to_string())
+        );
     }
 
     #[test]
@@ -710,10 +788,20 @@ mod tests {
     }
 
     #[test]
+    fn test_tokenize_tilde_path_as_single_word() {
+        let tokens = Lexer::tokenize("cd ~/Desktop").unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::Word("cd".to_string()));
+        assert_eq!(tokens[1].kind, TokenKind::Word("~/Desktop".to_string()));
+    }
+
+    #[test]
     fn test_tokenize_braced_variable() {
         let tokens = Lexer::tokenize("echo ${HOME}").unwrap();
         assert_eq!(tokens[0].kind, TokenKind::Word("echo".to_string()));
-        assert_eq!(tokens[1].kind, TokenKind::BracedVariable("HOME".to_string()));
+        assert_eq!(
+            tokens[1].kind,
+            TokenKind::BracedVariable("HOME".to_string())
+        );
     }
 
     #[test]
@@ -730,7 +818,10 @@ mod tests {
         let tokens = Lexer::tokenize("echo hello # this is a comment").unwrap();
         assert_eq!(tokens[0].kind, TokenKind::Word("echo".to_string()));
         assert_eq!(tokens[1].kind, TokenKind::Word("hello".to_string()));
-        assert_eq!(tokens[2].kind, TokenKind::Comment(" this is a comment".to_string()));
+        assert_eq!(
+            tokens[2].kind,
+            TokenKind::Comment(" this is a comment".to_string())
+        );
     }
 
     #[test]

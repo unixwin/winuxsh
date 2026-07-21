@@ -31,9 +31,21 @@ impl Shell {
                 };
 
                 let new_dir = if dir_str == "~" {
-                    dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
+                    dirs::home_dir().unwrap_or_else(|| self.current_dir.clone())
+                } else if let Some(rest) = dir_str
+                    .strip_prefix("~/")
+                    .or_else(|| dir_str.strip_prefix("~\\"))
+                {
+                    dirs::home_dir()
+                        .unwrap_or_else(|| self.current_dir.clone())
+                        .join(rest)
                 } else {
-                    PathBuf::from(dir_str.as_str())
+                    let path = PathBuf::from(dir_str.as_str());
+                    if path.is_absolute() {
+                        path
+                    } else {
+                        self.current_dir.join(path)
+                    }
                 };
 
                 if let Err(e) = std::env::set_current_dir(&new_dir) {

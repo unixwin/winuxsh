@@ -109,6 +109,7 @@ impl Executor {
 
         let mut command = Command::new(&actual_program);
         command.args(&actual_args);
+        command.current_dir(&self.current_dir);
 
         command.stdin(Stdio::inherit());
         if capture_output {

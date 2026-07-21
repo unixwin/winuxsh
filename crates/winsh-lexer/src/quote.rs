@@ -39,45 +39,61 @@ pub fn process_dollar_quotes(input: &str) -> Result<String, ShellError> {
                             }
                         }
                     }
-                    let value = u32::from_str_radix(&octal, 8)
-                        .map_err(|_| ShellError::BadSubstitution(format!("invalid octal: \\{}", octal)))?;
+                    let value = u32::from_str_radix(&octal, 8).map_err(|_| {
+                        ShellError::BadSubstitution(format!("invalid octal: \\{}", octal))
+                    })?;
                     if let Some(c) = char::from_u32(value) {
                         result.push(c);
                     } else {
-                        return Err(ShellError::BadSubstitution(format!("invalid char: \\{}", octal)));
+                        return Err(ShellError::BadSubstitution(format!(
+                            "invalid char: \\{}",
+                            octal
+                        )));
                     }
                 }
                 Some('x') => {
                     // Hex escape: \xHH
                     let hex: String = chars.by_ref().take(2).collect();
-                    let value = u32::from_str_radix(&hex, 16)
-                        .map_err(|_| ShellError::BadSubstitution(format!("invalid hex: \\x{}", hex)))?;
+                    let value = u32::from_str_radix(&hex, 16).map_err(|_| {
+                        ShellError::BadSubstitution(format!("invalid hex: \\x{}", hex))
+                    })?;
                     if let Some(c) = char::from_u32(value) {
                         result.push(c);
                     } else {
-                        return Err(ShellError::BadSubstitution(format!("invalid char: \\x{}", hex)));
+                        return Err(ShellError::BadSubstitution(format!(
+                            "invalid char: \\x{}",
+                            hex
+                        )));
                     }
                 }
                 Some('u') => {
                     // Unicode escape: \uHHHH
                     let hex: String = chars.by_ref().take(4).collect();
-                    let value = u32::from_str_radix(&hex, 16)
-                        .map_err(|_| ShellError::BadSubstitution(format!("invalid unicode: \\u{}", hex)))?;
+                    let value = u32::from_str_radix(&hex, 16).map_err(|_| {
+                        ShellError::BadSubstitution(format!("invalid unicode: \\u{}", hex))
+                    })?;
                     if let Some(c) = char::from_u32(value) {
                         result.push(c);
                     } else {
-                        return Err(ShellError::BadSubstitution(format!("invalid char: \\u{}", hex)));
+                        return Err(ShellError::BadSubstitution(format!(
+                            "invalid char: \\u{}",
+                            hex
+                        )));
                     }
                 }
                 Some('U') => {
                     // Unicode escape: \UHHHHHHHH
                     let hex: String = chars.by_ref().take(8).collect();
-                    let value = u32::from_str_radix(&hex, 16)
-                        .map_err(|_| ShellError::BadSubstitution(format!("invalid unicode: \\U{}", hex)))?;
+                    let value = u32::from_str_radix(&hex, 16).map_err(|_| {
+                        ShellError::BadSubstitution(format!("invalid unicode: \\U{}", hex))
+                    })?;
                     if let Some(c) = char::from_u32(value) {
                         result.push(c);
                     } else {
-                        return Err(ShellError::BadSubstitution(format!("invalid char: \\U{}", hex)));
+                        return Err(ShellError::BadSubstitution(format!(
+                            "invalid char: \\U{}",
+                            hex
+                        )));
                     }
                 }
                 Some(c) => {
@@ -128,7 +144,10 @@ mod tests {
     #[test]
     fn test_dollar_quotes_basic() {
         assert_eq!(process_dollar_quotes("hello").unwrap(), "hello");
-        assert_eq!(process_dollar_quotes("hello\\nworld").unwrap(), "hello\nworld");
+        assert_eq!(
+            process_dollar_quotes("hello\\nworld").unwrap(),
+            "hello\nworld"
+        );
         assert_eq!(process_dollar_quotes("tab\\there").unwrap(), "tab\there");
     }
 
@@ -146,7 +165,10 @@ mod tests {
     #[test]
     fn test_dollar_quotes_hex() {
         assert_eq!(process_dollar_quotes("\\x41").unwrap(), "A");
-        assert_eq!(process_dollar_quotes("\\x48\\x65\\x6c\\x6c\\x6f").unwrap(), "Hello");
+        assert_eq!(
+            process_dollar_quotes("\\x48\\x65\\x6c\\x6c\\x6f").unwrap(),
+            "Hello"
+        );
     }
 
     #[test]
@@ -158,7 +180,10 @@ mod tests {
     #[test]
     fn test_dollar_quotes_octal() {
         assert_eq!(process_dollar_quotes("\\101").unwrap(), "A");
-        assert_eq!(process_dollar_quotes("\\110\\145\\154\\154\\157").unwrap(), "Hello");
+        assert_eq!(
+            process_dollar_quotes("\\110\\145\\154\\154\\157").unwrap(),
+            "Hello"
+        );
     }
 
     #[test]

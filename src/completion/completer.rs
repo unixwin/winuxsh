@@ -1,14 +1,14 @@
-﻿// Custom completer for WinSH
+// Custom completer for WinSH
 // Integrates command, path, and variable completion
 
-use std::path::PathBuf;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use reedline::{Completer, Span, Suggestion};
-use crate::completion::{CompletionContext, CompletionPlugin, CompletionResult};
+use crate::array::ArrayValue;
 use crate::completion::path::PathCompleter;
 use crate::completion::variables::VariableCompleter;
-use crate::array::ArrayValue;
+use crate::completion::{CompletionContext, CompletionPlugin, CompletionResult};
+use reedline::{Completer, Span, Suggestion};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 /// State shared with completer
 pub struct CompletionState {
@@ -42,9 +42,7 @@ pub struct WinuxshCompleter {
 impl WinuxshCompleter {
     /// Create a new completer with shared state
     pub fn new(state: Arc<Mutex<CompletionState>>) -> Self {
-        Self {
-            state,
-        }
+        Self { state }
     }
 
     /// Update state
@@ -58,7 +56,11 @@ impl WinuxshCompleter {
     /// Complete input
     fn complete_input(&mut self, input: &str, cursor_pos: usize) -> Vec<Suggestion> {
         let (current_dir, env_vars, plugins) = if let Ok(state) = self.state.lock() {
-            (state.current_dir.clone(), state.env_vars.clone(), state.plugins.clone())
+            (
+                state.current_dir.clone(),
+                state.env_vars.clone(),
+                state.plugins.clone(),
+            )
         } else {
             return Vec::new();
         };
@@ -94,7 +96,12 @@ impl WinuxshCompleter {
     }
 
     /// Format completions as suggestions
-    fn format_completions(&self, result: CompletionResult, input: &str, cursor_pos: usize) -> Vec<Suggestion> {
+    fn format_completions(
+        &self,
+        result: CompletionResult,
+        input: &str,
+        cursor_pos: usize,
+    ) -> Vec<Suggestion> {
         let completions = result.completions;
         let result_descriptions = result.descriptions;
 
@@ -109,7 +116,7 @@ impl WinuxshCompleter {
         // Only replace the part after the last path separator
         let before_cursor = &input[..cursor_pos];
         let last_path_sep = before_cursor.rfind(|c: char| c == '/' || c == '\\');
-        
+
         let span = if let Some(sep_pos) = last_path_sep {
             // For paths, only replace after the last separator
             Span {
@@ -158,7 +165,9 @@ mod tests {
 
     #[test]
     fn test_completer_creation() {
-        let state = Arc::new(Mutex::new(CompletionState::new(PathBuf::from("/home/user"))));
+        let state = Arc::new(Mutex::new(CompletionState::new(PathBuf::from(
+            "/home/user",
+        ))));
         let completer = WinuxshCompleter::new(state);
     }
 }

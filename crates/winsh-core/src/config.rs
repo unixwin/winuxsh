@@ -68,13 +68,8 @@ impl Default for ShellConfig {
             history_file,
             history_size: 10000,
             history_save_size: 10000,
-            config_files: vec![
-                home.join(".winshrc"),
-                home.join(".winshrc.toml"),
-            ],
-            plugin_dirs: vec![
-                home.join(".winsh").join("plugins"),
-            ],
+            config_files: vec![home.join(".winshrc"), home.join(".winshrc.toml")],
+            plugin_dirs: vec![home.join(".winsh").join("plugins")],
             theme: "default".to_string(),
             aliases: HashMap::new(),
             env_vars: HashMap::new(),

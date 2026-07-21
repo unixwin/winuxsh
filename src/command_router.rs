@@ -1,8 +1,8 @@
 use anyhow::{anyhow, Result};
+use log::debug;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use log::debug;
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
 pub enum CommandCategory {
@@ -98,31 +98,38 @@ impl CommandClassification {
 
 pub fn load_classification() -> Result<CommandClassification> {
     // Get executable path and build config search paths relative to it
-    let exe_path = std::env::current_exe()
-        .map_err(|e| anyhow!("Failed to get executable path: {}", e))?;
+    let exe_path =
+        std::env::current_exe().map_err(|e| anyhow!("Failed to get executable path: {}", e))?;
 
-    let exe_dir = exe_path.parent()
+    let exe_dir = exe_path
+        .parent()
         .ok_or_else(|| anyhow!("Failed to get executable directory"))?;
 
     // Try multiple possible locations for the classification file
     let possible_paths = vec![
-        PathBuf::from("commands_classification.toml"),  // Current directory
+        PathBuf::from("commands_classification.toml"), // Current directory
         exe_dir.join("commands_classification.toml"),  // Same directory as executable
-        exe_dir.join("../../commands_classification.toml"),  // Development: from target/release back to project root
-        exe_dir.join("../../../commands_classification.toml"),  // Development: deeper nesting
+        exe_dir.join("../../commands_classification.toml"), // Development: from target/release back to project root
+        exe_dir.join("../../../commands_classification.toml"), // Development: deeper nesting
     ];
 
     for config_path in &possible_paths {
         if let Ok(content) = std::fs::read_to_string(config_path) {
-            let classification: CommandClassification = toml::from_str(&content)
-                .map_err(|e| anyhow!("Failed to parse classification file {}: {}", config_path.display(), e))?;
+            let classification: CommandClassification = toml::from_str(&content).map_err(|e| {
+                anyhow!(
+                    "Failed to parse classification file {}: {}",
+                    config_path.display(),
+                    e
+                )
+            })?;
             return Ok(classification);
         }
     }
 
     Err(anyhow!(
         "Failed to read classification file from any location. Searched: {}",
-        possible_paths.iter()
+        possible_paths
+            .iter()
             .map(|p| p.display().to_string())
             .collect::<Vec<_>>()
             .join(", ")
@@ -136,16 +143,34 @@ mod tests {
     #[test]
     fn test_load_classification() {
         let classification = load_classification().unwrap();
-        
+
         // Test known commands
         assert_eq!(classification.classify("ls"), Some(CommandCategory::Simple));
-        assert_eq!(classification.classify("grep"), Some(CommandCategory::Simple));
-        assert_eq!(classification.classify("less"), Some(CommandCategory::Interactive));
-        assert_eq!(classification.classify("top"), Some(CommandCategory::Interactive));
-        assert_eq!(classification.classify("sed"), Some(CommandCategory::Complex));
-        assert_eq!(classification.classify("xargs"), Some(CommandCategory::Complex));
-        assert_eq!(classification.classify("cd"), Some(CommandCategory::Builtin));
-        
+        assert_eq!(
+            classification.classify("grep"),
+            Some(CommandCategory::Simple)
+        );
+        assert_eq!(
+            classification.classify("less"),
+            Some(CommandCategory::Interactive)
+        );
+        assert_eq!(
+            classification.classify("top"),
+            Some(CommandCategory::Interactive)
+        );
+        assert_eq!(
+            classification.classify("sed"),
+            Some(CommandCategory::Complex)
+        );
+        assert_eq!(
+            classification.classify("xargs"),
+            Some(CommandCategory::Complex)
+        );
+        assert_eq!(
+            classification.classify("cd"),
+            Some(CommandCategory::Builtin)
+        );
+
         // Test unknown command
         assert_eq!(classification.classify("nonexistent"), None);
     }
@@ -153,12 +178,12 @@ mod tests {
     #[test]
     fn test_is_winuxcmd_command() {
         let classification = load_classification().unwrap();
-        
+
         assert!(classification.is_winuxcmd_command("ls"));
         assert!(classification.is_winuxcmd_command("grep"));
         assert!(classification.is_winuxcmd_command("less"));
         assert!(classification.is_winuxcmd_command("sed"));
-        
+
         assert!(!classification.is_winuxcmd_command("cd"));
         assert!(!classification.is_winuxcmd_command("exit"));
     }
@@ -166,11 +191,11 @@ mod tests {
     #[test]
     fn test_is_builtin_command() {
         let classification = load_classification().unwrap();
-        
+
         assert!(classification.is_builtin_command("cd"));
         assert!(classification.is_builtin_command("exit"));
         assert!(classification.is_builtin_command("pwd"));
-        
+
         assert!(!classification.is_builtin_command("ls"));
         assert!(!classification.is_builtin_command("grep"));
     }
@@ -178,10 +203,10 @@ mod tests {
     #[test]
     fn test_is_interactive() {
         let classification = load_classification().unwrap();
-        
+
         assert!(classification.is_interactive("less"));
         assert!(classification.is_interactive("top"));
-        
+
         assert!(!classification.is_interactive("ls"));
         assert!(!classification.is_interactive("grep"));
     }
@@ -189,11 +214,14 @@ mod tests {
     #[test]
     fn test_get_priority() {
         let classification = load_classification().unwrap();
-        
+
         assert_eq!(classification.get_priority(&CommandCategory::Builtin), 1);
         assert_eq!(classification.get_priority(&CommandCategory::Simple), 2);
         assert_eq!(classification.get_priority(&CommandCategory::Complex), 3);
-        assert_eq!(classification.get_priority(&CommandCategory::Interactive), 4);
+        assert_eq!(
+            classification.get_priority(&CommandCategory::Interactive),
+            4
+        );
     }
 }
 
@@ -258,28 +286,31 @@ impl CommandRouter {
                     debug!("Force PATH execution for interactive command: {}", command);
                     return RouteDecision::ExternalCommand;
                 }
-                
+
                 // Commands with known issues in DLL implementation
                 // Force them to use PATH for better compatibility
                 let force_path_commands = vec![
-                    "top",   // top needs proper TTY handling
+                    "top", // top needs proper TTY handling
                 ];
                 if force_path_commands.iter().any(|&cmd| cmd == command) {
                     debug!("Force PATH execution for compatibility: {}", command);
                     return RouteDecision::ExternalCommand;
                 }
-                
+
                 // Text processing commands that might wait for input
                 // Force them to use PATH for proper Ctrl+C handling
                 let input_waiting_commands = vec![
-                    "grep", "sed", "awk", "perl", "python", "ruby", "less", "more", "vi", "vim", "nano", "ed", "emacs",
-                    "ssh", "telnet", "ftp", "sftp", "nc", "netcat"
+                    "grep", "sed", "awk", "perl", "python", "ruby", "less", "more", "vi", "vim",
+                    "nano", "ed", "emacs", "ssh", "telnet", "ftp", "sftp", "nc", "netcat",
                 ];
                 if input_waiting_commands.iter().any(|&cmd| cmd == command) {
-                    debug!("Force PATH execution for input-waiting command: {}", command);
+                    debug!(
+                        "Force PATH execution for input-waiting command: {}",
+                        command
+                    );
                     return RouteDecision::ExternalCommand;
                 }
-                
+
                 debug!("Route to WinuxCmd DLL: {}", command);
                 return RouteDecision::WinuxCmdDLL(category);
             }
@@ -337,26 +368,17 @@ mod router_tests {
     fn test_route_builtin() {
         let classification = load_classification().unwrap();
         let router = CommandRouter::new(classification, true);
-        
-        assert_eq!(
-            router.route_command("cd"),
-            RouteDecision::Builtin
-        );
-        assert_eq!(
-            router.route_command("pwd"),
-            RouteDecision::Builtin
-        );
-        assert_eq!(
-            router.route_command("echo"),
-            RouteDecision::Builtin
-        );
+
+        assert_eq!(router.route_command("cd"), RouteDecision::Builtin);
+        assert_eq!(router.route_command("pwd"), RouteDecision::Builtin);
+        assert_eq!(router.route_command("echo"), RouteDecision::Builtin);
     }
 
     #[test]
     fn test_route_winuxcmd_simple() {
         let classification = load_classification().unwrap();
         let router = CommandRouter::new(classification, true);
-        
+
         if router.is_ffi_available() {
             assert_eq!(
                 router.route_command("ls"),
@@ -368,10 +390,7 @@ mod router_tests {
             );
         } else {
             // Fallback to external if daemon not available
-            assert_eq!(
-                router.route_command("ls"),
-                RouteDecision::ExternalCommand
-            );
+            assert_eq!(router.route_command("ls"), RouteDecision::ExternalCommand);
         }
     }
 
@@ -379,7 +398,7 @@ mod router_tests {
     fn test_route_winuxcmd_interactive() {
         let classification = load_classification().unwrap();
         let router = CommandRouter::new(classification, true);
-        
+
         if router.is_ffi_available() {
             assert_eq!(
                 router.route_command("less"),
@@ -396,7 +415,7 @@ mod router_tests {
     fn test_route_winuxcmd_complex() {
         let classification = load_classification().unwrap();
         let router = CommandRouter::new(classification, true);
-        
+
         if router.is_ffi_available() {
             assert_eq!(
                 router.route_command("sed"),
@@ -413,7 +432,7 @@ mod router_tests {
     fn test_route_external() {
         let classification = load_classification().unwrap();
         let router = CommandRouter::new(classification, true);
-        
+
         // Commands not in classification should route to external
         assert_eq!(
             router.route_command("notepad"),
@@ -429,7 +448,7 @@ mod router_tests {
     fn test_route_with_path() {
         let classification = load_classification().unwrap();
         let router = CommandRouter::new(classification, true);
-        
+
         // Commands with path separators should use external execution
         assert_eq!(
             router.route_command("C:\\Git\\bin\\ls.exe"),

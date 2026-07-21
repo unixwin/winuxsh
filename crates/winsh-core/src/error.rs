@@ -33,10 +33,7 @@ pub enum ShellError {
     UnexpectedEof,
 
     #[error("unterminated {what} starting at line {line}")]
-    Unterminated {
-        what: String,
-        line: usize,
-    },
+    Unterminated { what: String, line: usize },
 
     // Command errors
     #[error("command not found: {0}")]

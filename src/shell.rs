@@ -1,9 +1,8 @@
 use colored::Colorize;
 use log::debug;
 use reedline::{
-    default_emacs_keybindings, DefaultPrompt, DefaultPromptSegment, Emacs,
-    FileBackedHistory, KeyCode, KeyModifiers, ListMenu, MenuBuilder,
-    Reedline, ReedlineEvent, ReedlineMenu,
+    default_emacs_keybindings, DefaultPrompt, DefaultPromptSegment, Emacs, FileBackedHistory,
+    KeyCode, KeyModifiers, ListMenu, MenuBuilder, Reedline, ReedlineEvent, ReedlineMenu,
 };
 use std::collections::HashMap;
 use std::io::BufRead;
@@ -17,14 +16,14 @@ use crate::config::ShellConfig;
 use crate::error::{Result, ShellError};
 use crate::executor::Executor;
 use crate::job::JobManager;
-use winsh_lexer::Lexer;
-use winsh_parser::Parser;
-use winsh_ast::{Stmt, Word};
-use winsh_ast::word::WordPart;
-use crate::tokenizer::{CommandInfo, ParsedCommand};
 use crate::plugin::PluginManager;
 use crate::theme::ThemePlugin;
+use crate::tokenizer::{CommandInfo, ParsedCommand};
 use glob;
+use winsh_ast::word::WordPart;
+use winsh_ast::{Stmt, Word};
+use winsh_lexer::Lexer;
+use winsh_parser::Parser;
 
 /// Main shell structure
 pub struct Shell {
@@ -90,7 +89,7 @@ impl Shell {
         // Create shared completion state with current directory
         let current_dir = std::env::current_dir()?;
         let completion_state = std::sync::Arc::new(std::sync::Mutex::new(
-            crate::completion::CompletionState::new(current_dir.clone())
+            crate::completion::CompletionState::new(current_dir.clone()),
         ));
 
         // Register built-in command completion plugin
@@ -103,9 +102,7 @@ impl Shell {
 
         // Create custom completer with shared state
         use crate::completion::WinuxshCompleter;
-        let completer = Box::new(WinuxshCompleter::new(
-            completion_state.clone()
-        ));
+        let completer = Box::new(WinuxshCompleter::new(completion_state.clone()));
 
         // Create completion menu — single-column popup style
         use nu_ansi_term::{Color, Style};
@@ -117,20 +114,14 @@ impl Shell {
                 // prefix marker for the selected row
                 .with_marker("> ")
                 // normal (unselected) item
-                .with_text_style(
-                    Style::new().fg(Color::White)
-                )
+                .with_text_style(Style::new().fg(Color::White))
                 // selected item: bright cyan bg, black fg
-                .with_selected_text_style(
-                    Style::new().fg(Color::Black).on(Color::Fixed(39))
-                )
+                .with_selected_text_style(Style::new().fg(Color::Black).on(Color::Fixed(39)))
                 // matched chars (typed prefix) shown bold green
-                .with_match_text_style(
-                    Style::new().fg(Color::Fixed(114)).bold()
-                )
+                .with_match_text_style(Style::new().fg(Color::Fixed(114)).bold())
                 // matched chars inside the selected item
                 .with_selected_match_text_style(
-                    Style::new().fg(Color::Black).on(Color::Fixed(39)).bold()
+                    Style::new().fg(Color::Black).on(Color::Fixed(39)).bold(),
                 )
                 .with_page_size(12),
         );
@@ -320,7 +311,9 @@ impl Shell {
                 let source_path = if path.starts_with("$HOME") || path.starts_with('~') {
                     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
                     let home_display = home.display().to_string();
-                    let rel = path.replacen("$HOME", &home_display, 1).replacen('~', &home_display, 1);
+                    let rel =
+                        path.replacen("$HOME", &home_display, 1)
+                            .replacen('~', &home_display, 1);
                     PathBuf::from(rel.replace('/', "\\"))
                 } else {
                     PathBuf::from(path)
@@ -328,7 +321,11 @@ impl Shell {
                 log::debug!("source: {} -> {}", path, source_path.display());
                 if source_path.exists() {
                     if let Ok(source_content) = std::fs::read_to_string(&source_path) {
-                        log::debug!("source: loaded {} ({} bytes)", source_path.display(), source_content.len());
+                        log::debug!(
+                            "source: loaded {} ({} bytes)",
+                            source_path.display(),
+                            source_content.len()
+                        );
                         self.process_winshrc_content(&source_content, home_str)?;
                     } else {
                         log::warn!("source: failed to read {}", source_path.display());
@@ -356,7 +353,8 @@ impl Shell {
             if let Some(rest) = expanded.strip_prefix("alias ") {
                 if let Some((name, value)) = rest.split_once('=') {
                     let value = value.trim().trim_matches('\'').trim_matches('"');
-                    self.aliases.insert(name.trim().to_string(), value.to_string());
+                    self.aliases
+                        .insert(name.trim().to_string(), value.to_string());
                 }
                 continue;
             }
@@ -402,7 +400,9 @@ impl Shell {
         let mut result = line.to_string();
         result = result.replace("$HOME", home_str);
 
-        let mut vars: Vec<(&String, &str)> = self.env_vars.iter()
+        let mut vars: Vec<(&String, &str)> = self
+            .env_vars
+            .iter()
             .filter_map(|(k, v)| v.as_string().map(|s| (k, s)))
             .collect();
         vars.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
@@ -428,14 +428,20 @@ impl Shell {
 
     /// Load configuration
     fn load_config(&mut self) -> Result<()> {
-        let winshrc = dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".winshrc");
+        let winshrc = dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".winshrc");
         if winshrc.exists() {
             log::info!("Loading config: {}", winshrc.display());
             self.parse_config_file(&winshrc)?;
             log::info!("Config loaded successfully");
         } else {
             if let Some(config_path) = crate::config::ConfigManager::find_config_file() {
-                if config_path.extension().map(|e| e == "toml").unwrap_or(false) {
+                if config_path
+                    .extension()
+                    .map(|e| e == "toml")
+                    .unwrap_or(false)
+                {
                     let mut config_manager = crate::config::ConfigManager::new();
                     self.config = config_manager.load_config(&config_path)?;
                 } else {
@@ -452,17 +458,23 @@ impl Shell {
         use crate::completion::external::ExternalCompletionPlugin;
 
         // Collect directories: configured ones + default ~/.winsh/completions
-        let mut dirs: Vec<PathBuf> = self.config.completions.completion_dirs.iter().map(|dir| {
-            if dir.starts_with('~') {
-                if let Some(home) = dirs::home_dir() {
-                    home.join(&dir[2..]) // skip "~/"
+        let mut dirs: Vec<PathBuf> = self
+            .config
+            .completions
+            .completion_dirs
+            .iter()
+            .map(|dir| {
+                if dir.starts_with('~') {
+                    if let Some(home) = dirs::home_dir() {
+                        home.join(&dir[2..]) // skip "~/"
+                    } else {
+                        PathBuf::from(dir)
+                    }
                 } else {
                     PathBuf::from(dir)
                 }
-            } else {
-                PathBuf::from(dir)
-            }
-        }).collect();
+            })
+            .collect();
 
         // Always include the default dir
         if let Some(home) = dirs::home_dir() {
@@ -518,13 +530,19 @@ impl Shell {
         let username = self.get_env_var("USERNAME", "user");
         let hostname = self.get_env_var("COMPUTERNAME", "localhost");
         let dir = self.current_dir.display().to_string();
-        
+
         // Replace home directory with ~ for cleaner display
         let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         let home_str = home_dir.display().to_string();
         let dir_display = if dir.starts_with(&home_str) {
-            if dir == home_str { "~".to_string() } else { format!("~{}", &dir[home_str.len()..]) }
-        } else { dir };
+            if dir == home_str {
+                "~".to_string()
+            } else {
+                format!("~{}", &dir[home_str.len()..])
+            }
+        } else {
+            dir
+        };
 
         // Check if PROMPT env var is set (oh-my-winuxsh theme)
         let prompt_text = if let Some(ArrayValue::String(ref fmt)) = self.env_vars.get("PROMPT") {
@@ -559,17 +577,35 @@ impl Shell {
                             chars.next();
                             let mut color = String::new();
                             while let Some(&cc) = chars.peek() {
-                                if cc == '}' { chars.next(); break; }
+                                if cc == '}' {
+                                    chars.next();
+                                    break;
+                                }
                                 color.push(chars.next().unwrap());
                             }
                             result.push_str(&self.ansi_fg(&color));
                         }
                     }
-                    Some('f') => { chars.next(); result.push_str("\x1b[39m"); }
-                    Some('n') => { chars.next(); result.push_str(user); }
-                    Some('m') => { chars.next(); result.push_str(host); }
-                    Some('~') => { chars.next(); result.push_str(dir); }
-                    Some('#') => { chars.next(); result.push('%'); } // always % for non-root
+                    Some('f') => {
+                        chars.next();
+                        result.push_str("\x1b[39m");
+                    }
+                    Some('n') => {
+                        chars.next();
+                        result.push_str(user);
+                    }
+                    Some('m') => {
+                        chars.next();
+                        result.push_str(host);
+                    }
+                    Some('~') => {
+                        chars.next();
+                        result.push_str(dir);
+                    }
+                    Some('#') => {
+                        chars.next();
+                        result.push('%');
+                    } // always % for non-root
                     Some('T') => {
                         chars.next();
                         use std::time::SystemTime;
@@ -580,13 +616,18 @@ impl Shell {
                             result.push_str(&format!("{:02}:{:02}", h, m));
                         }
                     }
-                    Some('?') => { chars.next(); result.push_str(&self.last_exit_code.to_string()); }
+                    Some('?') => {
+                        chars.next();
+                        result.push_str(&self.last_exit_code.to_string());
+                    }
                     Some(c2) => {
                         chars.next();
                         result.push('%');
                         result.push(c2);
                     }
-                    None => { result.push('%'); }
+                    None => {
+                        result.push('%');
+                    }
                 }
             } else {
                 result.push(c);
@@ -807,7 +848,11 @@ impl Shell {
                 }
                 crate::command_router::RouteDecision::NotFound => {
                     self.last_exit_code = 127;
-                    eprintln!("{} {}", "Error:".red(), format!("Command '{}' not found", clean_command));
+                    eprintln!(
+                        "{} {}",
+                        "Error:".red(),
+                        format!("Command '{}' not found", clean_command)
+                    );
                     return Ok(());
                 }
             }
@@ -858,19 +903,29 @@ impl Shell {
             Ok(Some(p)) => p,
             _ => {
                 self.last_exit_code = 127;
-                eprintln!("{} {}", "Error:".red(), format!("Command '{}' not found", command));
+                eprintln!(
+                    "{} {}",
+                    "Error:".red(),
+                    format!("Command '{}' not found", command)
+                );
                 return Ok(());
             }
         };
 
         let env_vars: Vec<(String, ArrayValue)> = self
-            .env_vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+            .env_vars
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
         let executor = Executor::new(&env_vars, &self.current_dir);
         let mut winuxcmd_args = vec![command.to_string()];
         winuxcmd_args.extend(args.iter().cloned());
 
         match executor.execute(&winuxcmd.to_string_lossy(), &winuxcmd_args, cmd_info) {
-            Ok(code) => { self.last_exit_code = code; Ok(()) }
+            Ok(code) => {
+                self.last_exit_code = code;
+                Ok(())
+            }
             Err(e) => {
                 self.last_exit_code = 127;
                 eprintln!("{} {}", "Error:".red(), e);
@@ -981,7 +1036,11 @@ impl Shell {
             }
             Err(e) => {
                 // DLL execution failed, fall back to external command
-                eprintln!("{} {}", "Warning:".yellow(), format!("WinuxCmd DLL failed: {}", e));
+                eprintln!(
+                    "{} {}",
+                    "Warning:".yellow(),
+                    format!("WinuxCmd DLL failed: {}", e)
+                );
                 eprintln!("Falling back to external command execution");
                 self.execute_external_command_fallback(command, args, cmd_info)
             }
@@ -1035,7 +1094,7 @@ impl Shell {
     /// Execute a pipeline
     pub fn execute_pipeline(&mut self, cmds: &[CommandInfo]) -> Result<()> {
         log::debug!("execute_pipeline: {} commands", cmds.len());
-        
+
         if cmds.is_empty() {
             return Ok(());
         }
@@ -1051,7 +1110,7 @@ impl Shell {
 
     /// Execute a real pipeline with Windows pipes
     fn execute_real_pipeline(&mut self, cmds: &[CommandInfo]) -> Result<()> {
-        use std::process::{Child, Stdio, Command};
+        use std::process::{Child, Command, Stdio};
 
         if cmds.is_empty() {
             return Ok(());
@@ -1079,7 +1138,9 @@ impl Shell {
 
             // Get command name and args
             if cmd.args.is_empty() {
-                return Err(crate::error::ShellError::Parse("Empty command in pipeline".to_string()));
+                return Err(crate::error::ShellError::Parse(
+                    "Empty command in pipeline".to_string(),
+                ));
             }
 
             let cmd_name = &cmd.args[0];
@@ -1179,15 +1240,20 @@ impl Shell {
             }
 
             // Spawn process
-            let mut child = process.spawn()
-                .map_err(|e| crate::error::ShellError::CommandNotFound(format!(
+            let mut child = process.spawn().map_err(|e| {
+                crate::error::ShellError::CommandNotFound(format!(
                     "Failed to execute '{}': {}",
                     cmd_name, e
-                )))?;
+                ))
+            })?;
 
             // Debug output
-            log::debug!("Spawned process '{}' (PID: {:?}) in pipeline (is_last: {})", 
-                       cmd_name, child.id(), is_last);
+            log::debug!(
+                "Spawned process '{}' (PID: {:?}) in pipeline (is_last: {})",
+                cmd_name,
+                child.id(),
+                is_last
+            );
 
             // Save stdout for next command (if not last)
             if !is_last {
@@ -1203,10 +1269,12 @@ impl Shell {
         // Wait for all processes to complete
         let mut last_exit_code = 0;
         for mut child in children {
-            let status = child.wait()
-                .map_err(|e| crate::error::ShellError::CommandNotFound(format!(
-                    "Failed to wait for process: {}", e
-                )))?;
+            let status = child.wait().map_err(|e| {
+                crate::error::ShellError::CommandNotFound(format!(
+                    "Failed to wait for process: {}",
+                    e
+                ))
+            })?;
 
             last_exit_code = status.code().unwrap_or(1);
         }
@@ -1333,11 +1401,8 @@ impl Shell {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or_default();
-        let base = std::env::temp_dir().join(format!(
-            "winuxsh_subst_{}_{}",
-            std::process::id(),
-            nonce
-        ));
+        let base =
+            std::env::temp_dir().join(format!("winuxsh_subst_{}_{}", std::process::id(), nonce));
 
         let stdout_path = base.with_extension("stdout.tmp");
         let stderr_path = base.with_extension("stderr.tmp");
@@ -1363,7 +1428,12 @@ impl Shell {
                             cmd.stderr_append = true;
                         }
                     }
-                    *last = self.redirect_command_info_for_capture(last, stdout_path, stderr_path, true);
+                    *last = self.redirect_command_info_for_capture(
+                        last,
+                        stdout_path,
+                        stderr_path,
+                        true,
+                    );
                 }
                 ParsedCommand::Pipeline(redirected)
             }
@@ -1378,7 +1448,9 @@ impl Shell {
             ParsedCommand::Sequence(commands) => ParsedCommand::Sequence(
                 commands
                     .iter()
-                    .map(|command| self.redirect_parsed_for_capture(command, stdout_path, stderr_path))
+                    .map(|command| {
+                        self.redirect_parsed_for_capture(command, stdout_path, stderr_path)
+                    })
                     .collect(),
             ),
         }
@@ -1812,7 +1884,12 @@ impl Shell {
         Ok(cond.to_string())
     }
 
-    fn find_then_body_start(&self, lines: &[String], start: usize, fi: usize) -> Result<(usize, usize)> {
+    fn find_then_body_start(
+        &self,
+        lines: &[String],
+        start: usize,
+        fi: usize,
+    ) -> Result<(usize, usize)> {
         let header = Self::normalize_script_line(&lines[start]);
         if header.ends_with("; then") || header.ends_with(" then") {
             return Ok((start + 1, start + 1));
@@ -1848,7 +1925,11 @@ impl Shell {
                 if depth == 0 {
                     return Ok(i);
                 }
-            } else if depth == 1 && branch_markers.iter().any(|m| line == *m || line.starts_with(&format!("{m} "))) {
+            } else if depth == 1
+                && branch_markers
+                    .iter()
+                    .any(|m| line == *m || line.starts_with(&format!("{m} ")))
+            {
                 return Ok(i);
             }
             i += 1;
@@ -1967,8 +2048,10 @@ impl Shell {
                 state
                     .locals
                     .insert(key.to_string(), normalized_value.to_string());
-                self.env_vars
-                    .insert(key.to_string(), ArrayValue::String(normalized_value.clone()));
+                self.env_vars.insert(
+                    key.to_string(),
+                    ArrayValue::String(normalized_value.clone()),
+                );
                 std::env::set_var(key, &normalized_value);
             }
             idx += 1;
@@ -2104,8 +2187,8 @@ impl Shell {
     }
 
     fn normalize_script_line(line: &str) -> String {
-        let trimmed = line
-            .trim_matches(|c: char| c == '\u{feff}' || c == '\u{fffe}' || c.is_whitespace());
+        let trimmed =
+            line.trim_matches(|c: char| c == '\u{feff}' || c == '\u{fffe}' || c.is_whitespace());
         Self::strip_inline_comment(trimmed).trim().to_string()
     }
 
@@ -2298,25 +2381,54 @@ fn convert_to_parsed_command(stmts: &[Stmt]) -> ParsedCommand {
 
 fn convert_stmt(stmt: &Stmt) -> ParsedCommand {
     match stmt {
-        Stmt::Command { words, redirections, background } => {
-            let args: Vec<String> = words.iter().map(|w| expand_word(w, &HashMap::new())).collect();
+        Stmt::Command {
+            words,
+            redirections,
+            background,
+        } => {
+            let args: Vec<String> = words
+                .iter()
+                .map(|w| expand_word(w, &HashMap::new()))
+                .collect();
             let mut cmd = CommandInfo::default();
             cmd.args = args;
             cmd.background = *background;
             // Convert redirections
             for redir in redirections {
-                match &redir.target {
-                    winsh_ast::redir::RedirTarget::File(word) => {
-                        let file = expand_word(word, &HashMap::new());
-                        match redir.op {
-                            winsh_ast::redir::RedirOp::In => { cmd.stdin_redir = Some(file); }
-                            winsh_ast::redir::RedirOp::Out => { cmd.stdout_redir = Some(file); }
-                            winsh_ast::redir::RedirOp::Append => { cmd.stdout_redir = Some(file); cmd.stdout_append = true; }
-                            winsh_ast::redir::RedirOp::Err => { cmd.stderr_redir = Some(file); }
-                            winsh_ast::redir::RedirOp::ErrAppend => { cmd.stderr_redir = Some(file); cmd.stderr_append = true; }
-                            winsh_ast::redir::RedirOp::ErrToOut => { cmd.stderr_to_stdout = true; }
-                            winsh_ast::redir::RedirOp::OutToErr => { cmd.stdout_to_stderr = true; }
-                            _ => {}
+                match redir.op {
+                    winsh_ast::redir::RedirOp::ErrToOut => {
+                        cmd.stderr_to_stdout = true;
+                    }
+                    winsh_ast::redir::RedirOp::OutToErr => {
+                        cmd.stdout_to_stderr = true;
+                    }
+                    winsh_ast::redir::RedirOp::In
+                    | winsh_ast::redir::RedirOp::Out
+                    | winsh_ast::redir::RedirOp::Append
+                    | winsh_ast::redir::RedirOp::Err
+                    | winsh_ast::redir::RedirOp::ErrAppend => {
+                        if let winsh_ast::redir::RedirTarget::File(word) = &redir.target {
+                            let file = expand_word(word, &HashMap::new());
+                            match redir.op {
+                                winsh_ast::redir::RedirOp::In => {
+                                    cmd.stdin_redir = Some(file);
+                                }
+                                winsh_ast::redir::RedirOp::Out => {
+                                    cmd.stdout_redir = Some(file);
+                                }
+                                winsh_ast::redir::RedirOp::Append => {
+                                    cmd.stdout_redir = Some(file);
+                                    cmd.stdout_append = true;
+                                }
+                                winsh_ast::redir::RedirOp::Err => {
+                                    cmd.stderr_redir = Some(file);
+                                }
+                                winsh_ast::redir::RedirOp::ErrAppend => {
+                                    cmd.stderr_redir = Some(file);
+                                    cmd.stderr_append = true;
+                                }
+                                _ => {}
+                            }
                         }
                     }
                     _ => {}
@@ -2324,17 +2436,26 @@ fn convert_stmt(stmt: &Stmt) -> ParsedCommand {
             }
             ParsedCommand::Single(cmd)
         }
-        Stmt::Pipeline { commands, negated: _ } => {
-            let cmds: Vec<CommandInfo> = commands.iter().filter_map(|s| {
-                if let Stmt::Command { words, .. } = s {
-                    let args: Vec<String> = words.iter().map(|w| expand_word(w, &HashMap::new())).collect();
-                    let mut cmd = CommandInfo::default();
-                    cmd.args = args;
-                    Some(cmd)
-                } else {
-                    None
-                }
-            }).collect();
+        Stmt::Pipeline {
+            commands,
+            negated: _,
+        } => {
+            let cmds: Vec<CommandInfo> = commands
+                .iter()
+                .filter_map(|s| {
+                    if let Stmt::Command { words, .. } = s {
+                        let args: Vec<String> = words
+                            .iter()
+                            .map(|w| expand_word(w, &HashMap::new()))
+                            .collect();
+                        let mut cmd = CommandInfo::default();
+                        cmd.args = args;
+                        Some(cmd)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
             ParsedCommand::Pipeline(cmds)
         }
         Stmt::And { left, right } => {
@@ -2411,6 +2532,39 @@ mod tests {
     }
 
     #[test]
+    fn test_builtin_cd_relative_uses_shell_current_dir() {
+        let original_dir = std::env::current_dir().unwrap();
+        let test_dir = std::env::temp_dir().join(format!("winuxsh_cd_{}", std::process::id()));
+        let child_dir = test_dir.join("child");
+        fs::create_dir_all(&child_dir).unwrap();
+
+        let mut shell = Shell::new(false).unwrap();
+        shell.current_dir = test_dir.clone();
+        std::env::set_current_dir(&original_dir).unwrap();
+
+        shell.execute_command("cd child").unwrap();
+
+        assert_eq!(shell.current_dir, child_dir);
+        std::env::set_current_dir(original_dir).unwrap();
+        let _ = fs::remove_dir_all(test_dir);
+    }
+
+    #[test]
+    fn test_builtin_cd_tilde_slash_path() {
+        let original_dir = std::env::current_dir().unwrap();
+        let home = match dirs::home_dir() {
+            Some(home) => home,
+            None => return,
+        };
+        let mut shell = Shell::new(false).unwrap();
+
+        shell.execute_command("cd ~/").unwrap();
+
+        assert_eq!(shell.current_dir, home);
+        std::env::set_current_dir(original_dir).unwrap();
+    }
+
+    #[test]
     fn test_builtin_echo_redirection() {
         let mut shell = Shell::new(false).unwrap();
         let test_dir = std::env::temp_dir().join(format!("winuxsh_redir_{}", std::process::id()));
@@ -2465,10 +2619,7 @@ echo redirected > __OUT_PATH__
     #[test]
     fn test_expand_wildcards_keeps_unmatched_pattern_per_argument() {
         let shell = Shell::new(false).unwrap();
-        let unmatched = format!(
-            "winuxsh_unmatched_{}_*.unlikely",
-            std::process::id()
-        );
+        let unmatched = format!("winuxsh_unmatched_{}_*.unlikely", std::process::id());
         let args = vec!["Cargo.*".to_string(), unmatched.clone()];
 
         let expanded = shell.expand_wildcards(&args);

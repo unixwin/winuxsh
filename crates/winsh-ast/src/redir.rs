@@ -1,7 +1,7 @@
 //! Redirection types.
 
-use std::fmt;
 use crate::word::Word;
+use std::fmt;
 
 /// A redirection in a command.
 #[derive(Debug, Clone, PartialEq)]
@@ -59,7 +59,11 @@ pub enum RedirTarget {
     /// Close the descriptor
     Close,
     /// Here document content
-    HereDoc { delimiter: String, content: String, strip_tabs: bool },
+    HereDoc {
+        delimiter: String,
+        content: String,
+        strip_tabs: bool,
+    },
     /// Here string content
     HereString(Word),
 }

@@ -41,10 +41,7 @@ pub enum WordPart {
         all: bool, // true for ${VAR//old/new}
     },
     /// A variable with case modification: ${(u)VAR}
-    VariableCase {
-        name: String,
-        case: CaseOperator,
-    },
+    VariableCase { name: String, case: CaseOperator },
     /// A variable length: ${#VAR}
     VariableLength(String),
     /// A command substitution: $(command)
@@ -160,9 +157,7 @@ impl Word {
 
     /// Check if this word contains any glob patterns.
     pub fn has_glob(&self) -> bool {
-        self.parts
-            .iter()
-            .any(|p| matches!(p, WordPart::Glob(_)))
+        self.parts.iter().any(|p| matches!(p, WordPart::Glob(_)))
     }
 
     /// Check if this word contains any variable expansions.
@@ -183,12 +178,9 @@ impl Word {
 
     /// Check if this word contains any command substitutions.
     pub fn has_command_subst(&self) -> bool {
-        self.parts.iter().any(|p| {
-            matches!(
-                p,
-                WordPart::CommandSubst(_) | WordPart::BacktickSubst(_)
-            )
-        })
+        self.parts
+            .iter()
+            .any(|p| matches!(p, WordPart::CommandSubst(_) | WordPart::BacktickSubst(_)))
     }
 }
 
@@ -207,7 +199,11 @@ impl fmt::Display for WordPart {
             WordPart::Literal(s) => write!(f, "{}", s),
             WordPart::Variable(name) => write!(f, "${}", name),
             WordPart::BracedVariable(name) => write!(f, "${{{}}}", name),
-            WordPart::VariableDefault { name, operator, value } => {
+            WordPart::VariableDefault {
+                name,
+                operator,
+                value,
+            } => {
                 let op = match operator {
                     VarOperator::Minus => ":-",
                     VarOperator::Equals => ":=",
@@ -220,7 +216,11 @@ impl fmt::Display for WordPart {
                 };
                 write!(f, "${{{}{}{}}}", name, op, value)
             }
-            WordPart::VariablePattern { name, operator, pattern } => {
+            WordPart::VariablePattern {
+                name,
+                operator,
+                pattern,
+            } => {
                 let op = match operator {
                     PatternOperator::Hash => "#",
                     PatternOperator::DoubleHash => "##",
@@ -229,7 +229,12 @@ impl fmt::Display for WordPart {
                 };
                 write!(f, "${{{}{}{}}}", name, op, pattern)
             }
-            WordPart::VariableSubst { name, old, new, all } => {
+            WordPart::VariableSubst {
+                name,
+                old,
+                new,
+                all,
+            } => {
                 let sep = if *all { "//" } else { "/" };
                 write!(f, "${{{}{}{}/{}}}", name, sep, old, new)
             }
