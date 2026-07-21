@@ -20,7 +20,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  MSRV: "1.70"
+  RUST_TOOLCHAIN: stable
 
 jobs:
   build-windows:
@@ -72,7 +72,7 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1.11
         with:
-          toolchain: ${{ env.MSRV }}
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       - name: Install Rust target
         run: rustup target add ${{ matrix.rust_target }}
