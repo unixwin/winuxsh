@@ -111,6 +111,10 @@ macro_rules! compat_test {
 
 compat_test!(var_expansion, "var_expansion");
 compat_test!(command_substitution, "command_substitution");
+compat_test!(
+    command_substitution_function_pipeline,
+    "command_substitution_function_pipeline"
+);
 compat_test!(pipeline, "pipeline");
 compat_test!(if_else, "if_else");
 compat_test!(for_loop, "for_loop");
